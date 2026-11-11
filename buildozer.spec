@@ -27,7 +27,7 @@ source.include_exts = py,png,jpg,kv,atlas,json,ttf
 #source.exclude_exts = spec
 
 # (list) List of directory to exclude (leave empty to not exclude anything)
-source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github
+source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, tools
 
 # (list) List of exclusions using pattern matching
 # Do not prefix with './'
@@ -73,7 +73,7 @@ orientation = portrait
 #
 
 #
-# author = © Copyright Info
+# author =  Copyright Info
 
 # Kivy version to use
 osx.kivy_version = 2.2.0
