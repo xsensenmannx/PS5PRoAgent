@@ -1,7 +1,3 @@
-
-          restore-keys: |
-            buildozer-${{ runner.os }}-
-
       # sdkmanager fragt interaktiv nach den SDK-Lizenzen; buildozers pexpect-Automatik
       # bleibt dabei schon mal minutenlang stehen. Mit hinterlegten Lizenzen im
       # SDK-Ordner wird gar nicht erst gefragt - die Automatik ist nur Rueckfallnetz.
@@ -20,6 +16,3 @@
 
       - name: APK bauen
         timeout-minutes: 60
-        run: |
-          set -euo pipefail
-          export PATH="$PWD/.venv/bin:$HOME/.local/bin:$PATH"
