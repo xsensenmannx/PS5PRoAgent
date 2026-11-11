@@ -1,92 +1,25 @@
-name: APK bauen
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [main, master]
-    paths:
-      - main.py
-      - buildozer.spec
-      - icon.png
-      - "assets/**"
-      - tools/selftest.py
-      - .github/workflows/build-apk.yml
-
-# Bei mehreren Commits kurz hintereinander (z. B. Web-Upload) nur den neuesten bauen.
-concurrency:
-  group: apk-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  apk:
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Systempakete
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            autoconf automake libtool pkg-config zlib1g-dev libncurses-dev \
-            libffi-dev libssl-dev cmake unzip zip ccache git libltdl-dev
-          sudo apt-get install -y --no-install-recommends aidl || true
-
-      - name: Python 3.12 und Buildozer
-        run: |
-          set -euo pipefail
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          export PATH="$HOME/.local/bin:$PATH"
-          uv venv --python 3.12 .venv
-          uv pip install --python .venv/bin/python --upgrade pip setuptools wheel
-          uv pip install --python .venv/bin/python \
-            "git+https://github.com/kivy/buildozer" "cython==0.29.36" legacy-cgi
-          .venv/bin/buildozer --version
-
-      # Gate: ein kaputtes Preis-/JSON-LD-Parsing soll nie in die APK wandern.
-      - name: Logiktests
-        run: python3 tools/selftest.py
-
-      # SDK/NDK (~2 GB) und Zwischenstände. Der Schluessel enthaelt die spec, damit
-      # ein Wechsel von NDK/API nicht auf einem alten Cache haengen bleibt.
-      - name: Build-Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer
-            .buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             buildozer-${{ runner.os }}-
 
+      # sdkmanager fragt interaktiv nach den SDK-Lizenzen; buildozers pexpect-Automatik
+      # bleibt dabei schon mal minutenlang stehen. Mit hinterlegten Lizenzen im
+      # SDK-Ordner wird gar nicht erst gefragt - die Automatik ist nur Rueckfallnetz.
+      - name: Android-Lizenzen vorab akzeptieren
+        run: |
+          set -euo pipefail
+          LIC="$HOME/.buildozer/android/platform/android-sdk/licenses"
+          mkdir -p "$LIC"
+          printf '%s\n' \
+            8933bad161af4178b1185d1a37fbf41ea5269c55 \
+            d56f5187479451eabf01fb78af6dfcb131a6481e \
+            24333f8a63b6825ea9c5514f83c2829b004d1fee > "$LIC/android-sdk-license"
+          printf '%s\n' 84831b9409646a918e30573bab4c9c91346d8abd > "$LIC/android-sdk-preview-license"
+          printf '%s\n' 601085b94cd77f0b54ff86406957099ebe79c4d6 > "$LIC/android-googletv-license"
+          ls -l "$LIC"
+
       - name: APK bauen
+        timeout-minutes: 60
         run: |
           set -euo pipefail
           export PATH="$PWD/.venv/bin:$HOME/.local/bin:$PATH"
-          # Ohne VIRTUAL_ENV nutzt buildozer `pip install --user`, was pip in einem venv
-          # mit "Can not perform a '--user' install" abbricht.
-          export VIRTUAL_ENV="$PWD/.venv"
-          buildozer -v android debug 2>&1 | tee buildozer.log
-
-      - name: APK als Artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ps5pro-apk
-          path: bin/*.apk
-          if-no-files-found: error
-
-      - name: Log bei Fehler
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: buildozer-log
-          path: buildozer.log
-          if-no-files-found: ignore
-
