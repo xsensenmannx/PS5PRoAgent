@@ -60,15 +60,16 @@ jobs:
             libffi-dev libssl-dev cmake unzip zip ccache git libltdl-dev
           sudo apt-get install -y --no-install-recommends aidl || true
 
+      - name: uv einrichten
+        uses: astral-sh/setup-uv@v5
+
       - name: Python 3.12 und Buildozer
         run: |
           set -euo pipefail
-          curl -LsSf https://astral.sh | sh
-          export PATH="$HOME/.local/bin:$PATH"
           uv venv --python 3.12 .venv
           uv pip install --python .venv/bin/python --upgrade pip setuptools wheel
           uv pip install --python .venv/bin/python \
-            "git+https://github.com" "cython==0.29.36" legacy-cgi
+            buildozer "cython==0.29.36" legacy-cgi
           .venv/bin/buildozer --version
 
       # Gate: ein kaputtes Preis-/JSON-LD-Parsing soll nie in die APK wandern.
