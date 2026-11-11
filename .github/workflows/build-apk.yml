@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
           echo "Alle Pflichtdateien vorhanden."
 
       - name: Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -63,42 +63,47 @@ jobs:
       - name: Python 3.12 und Buildozer
         run: |
           set -euo pipefail
-          curl -LsSf https://astral.sh/uv/install.sh | sh
+          curl -LsSf https://astral.sh | sh
           export PATH="$HOME/.local/bin:$PATH"
           uv venv --python 3.12 .venv
           uv pip install --python .venv/bin/python --upgrade pip setuptools wheel
           uv pip install --python .venv/bin/python \
-            "git+https://github.com/kivy/buildozer" "cython==0.29.36" legacy-cgi
+            "git+https://github.com" "cython==0.29.36" legacy-cgi
           .venv/bin/buildozer --version
 
       # Gate: ein kaputtes Preis-/JSON-LD-Parsing soll nie in die APK wandern.
       - name: Logiktests
         run: python3 tools/selftest.py
 
-      # SDK/NDK (~2 GB) und Zwischenstände. Der Schluessel enthaelt die spec, damit
-      # ein Wechsel von NDK/API nicht auf einem alten Cache haengen bleibt.
+      # SDK/NDK (~2 GB) und Zwischenstände. Neuer Key (v2), damit ein eventuell
+      # defekter Cache-Stand nicht wiederhergestellt wird.
       - name: Build-Cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v2-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-${{ runner.os }}-
+            buildozer-v2-${{ runner.os }}-
 
-      # sdkmanager fragt interaktiv nach den SDK-Lizenzen; buildozers pexpect-Automatik
-      # bleibt dabei schon mal minutenlang stehen. Mit hinterlegten Lizenzen im
-      # SDK-Ordner wird gar nicht erst gefragt - die Automatik ist nur Rueckfallnetz.
-      - name: Android-Lizenzen vorab akzeptieren
+      # Lizenzen nur schreiben, wenn das Android SDK bereits vollstaendig aus dem
+      # Cache geladen wurde. Wird der Ordner vorab leer angelegt, ueberspringt
+      # Buildozer den Download der Command-Line-Tools (sdkmanager fehlt).
+      - name: Android-Lizenzen bei vorhandenem SDK setzen
         run: |
           set -euo pipefail
-          LIC="$HOME/.buildozer/android/platform/android-sdk/licenses"
-          mkdir -p "$LIC"
-          printf '%s\n%s\n%s\n' 8933bad161af4178b1185d1a37fbf41ea5269c55 d56f5187479451eabf01fb78af6dfcb131a6481e 24333f8a63b6825ea9c5514f83c2829b004d1fee > "$LIC/android-sdk-license"
-          printf '%s\n' 84831b9409646a918e30573bab4c9c91346d8abd > "$LIC/android-sdk-preview-license"
-          printf '%s\n' 601085b94cd77f0b54ff86406957099ebe79c4d6 > "$LIC/android-googletv-license"
-          ls -l "$LIC"
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          if [ -d "$SDK/tools" ] || [ -d "$SDK/cmdline-tools" ]; then
+            LIC="$SDK/licenses"
+            mkdir -p "$LIC"
+            printf '%s\n%s\n%s\n' 8933bad161af4178b1185d1a37fbf41ea5269c55 d56f5187479451eabf01fb78af6dfcb131a6481e 24333f8a63b6825ea9c5514f83c2829b004d1fee > "$LIC/android-sdk-license"
+            printf '%s\n' 84831b9409646a918e30573bab4c9c91346d8abd > "$LIC/android-sdk-preview-license"
+            printf '%s\n' 601085b94cd77f0b54ff86406957099ebe79c4d6 > "$LIC/android-googletv-license"
+            ls -l "$LIC"
+          else
+            echo "Android SDK noch nicht im Cache – Buildozer laedt es sauber herunter."
+          fi
 
       - name: APK bauen
         timeout-minutes: 60
