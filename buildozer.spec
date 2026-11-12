@@ -40,9 +40,10 @@ version = 1.0
 # version.regex = __version__ = ['"](.*)['"]
 # version.filename = %(source.dir)s/main.py
 
-# Python-Version festlegen
-requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
+# (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
+requirements = python3, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
+
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
@@ -107,7 +108,7 @@ icon.adaptive_background.filename = %(source.dir)s/assets/icon_bg.png
 android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS
 
 
-# Bewährtes NDK für Kivy 2.3 nutzen android.ndk = 25b
+# (list) features (adds uses-feature -tags to manifest)
 #android.features = android.hardware.usb.host
 
 # (int) Target Android API, should be as high as possible.
@@ -124,7 +125,7 @@ android.minapi = 24
 #android.sdk = 20
 
 # (str) Android NDK version to use
-android.ndk = 25b
+android.ndk = 28c
 
 # (int) Android NDK API to use. This is the minimum API your app will support, it should usually match android.minapi.
 android.ndk_api = 24
@@ -297,7 +298,10 @@ android.accept_sdk_license = True
 
 # (list) The Android archs to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
 # In past, was `android.arch` as we weren't supporting builds for multiple archs at the same time.
-android.archs = arm64-v8a, armeabi-v7a
+# Nur arm64-v8a: alle aktuellen Android-Geraete sind 64-Bit. Der zusaetzliche
+# 32-Bit-Pfad (armeabi-v7a) verdoppelt die Bauzeit und ist bei NDK 28c die
+# haeufigste Fehlerquelle in den Rezepten. Fuer alte Geraete wieder ergaenzen.
+android.archs = arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing
@@ -342,6 +346,9 @@ android.display_cutout = never
 
 # (str) python-for-android branch to use, defaults to master
 # master ist fuer Host-Python <= 3.12 freigegeben (develop braucht 3.14).
+# Achtung: Das p4a-Rezept "python3" gibt die Ziel-Python-Version vor (aktuell
+# 3.11.9) und p4a verlangt, dass der Host-Python im venv exakt dieselbe Version
+# hat. Nach einem p4a-Update ggf. die venv-Version in tools/ci_build.sh anpassen.
 p4a.branch = master
 
 # (str) python-for-android specific commit to use, defaults to HEAD, must be within p4a.branch

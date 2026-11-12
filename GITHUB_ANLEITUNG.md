@@ -21,7 +21,7 @@ Die eigentliche Arbeit steckt in zwei Skripten, die mit dem Projekt hochgeladen 
 
 | Datei | Aufgabe |
 | --- | --- |
-| `tools/ci_build.sh` | prüft Pflichtdateien, installiert Systempakete, legt das venv mit Python 3.12 an, akzeptiert Lizenzen, baut die APK |
+| `tools/ci_build.sh` | prüft Pflichtdateien, installiert Systempakete, legt das venv mit Python 3.11.9 an, akzeptiert Lizenzen, baut die APK |
 | `tools/ci_licenses.sh` | schreibt die akzeptierten SDK-Lizenzen in ein **fertig installiertes** SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb heruntergeladene SDK/NDK-Bäume, an denen buildozer sonst dauerhaft scheitert |
 

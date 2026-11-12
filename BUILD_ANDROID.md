@@ -21,6 +21,9 @@ eigenes.
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
 | `tools/selftest.py` | Logiktests ohne Kivy (35 Zusicherungen) |
+| `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
+| `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
+| `tools/ci_fix_cache.sh` | entfernt halb geladene SDK/NDK-Bäume (sonst überspringt buildozer die Installation) |
 | `PS5Pro_APK_Colab.ipynb` | Build-Notebook für Colab |
 | `.github/workflows/build-apk.yml` | CI-Build mit Artifact |
 | `ps5pro.zip` | Upload-Paket für Colab (main.py, spec, icons, `assets/`) |
@@ -35,7 +38,8 @@ eigenes.
    `PS5Pro_APK_Colab.ipynb` auswählen.
 2. Zelle 1 ausführen (`▶` links, oder `Strg+Enter`): installiert Autotools und JDK.
    Erwartete Ausgabe: eine `java version`-Zeile.
-3. Zelle 2: legt mit `uv` eine **Python-3.12-Umgebung** an und installiert Buildozer.
+3. Zelle 2: legt mit `uv` eine **Python-3.11.9-Umgebung** an und installiert Buildozer.
+   Die Version ist nicht beliebig: p4a verlangt Host-Python == Ziel-Python (3.11.9).
    Erwartete Ausgabe: `Buildozer 1.6.x`. Das dauert 1–3 Minuten.
 4. Zelle 3: ZIP auswählen → `ps5pro.zip` aus dem Projekt hochladen. Erwartete Ausgabe:
    `Projekt entpackt nach: /content/ps5pro` mit `['assets', 'buildozer.spec', 'icon.png', 'main.py']`.
@@ -73,7 +77,7 @@ git push -u origin main
 Danach passiert eines von zwei Dingen:
 
 * Der Push auf `main` startet den Workflow automatisch (Pfadfilter: `main.py`,
-  `buildozer.spec`, `icon.png`, der Workflow selbst).
+  `buildozer.spec`, `icon.png`, `assets/**`, `tools/**`, der Workflow selbst).
 * Oder manuell: **Actions → APK bauen → Run workflow**.
 
 Nach 15–40 Minuten (erster Lauf; danach deutlich kürzer dank Cache) liegt die APK unter
@@ -89,12 +93,22 @@ fehl, wird gar nicht erst gebaut.
 
 Nur nötig, wenn du ohnehin Linux hast (Windows: WSL2 mit Ubuntu 22.04/24.04).
 
+Am einfachsten mit dem Skript, das auch der CI-Workflow benutzt — es prüft die
+Pflichtdateien, installiert die Pakete, legt das venv an, akzeptiert die SDK-Lizenzen
+und baut:
+
+```bash
+bash tools/ci_build.sh
+```
+
+Oder von Hand:
+
 ```bash
 sudo apt update
 sudo apt install -y git zip unzip openjdk-17-jdk python3-pip \
     autoconf libtool pkg-config zlib1g-dev libncurses-dev libffi-dev \
     libssl-dev cmake ccache
-pip install --user "buildozer" "cython==0.29.36" legacy-cgi
+pip install --user "buildozer" "cython==0.29.37" legacy-cgi
 buildozer android debug
 ```
 
@@ -104,9 +118,10 @@ Mit Docker bleibt das System unberührt:
 docker run --rm -v "$PWD":/home/user/hostcwd kivy/buildozer android debug
 ```
 
-Die APK landet in `bin/`. Wichtig: Das Host-Python muss **≤ 3.12** sein; mit 3.13/3.14
-bricht python-for-android `master` ab (dann `uv venv --python 3.12` benutzen, wie im
-Notebook).
+Die APK landet in `bin/`. Wichtig: Das Host-Python im venv muss **exakt** der Version des
+p4a-Rezepts `python3` entsprechen (derzeit 3.11.9). Mit einem neueren Host bricht der Build
+mit `python3 should have same version as hostpython3, 3.11.9 != 3.14.2` ab — dann
+`uv venv --python 3.11.9` benutzen, wie im Notebook und in `tools/ci_build.sh`.
 
 ---
 
@@ -153,12 +168,15 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | Meldung / Symptom | Ursache | Lösung |
 | --- | --- | --- |
 | `Buildozer failed to execute the last command` | irgendein Schritt | Immer den Block davor lesen: `/content/buildozer.log` bzw. das Artifact `buildozer-log`. Die letzte `Command failed`-Zeile nennt den echten Fehler. |
-| `No module named 'distutils'` / `pkg_resources` | zu neues Host-Python | Python 3.12 im venv erzwingen (`uv venv --python 3.12`), `setuptools` installieren. |
-| Fehler in `Cython.Compiler…` | Cython 3 statt 0.29 | `cython==0.29.36` installieren, `.buildozer` löschen. |
+| `No module named 'distutils'` / `pkg_resources` | zu neues Host-Python | venv mit 3.11.9 anlegen (`uv venv --python 3.11.9`), `setuptools` installieren. |
+| `python3 should have same version as hostpython3` | Host-Python ≠ Ziel-Python | venv mit der Rezeptversion anlegen: `uv venv --python 3.11.9` (Zelle 2 / `tools/ci_build.sh`). |
+| Fehler in `Cython.Compiler…` | Cython 3 statt 0.29 | `cython==0.29.37` installieren, `.buildozer` löschen. |
 | `Can not perform a '--user' install` | Buildozer erkennt das venv nicht und ruft `pip install --user` auf | `VIRTUAL_ENV` setzen oder das venv aktivieren — Zelle 5 im Notebook und der Actions-Workflow tun das bereits. |
 | `No module named pip` | venv ohne pip (z. B. frisches `uv venv`) | `uv pip install --python <venv>/bin/python pip` (Zelle 2 erledigt das). |
 | `Aidl not found` | fehlendes Build-Tool | `sudo apt install aidl` (oder `android-sdk-build-tools`). |
 | `SDK license not accepted` | Lizenz | In der Spec steht `android.accept_sdk_license = True`; danach `buildozer android clean`. |
+| Lauf bleibt beim Lizenztext stehen (`License android-sdk-license:`) | `sdkmanager` wartet auf eine Eingabe | Buildozer beantwortet das selbst (`android.accept_sdk_license = True`); `bash tools/ci_licenses.sh` hinterlegt die Lizenzen zusätzlich. Sonst Lauf abbrechen, `.buildozer`-Cache löschen, neu starten. |
+| `sdkmanager does not exist, sdkmanager is not installed` | halb geladenes SDK: buildozer prüft nur, ob der Ordner existiert, und überspringt dann die Installation | `bash tools/ci_fix_cache.sh` (läuft automatisch in `tools/ci_build.sh`) entfernt den kaputten Baum; danach neu bauen. |
 | `Unable to find recommended Android NDK` | alte p4a-Kopie | `rm -rf .buildozer` und Cache verwerfen, neu bauen. |
 | Build bricht nach NDK-/API-Wechsel | alter Cache | `buildozer android clean`, `rm -rf .buildozer bin`, Drive-Cache bzw. Actions-Cache löschen. |
 | APK installiert nicht („App nicht installiert") | anderer Schlüssel/ältere Version | Alte App deinstallieren oder `adb install -r` mit gleichem Paketnamen. |
@@ -176,14 +194,14 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | --- | --- | --- |
 | `android.api` / `android.minapi` | 34 / 24 | Ab targetSdk 35 erzwingt Android Edge-to-Edge; Kivy 2.3 zeichnet dann unter Status- und Navigationsleiste, bei 36 ist der Opt-out entfernt. 34 hält Fullscreen intakt, läuft ab Android 7.0. |
 | `android.ndk` / `android.ndk_api` | 28c / 24 | Aktuelle p4a-Empfehlung, inkl. 16-KB-Page-Support für Android 15+. |
-| `p4a.branch` | `master` | Passt zu Host-Python 3.12; `develop` verlangt 3.14. |
+| `p4a.branch` | `master` | Dessen `python3`-Rezept ist 3.11.9 — der venv-Host muss dieselbe Version haben. |
 | `icon.filename` | `icon.png` | Legacy-Icon (Android 7 und Fallback). |
 | `icon.adaptive_*` | `assets/icon_fg.png`, `assets/icon_bg.png` | Android 8+ maskiert das Icon (Kreis/Squircle); ohne Adaptive-Variante wird das Logo verkleinert in eine weiße Fläche gesetzt. |
 | `fullscreen` | `1` | Konsolen-Look, keine Titelleiste. |
 | `android.display_cutout` | `never` | Inhalt bleibt aus der Notch-Region. |
 | `android.presplash_color` | `#04080a` | Kein weißes Aufblitzen beim Start. |
 | `android.accept_sdk_license` | `True` | Keine interaktive Lizenzabfrage in Colab/CI. |
-| `android.archs` | `arm64-v8a, armeabi-v7a` | Aktuelle Geräte plus ältere 32-Bit-Geräte. |
+| `android.archs` | `arm64-v8a` | Alle aktuellen Geräte sind 64-Bit; der 32-Bit-Pfad verdoppelte die Bauzeit und war die häufigste Fehlerquelle. Für alte Geräte `, armeabi-v7a` ergänzen. |
 | `android.permissions` | INTERNET, VIBRATE, POST_NOTIFICATIONS | Scan, haptisches Feedback, Alarm. |
 | `source.exclude_*` | `.buildozer, bin, _verify, .github`; `*.zip, *.ipynb, *.md, *.log` | Doku und Upload-Paket landen nicht in der APK. |
 
