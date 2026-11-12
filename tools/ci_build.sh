@@ -23,7 +23,8 @@ say "Pflichtdateien pruefen"
 missing=0
 for f in main.py buildozer.spec icon.png \
          assets/icon_fg.png assets/icon_bg.png tools/selftest.py \
-         tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh; do
+         tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
+         tools/ci_log_failure.sh; do
     if [ ! -f "$f" ]; then
         echo "::error file=$f::Pflichtdatei fehlt: $f"
         missing=1
@@ -116,10 +117,7 @@ set -e
 
 if [ "$rc" -ne 0 ]; then
     echo "::error::buildozer ist mit Code $rc gescheitert - Details in buildozer.log"
-    echo "--- 40 Zeilen vor der letzten Fehlerstelle ---"
-    tac buildozer.log | grep -B 40 -m1 'Command failed' | tac | tail -60 || true
-    echo "--- letzte 20 Zeilen ---"
-    tail -20 buildozer.log
+    bash tools/ci_log_failure.sh buildozer.log
     # Bekannte Signatur: es wurde gegen ein zu neues CPython gebaut.
     if grep -qE 'include/python3\.(1[3-9])' buildozer.log; then
         echo "::error::Gebaut wurde gegen Python 3.1x. Der Pin aus buildozer.spec"

@@ -25,6 +25,7 @@ Die eigentliche Arbeit steckt in drei Skripten, die mit dem Projekt hochgeladen 
 | `tools/ci_licenses.sh` | schreibt die akzeptierten SDK-Lizenzen in ein **fertig installiertes** SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb heruntergeladene SDK/NDK-Bäume, an denen buildozer sonst dauerhaft scheitert |
 | `tools/ci_check_apk.sh` | prüft die fertige APK: plausible Größe und die gepinnte Python-Version wirklich enthalten |
+| `tools/ci_log_failure.sh` | zieht die erste Fehlerzeile samt Kontext aus `buildozer.log` – genau die Zeilen, die bei einem roten Lauf in der Zusammenfassung erscheinen |
 
 Beide laufen auch lokal auf Linux/WSL: `bash tools/ci_build.sh`.
 
