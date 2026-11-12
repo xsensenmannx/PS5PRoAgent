@@ -22,7 +22,8 @@ export PYTHONIOENCODING=utf-8
 say "Pflichtdateien pruefen"
 missing=0
 for f in main.py buildozer.spec icon.png \
-         assets/icon_fg.png assets/icon_bg.png tools/selftest.py; do
+         assets/icon_fg.png assets/icon_bg.png tools/selftest.py \
+         tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh; do
     if [ ! -f "$f" ]; then
         echo "::error file=$f::Pflichtdatei fehlt: $f"
         missing=1
