@@ -39,8 +39,8 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-v3-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: buildozer-v3-${{ runner.os }}-
+          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-v4-${{ runner.os }}-
 
       - name: APK bauen
         timeout-minutes: 120
