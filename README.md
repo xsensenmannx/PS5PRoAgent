@@ -38,8 +38,9 @@ Der Build läuft auf Linux — zwei Wege ohne eigenen Linux-Rechner:
   baut bei jedem Push und legt die APK als Artifact ab. Schritt für Schritt:
   [GITHUB_ANLEITUNG.md](GITHUB_ANLEITUNG.md).
 
-Die vollständige Anleitung inklusive Installation, Bedienung, Fehlerbehebung und
-Play-Store-Release steht in **[BUILD_ANDROID.md](BUILD_ANDROID.md)**.
+Die vollständige Anleitung inklusive Installation, Bedienung und Fehlerbehebung
+steht in **[BUILD_ANDROID.md](BUILD_ANDROID.md)**. Für Google Play (targetSdk 36,
+signiertes AAB, Keystore und Secrets) siehe **[PLAY_STORE.md](PLAY_STORE.md)**.
 
 ## Projektstruktur
 
@@ -53,8 +54,10 @@ assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
 assets/notify_icon.png        Statusleisten-Icon des Hintergrund-Service
 tools/selftest.py             Logiktests ohne Kivy (CI-Gate)
-tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal)
+tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal, APK oder AAB)
 tools/ci_check_apk.sh         prüft die fertige APK (Größe, Python-Version)
+tools/ci_check_aab.sh         prüft das AAB (Struktur, Signatur, Python-Version)
+PLAY_STORE.md                 Play-Release: Keystore, Secrets, AAB, Play Console
 tools/ci_licenses.sh          akzeptiert die Android-SDK-Lizenzen
 tools/ci_fix_cache.sh         räumt halb geladene SDK/NDK-Bäume auf
 PS5Pro_APK_Colab.ipynb        Build-Notebook für Colab

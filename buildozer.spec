@@ -137,11 +137,10 @@ android.add_resources = assets/notify_icon.png:drawable/notify_icon.png
 #android.features = android.hardware.usb.host
 
 # (int) Target Android API, should be as high as possible.
-# Bewusst 34 und nicht 36: ab targetSdk 35 erzwingt Android Edge-to-Edge, und Kivy 2.3
-# zeichnet dann unter Status-/Navigationsleiste (bei 36 ist der Opt-out entfernt).
-# 34 laesst das Fullscreen-Layout unveraendert; Sideloading ist davon unberuehrt.
-# Nur fuer eine Play-Store-Einreichung waere 35+ noetig (separater Release-Schritt).
-android.api = 34
+# Google Play verlangt seit 31.08.2026 fuer neue Apps und Updates API 36.
+# Ab targetSdk 35 erzwingt Android Edge-to-Edge; die App liest die Insets per
+# pyjnius und verschiebt Titel/Buttons entsprechend (main.py, android_insets).
+android.api = 36
 
 # (int) Minimum API your APK / AAB will support.
 android.minapi = 24
@@ -329,8 +328,14 @@ android.accept_sdk_license = True
 android.archs = arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
-# this is not the same as app version and should only be edited if you know what you're doing
-# android.numeric_version = 1
+# Google Play verlangt fuer JEDEN Upload einen hoeheren versionCode. Vor dem
+# naechsten Play-Upload hier +1 (die Anzeige-Version oben bleibt davon unabhaengig).
+android.numeric_version = 1
+
+# (str) The format used to package the app for release mode (aab or apk or aar).
+# Play nimmt nur AABs an; die Debug-APK fuer Sideloading bleibt wie gehabt.
+android.release_artifact = aab
+
 
 # (bool) enables Android auto backup feature (Android API >=23)
 android.allow_backup = True
@@ -357,7 +362,9 @@ android.allow_backup = True
 # It allows for an edge-to-edge experience while providing space for important sensors on the front of the device.
 # Available options for Android API >= 28 are "default, shortEdges, never" and defaults to never.
 # Android documentation: https://developer.android.com/develop/ui/views/layout/display-cutout
-android.display_cutout = never
+# shortEdges: Notch-Flaeche nutzen; die Hoehe kommt ueber android_insets() als
+# oberer Rand zurueck, damit der Titel nicht unter der Kamera liegt.
+android.display_cutout = shortEdges
 
 #
 # Python for android (p4a) specific

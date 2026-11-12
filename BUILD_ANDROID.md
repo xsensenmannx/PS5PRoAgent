@@ -16,15 +16,19 @@ eigenes.
 
 | Datei | Zweck |
 | --- | --- |
-| `main.py` | die komplette App (UI, Radar, Scanner) |
-| `buildozer.spec` | Build-Konfiguration (API, NDK, Icon, Rechte) |
+| `main.py` | die Oberfläche (Radar, Karten, Einstellungen, Service-Start) |
+| `scan_core.py` | Scan-, Preis- und Speicherlogik ohne Kivy (auch im Service) |
+| `service.py` | Hintergrund-Scan als Foreground-Service |
+| `buildozer.spec` | Build-Konfiguration (API 36, NDK, Icon, Rechte, AAB) |
+| `PLAY_STORE.md` | Keystore, GitHub-Secrets, AAB und Play-Console-Schritte |
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
-| `tools/selftest.py` | Logiktests ohne Kivy (67 Zusicherungen) |
+| `tools/selftest.py` | Logiktests ohne Kivy (über 90 Zusicherungen) |
 | `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb geladene SDK/NDK-Bäume (sonst überspringt buildozer die Installation) |
 | `tools/ci_check_apk.sh` | prüft die fertige APK (Größe, enthält `libpython3.11.so`) |
+| `tools/ci_check_aab.sh` | prüft das AAB (Struktur, Signatur, `libpython3.11.so`) |
 | `tools/ci_log_failure.sh` | holt die erste echte Fehlerstelle aus `buildozer.log` (für die Job-Zusammenfassung) |
 | `PS5Pro_APK_Colab.ipynb` | Build-Notebook für Colab |
 | `.github/workflows/build-apk.yml` | CI-Build mit Artifact |

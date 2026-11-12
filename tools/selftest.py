@@ -208,6 +208,8 @@ def main_tests():
     check("nur_konsole ohne product", core.pruefe_nur_konsole(
         "<html><body>PlayStation 5 Pro 2 TB Uebersicht</body></html>", {}), True)
     check("nur_konsole fremdprodukt", core.pruefe_nur_konsole("<html>xbox</html>", {}), False)
+    # Ohne Android/Activity duerfen die Insets nichts verschieben.
+    check("insets ohne android", main.android_insets(), (0.0, 0.0))
 
     # Meta-Preis-Fallback
     check("meta preis", core.extract_meta_preis(
@@ -398,7 +400,11 @@ def spec_tests():
     # 2.3.0 bricht mit NDK 28c/clang 20 in cgl_gl.c ab: dort steht
     # "const GLchar**" gegen "const GLchar* const *" der GLES-Header.
     check("spec kivy nicht 2.3.0", "kivy==2.3.0" in req, False)
-    check("spec api 34", c.get("app", "android.api"), "34")
+    # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
+    check("spec api 36", c.get("app", "android.api"), "36")
+    check("spec release aab", c.get("app", "android.release_artifact"), "aab")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "1")
+    check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
     check("spec hintergrund-service", c.get("app", "services"),

@@ -59,3 +59,128 @@ jobs:
           # mit "asset already exists" abzubrechen.
           overwrite_files: true
           fail_on_unmatched_files: true
+
+  # Signiertes App Bundle fuer Google Play. Laeuft parallel zur APK, damit der
+  # Tag-Lauf nicht laenger wird. Ohne Release-Secrets wird mit einem
+  # Wegwerf-Schluessel gebaut: Das prueft den kompletten AAB-Pfad, das Ergebnis
+  # landet aber nur als Workflow-Artefakt ("smoketest") und NICHT im Release.
+  aab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 210
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Signierschluessel bereitstellen
+        id: ks
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/keys"
+          KS="$RUNNER_TEMP/keys/upload.jks"
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            for v in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+              if [ -z "${!v:-}" ]; then
+                echo "::error::$v fehlt (siehe PLAY_STORE.md)"
+                exit 1
+              fi
+            done
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KS"
+            if [ ! -s "$KS" ]; then
+              echo "::error::Keystore-Secret ist leer oder kein gueltiges Base64"
+              exit 1
+            fi
+            echo "real=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::AAB wird mit dem hinterlegten Release-Keystore signiert"
+          else
+            PASS=$(openssl rand -hex 16)
+            echo "::add-mask::$PASS"
+            keytool -genkeypair -keystore "$KS" -alias upload \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$PASS" -keypass "$PASS" \
+              -dname "CN=Smoke Test, O=PS5 Pro, C=DE" >/dev/null 2>&1
+            echo "SMOKE_PASS=$PASS" >> "$GITHUB_ENV"
+            echo "real=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Kein Release-Keystore hinterlegt - AAB nur als Smoke-Test, nicht fuer Play."
+          fi
+
+      - name: Logiktests
+        run: python3 tools/selftest.py
+
+      - name: Build-Cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-v5-ubuntu2404-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-v5-ubuntu2404-
+
+      - name: AAB bauen
+        timeout-minutes: 120
+        env:
+          P4A_RELEASE_KEYSTORE: ${{ runner.temp }}/keys/upload.jks
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.ks.outputs.real }}" = "true" ]; then
+            export P4A_RELEASE_KEYSTORE_PASSWD="$ANDROID_KEYSTORE_PASSWORD"
+            export P4A_RELEASE_KEYALIAS="$ANDROID_KEY_ALIAS"
+            export P4A_RELEASE_KEYALIAS_PASSWD="$ANDROID_KEY_PASSWORD"
+          else
+            export P4A_RELEASE_KEYSTORE_PASSWD="$SMOKE_PASS"
+            export P4A_RELEASE_KEYALIAS=upload
+            export P4A_RELEASE_KEYALIAS_PASSWD="$SMOKE_PASS"
+          fi
+          ARTIFACT=aab bash tools/ci_build.sh
+
+      - name: AAB als Artefakt (echter Schluessel)
+        if: steps.ks.outputs.real == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ps5pro-aab
+          path: bin/*.aab
+          if-no-files-found: error
+
+      - name: AAB als Smoke-Test-Artefakt
+        if: steps.ks.outputs.real != 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ps5pro-aab-smoketest
+          path: bin/*.aab
+          if-no-files-found: error
+
+      - name: AAB ans Release haengen
+        if: steps.ks.outputs.real == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: bin/*.aab
+          overwrite_files: true
+          fail_on_unmatched_files: true
+
+      - name: Fehlerbericht in die Zusammenfassung
+        if: failure()
+        run: |
+          {
+            echo "## AAB-Build fehlgeschlagen"
+            echo ""
+            echo '```'
+            bash tools/ci_log_failure.sh buildozer.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log bei Fehler
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: buildozer-aab-log
+          path: buildozer.log
+          if-no-files-found: ignore
