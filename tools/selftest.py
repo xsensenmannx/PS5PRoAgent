@@ -12,7 +12,6 @@ import configparser
 import os
 import re
 import sys
-import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -153,6 +152,11 @@ def main_tests():
     check("parse 1.099 Tausenderpunkt", main.parse_preis_str("1.099 €"), 1099.0)
     check("parse 2.099,90", main.parse_preis_str("2.099,90"), 2099.9)
     check("parse 1.5 bleibt dezimal", main.parse_preis_str("1.5"), 1.5)
+    check("parse 799,- ohne Cent", main.parse_preis_str("799,-"), 799.0)
+    check("parse 799,– Halbgeviertstrich", main.parse_preis_str("799,–"), 799.0)
+    check("parse 1.299,-- ohne Cent", main.parse_preis_str("1.299,--"), 1299.0)
+    check("parse 1.299,00 mit Sternchen", main.parse_preis_str("1.299,00 €*"), 1299.0)
+    check("parse (799,00 €) in Klammern", main.parse_preis_str("(799,00 €)"), 799.0)
     check("parse ohne Zahl", main.parse_preis_str("n/a"), None)
     check("format 1299.5", main.format_preis(1299.5), "1.299,50 €")
     check("format 799", main.format_preis(799.0), "799,00 €")
@@ -209,6 +213,21 @@ def main_tests():
     check("haendler feld vollstaendig", all(
         h.get("name") and h.get("land") in ("DE", "AT") and h.get("urls")
         for h in main.HAENDLER), True)
+    # Land und Domain muessen zusammenpassen. "Aetka AT" auf aetka.de war genau
+    # so ein Datenfehler: der AT-Filter zeigte damit einen deutschen Shop.
+    # Ausnahmen mit Grund: PS Direct fuehrt DE und AT unter derselben .com-Domain,
+    # Computeruniverse ist ein deutscher Shop auf .net.
+    ausnahmen = ("direct.playstation.com", "www.computeruniverse.net")
+    falsch = []
+    for h in main.HAENDLER:
+        host = h["urls"][0].split("/")[2].lower()
+        if host.startswith(ausnahmen):
+            continue
+        if h["land"] == "DE" and not host.endswith(".de"):
+            falsch.append(h["name"])
+        if h["land"] == "AT" and not host.endswith(".at"):
+            falsch.append(h["name"])
+    check("land passt zur Domain", falsch, [])
 
 
 def retry_tests():
