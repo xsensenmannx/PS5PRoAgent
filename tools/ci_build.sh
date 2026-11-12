@@ -46,18 +46,22 @@ if [ "${SKIP_APT:-0}" != "1" ]; then
 fi
 
 if [ "${SKIP_VENV:-0}" != "1" ]; then
-    say "Python 3.12 + Buildozer"
-    # python-for-android "master" ist fuer Host-Python bis 3.12 freigegeben.
+    say "Python 3.11.9 + Buildozer"
+    # p4a verlangt: hostpython3 == python3. Das python3-Rezept im ausgecheckten
+    # p4a ist 3.11.9 - deshalb muss auch der Host im venv 3.11.9 sein. Mit einem
+    # neueren Host bricht der Build ab mit:
+    #   "python3 should have same version as hostpython3, 3.11.9 != 3.x.y"
     if ! command -v uv >/dev/null 2>&1; then
         curl -LsSf https://astral.sh/uv/install.sh | sh
     fi
     export PATH="$HOME/.local/bin:$PATH"
-    uv venv --python 3.12 .venv
+    uv venv --python 3.11.9 .venv
     uv pip install --python .venv/bin/python --upgrade pip setuptools wheel
     uv pip install --python .venv/bin/python \
         "git+https://github.com/kivy/buildozer" "cython==0.29.37" legacy-cgi
 fi
 
+echo "Host-Python: $(.venv/bin/python -V 2>&1)"
 .venv/bin/buildozer --version
 
 say "SDK/NDK-Cache pruefen"

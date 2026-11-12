@@ -38,7 +38,8 @@ eigenes.
    `PS5Pro_APK_Colab.ipynb` auswählen.
 2. Zelle 1 ausführen (`▶` links, oder `Strg+Enter`): installiert Autotools und JDK.
    Erwartete Ausgabe: eine `java version`-Zeile.
-3. Zelle 2: legt mit `uv` eine **Python-3.12-Umgebung** an und installiert Buildozer.
+3. Zelle 2: legt mit `uv` eine **Python-3.11.9-Umgebung** an und installiert Buildozer.
+   Die Version ist nicht beliebig: p4a verlangt Host-Python == Ziel-Python (3.11.9).
    Erwartete Ausgabe: `Buildozer 1.6.x`. Das dauert 1–3 Minuten.
 4. Zelle 3: ZIP auswählen → `ps5pro.zip` aus dem Projekt hochladen. Erwartete Ausgabe:
    `Projekt entpackt nach: /content/ps5pro` mit `['assets', 'buildozer.spec', 'icon.png', 'main.py']`.
@@ -117,9 +118,10 @@ Mit Docker bleibt das System unberührt:
 docker run --rm -v "$PWD":/home/user/hostcwd kivy/buildozer android debug
 ```
 
-Die APK landet in `bin/`. Wichtig: Das Host-Python muss **≤ 3.12** sein; mit 3.13/3.14
-bricht python-for-android `master` ab (dann `uv venv --python 3.12` benutzen, wie im
-Notebook).
+Die APK landet in `bin/`. Wichtig: Das Host-Python im venv muss **exakt** der Version des
+p4a-Rezepts `python3` entsprechen (derzeit 3.11.9). Mit einem neueren Host bricht der Build
+mit `python3 should have same version as hostpython3, 3.11.9 != 3.14.2` ab — dann
+`uv venv --python 3.11.9` benutzen, wie im Notebook und in `tools/ci_build.sh`.
 
 ---
 
@@ -166,7 +168,8 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | Meldung / Symptom | Ursache | Lösung |
 | --- | --- | --- |
 | `Buildozer failed to execute the last command` | irgendein Schritt | Immer den Block davor lesen: `/content/buildozer.log` bzw. das Artifact `buildozer-log`. Die letzte `Command failed`-Zeile nennt den echten Fehler. |
-| `No module named 'distutils'` / `pkg_resources` | zu neues Host-Python | Python 3.12 im venv erzwingen (`uv venv --python 3.12`), `setuptools` installieren. |
+| `No module named 'distutils'` / `pkg_resources` | zu neues Host-Python | venv mit 3.11.9 anlegen (`uv venv --python 3.11.9`), `setuptools` installieren. |
+| `python3 should have same version as hostpython3` | Host-Python ≠ Ziel-Python | venv mit der Rezeptversion anlegen: `uv venv --python 3.11.9` (Zelle 2 / `tools/ci_build.sh`). |
 | Fehler in `Cython.Compiler…` | Cython 3 statt 0.29 | `cython==0.29.37` installieren, `.buildozer` löschen. |
 | `Can not perform a '--user' install` | Buildozer erkennt das venv nicht und ruft `pip install --user` auf | `VIRTUAL_ENV` setzen oder das venv aktivieren — Zelle 5 im Notebook und der Actions-Workflow tun das bereits. |
 | `No module named pip` | venv ohne pip (z. B. frisches `uv venv`) | `uv pip install --python <venv>/bin/python pip` (Zelle 2 erledigt das). |
@@ -191,7 +194,7 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | --- | --- | --- |
 | `android.api` / `android.minapi` | 34 / 24 | Ab targetSdk 35 erzwingt Android Edge-to-Edge; Kivy 2.3 zeichnet dann unter Status- und Navigationsleiste, bei 36 ist der Opt-out entfernt. 34 hält Fullscreen intakt, läuft ab Android 7.0. |
 | `android.ndk` / `android.ndk_api` | 28c / 24 | Aktuelle p4a-Empfehlung, inkl. 16-KB-Page-Support für Android 15+. |
-| `p4a.branch` | `master` | Passt zu Host-Python 3.12; `develop` verlangt 3.14. |
+| `p4a.branch` | `master` | Dessen `python3`-Rezept ist 3.11.9 — der venv-Host muss dieselbe Version haben. |
 | `icon.filename` | `icon.png` | Legacy-Icon (Android 7 und Fallback). |
 | `icon.adaptive_*` | `assets/icon_fg.png`, `assets/icon_bg.png` | Android 8+ maskiert das Icon (Kreis/Squircle); ohne Adaptive-Variante wird das Logo verkleinert in eine weiße Fläche gesetzt. |
 | `fullscreen` | `1` | Konsolen-Look, keine Titelleiste. |
