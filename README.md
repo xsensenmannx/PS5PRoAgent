@@ -57,6 +57,7 @@ GITHUB_ANLEITUNG.md           Build über GitHub Actions (Web-Upload und CLI)
 .github/workflows/release.yml     Tag v* -> APK als Release-Asset
 .github/workflows/diagnose.yml    manueller Diagnose-Lauf
 LICENSE                       MIT-Lizenz
+THIRD_PARTY_NOTICES.md        Lizenzen der gebündelten Bibliotheken
 ps5pro.zip                    Upload-Paket für Colab
 ```
 
@@ -84,5 +85,7 @@ MIT — siehe [LICENSE](LICENSE). Du darfst die App frei nutzen, verändern und
 weitergeben, solange der Copyright- und Lizenzhinweis erhalten bleibt.
 
 Die APK bündelt zusätzlich Kivy, python-for-android und weitere
-Open-Source-Bibliotheken. Für diese gelten ihre eigenen Lizenzen (u. a. MIT, BSD,
-Apache-2.0, MPL-2.0 und PSF); die MIT-Lizenz hier betrifft nur den Projektcode.
+Open-Source-Bibliotheken. Deren Lizenzen (MIT, BSD-3-Clause, Apache-2.0,
+MPL-2.0, PSF-2.0 u. a.) stehen mit Copyright-Hinweisen in
+**[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**; die MIT-Lizenz hier
+betrifft nur den Projektcode.
