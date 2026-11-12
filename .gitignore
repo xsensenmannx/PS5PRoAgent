@@ -10,3 +10,13 @@ __pycache__/
 # Lokale App-Daten
 ps5pro_settings.json
 ps5pro_history.json
+fonts/
+
+# Build-Protokolle und lokale Signatur
+buildozer.log
+*.keystore
+*.jks
+
+# Betriebssystem-Kram
+.DS_Store
+Thumbs.db

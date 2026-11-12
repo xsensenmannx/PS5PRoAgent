@@ -17,13 +17,14 @@ hat unbegrenzte Actions-Minuten; bei einem privaten zählt jeder Lauf auf dein K
 jedem Einfügen über die Weboberfläche kann eine YAML-Datei durch verlorene Einrückung
 kaputtgehen („Invalid workflow file"). Je weniger drinsteht, desto unwahrscheinlicher.
 
-Die eigentliche Arbeit steckt in zwei Skripten, die mit dem Projekt hochgeladen werden:
+Die eigentliche Arbeit steckt in drei Skripten, die mit dem Projekt hochgeladen werden:
 
 | Datei | Aufgabe |
 | --- | --- |
 | `tools/ci_build.sh` | prüft Pflichtdateien, installiert Systempakete, legt das venv mit Python 3.11.9 an, akzeptiert Lizenzen, baut die APK |
 | `tools/ci_licenses.sh` | schreibt die akzeptierten SDK-Lizenzen in ein **fertig installiertes** SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb heruntergeladene SDK/NDK-Bäume, an denen buildozer sonst dauerhaft scheitert |
+| `tools/ci_check_apk.sh` | prüft die fertige APK: plausible Größe und die gepinnte Python-Version wirklich enthalten |
 
 Beide laufen auch lokal auf Linux/WSL: `bash tools/ci_build.sh`.
 
@@ -49,6 +50,8 @@ PS5Pro_APK_Colab.ipynb
 tools/selftest.py
 tools/ci_build.sh
 tools/ci_licenses.sh
+tools/ci_fix_cache.sh
+tools/ci_check_apk.sh
 assets/icon_fg.png
 assets/icon_bg.png
 ```
@@ -100,7 +103,7 @@ workflows → Save**, dann **Actions → APK bauen → Run workflow**.
 | --- | --- | --- |
 | Auschecken | Sekunden | lädt deinen Commit |
 | Java 17 | ~20 s | Temurin-JDK, das Gradle erwartet |
-| **Logiktests** | ~2 s | 35 Zusicherungen; rot = kein Build |
+| **Logiktests** | ~2 s | 46 Zusicherungen; rot = kein Build |
 | Build-Cache | ~1 min | SDK/NDK (~2 GB) aus dem Cache oder Download |
 | **APK bauen** | 20–35 min | ruft `tools/ci_build.sh` auf (Pflichtdateien, Pakete, venv, Lizenzen, Build) |
 | APK als Artifact | Sekunden | lädt `bin/*.apk` hoch |
@@ -139,7 +142,7 @@ Personal access tokens (classic) → Haken `repo`. Die `.gitignore` hält `.buil
 
 ## APK installieren
 
-1. `ps5pro-apk.zip` entpacken → `ps5prosearchagent-1.0-arm64-v8a_armeabi-v7a-debug.apk`.
+1. `ps5pro-apk.zip` entpacken → `ps5prosearchagent-1.0-arm64-v8a-debug.apk`.
 2. Aufs Handy bringen (Kabel, Cloud, Messenger); der Name muss auf `.apk` enden.
 3. Antippen → **Installation aus dieser Quelle erlauben** → **Installieren**.
 4. Play-Protect-Hinweis „App wurde nicht geprüft" → **Mehr Details → Trotzdem installieren**.
@@ -163,7 +166,8 @@ Häufige Fälle:
 | Lauf steht minutenlang beim Lizenztext | `sdkmanager` fragt interaktiv | buildozer beantwortet das selbst (`android.accept_sdk_license = True`); `ci_licenses.sh` hinterlegt die Lizenzen zusätzlich, sobald das SDK existiert. Hängt es trotzdem: abbrechen, unter **Actions → Caches** den `buildozer-…`-Eintrag löschen, neu starten |
 | `sdkmanager path … does not exist, sdkmanager is not installed` | halb heruntergeladenes SDK im Cache — buildozer prüft nur, ob der Ordner existiert | `tools/ci_fix_cache.sh` räumt das auf und läuft automatisch in `ci_build.sh`. Zusätzlich **Actions → Caches** → `buildozer-…` löschen. |
 | `UnicodeDecodeError` direkt beim Start von buildozer | Locale ist ASCII, die `buildozer.spec` enthält Umlaute | `ci_build.sh` setzt `LANG`/`PYTHONUTF8`; lokal zusätzlich `export LANG=C.UTF-8` |
-| `Invalid workflow file` | YAML beim Einfügen zerstört | Datei löschen und über **Create new file** neu anlegen; die YAML ist inzwischen nur ~60 Zeilen |
+| Abbruch mitten im Kivy-Build, im Log `window_info.c` oder `_PyLong_AsByteArray` | p4a baut ohne Pin gegen CPython 3.14.2, und Cython 0.29 kann nur bis 3.12 | `buildozer.spec` pinnt `python3==3.11.9, hostpython3==3.11.9`; `tools/ci_fix_cache.sh` setzt den Pin auch im p4a-Checkout durch und verwirft alte python3-Builds. |
+| `Invalid workflow file` | YAML beim Einfügen zerstört | Datei löschen und über **Create new file** neu anlegen; die YAML ist inzwischen nur ~80 Zeilen |
 | Actions-Minuten leer / Lauf startet nicht | privates Repo | Repo auf **Public** stellen |
 | `Resource not accessible by integration` | Workflow-Rechte | **Settings → Actions → General → Workflow permissions → Read and write** |
 | grün, aber kein Artifact | `bin/*.apk` fehlt | im Job-Log steht der tatsächliche Pfad; meist wurde der Build übersprungen |

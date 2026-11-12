@@ -20,7 +20,9 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # Zwei Architekturen, Python + Kivy + SDL2 ab Quellcode: der erste Lauf
+    # braucht realistisch 60-100 Minuten. GitHub kappt bei 360.
+    timeout-minutes: 210
     steps:
       - uses: actions/checkout@v4
 
@@ -39,8 +41,8 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-v3-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: buildozer-v3-${{ runner.os }}-
+          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-v4-${{ runner.os }}-
 
       - name: APK bauen
         timeout-minutes: 120
