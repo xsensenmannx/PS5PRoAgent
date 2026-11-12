@@ -23,7 +23,8 @@ say "Pflichtdateien pruefen"
 missing=0
 for f in main.py buildozer.spec icon.png \
          assets/icon_fg.png assets/icon_bg.png tools/selftest.py \
-         tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh; do
+         tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
+         tools/ci_log_failure.sh; do
     if [ ! -f "$f" ]; then
         echo "::error file=$f::Pflichtdatei fehlt: $f"
         missing=1
@@ -36,7 +37,7 @@ fi
 echo "alle vorhanden"
 
 # Vorab-Pruefung in Sekunden statt nach 40 Minuten Build: p4a baut ohne Pin
-# CPython 3.14.2, das mit Cython 0.29.36 (fest im p4a-Recipe) und Kivy 2.3.0
+# CPython 3.14.2, das mit Cython 0.29.36 (fest im p4a-Recipe) und Kivy 2.3
 # nicht kompiliert. Und p4a verlangt python3 == hostpython3.
 say "Python-Pin pruefen"
 # Wichtig: [[:space:],] vor python3, sonst trifft das Muster auch das
@@ -54,7 +55,7 @@ if [ "$PYPIN" != "$HOSTPIN" ]; then
 fi
 case "$PYPIN" in
     3.10.*|3.11.*|3.12.*) echo "Python $PYPIN (Cython-0.29-kompatibel)" ;;
-    *) echo "::error::Python $PYPIN ist zu neu fuer Cython 0.29.36 und Kivy 2.3.0 (nur 3.10-3.12)."
+    *) echo "::error::Python $PYPIN ist zu neu fuer Cython 0.29.36 und Kivy 2.3 (nur 3.10-3.12)."
        exit 1 ;;
 esac
 
@@ -72,7 +73,7 @@ fi
 if [ "${SKIP_VENV:-0}" != "1" ]; then
     say "Python 3.11.9 + Buildozer"
     # p4a master baut ohne Pin CPython 3.14.2, das sich mit Cython 0.29 und
-    # Kivy 2.3.0 nicht kompilieren laesst. buildozer.spec pinnt python3 und
+    # Kivy 2.3 nicht kompilieren laesst. buildozer.spec pinnt python3 und
     # hostpython3 deshalb auf 3.11.9; der Host im venv ist derselbe Stand,
     # damit koennen Ziel- und Host-Version nicht auseinanderlaufen.
     if ! command -v uv >/dev/null 2>&1; then
@@ -116,10 +117,7 @@ set -e
 
 if [ "$rc" -ne 0 ]; then
     echo "::error::buildozer ist mit Code $rc gescheitert - Details in buildozer.log"
-    echo "--- 40 Zeilen vor der letzten Fehlerstelle ---"
-    tac buildozer.log | grep -B 40 -m1 'Command failed' | tac | tail -60 || true
-    echo "--- letzte 20 Zeilen ---"
-    tail -20 buildozer.log
+    bash tools/ci_log_failure.sh buildozer.log
     # Bekannte Signatur: es wurde gegen ein zu neues CPython gebaut.
     if grep -qE 'include/python3\.(1[3-9])' buildozer.log; then
         echo "::error::Gebaut wurde gegen Python 3.1x. Der Pin aus buildozer.spec"
