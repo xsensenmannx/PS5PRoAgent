@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -311,6 +312,24 @@ def retry_tests():
             pass
         check("503 drei Versuche", len(calls), 3)
         check("503 kein Sleep nach letztem Versuch", len(sleeps), 2)
+
+        # STOP/Pause setzt das Event; danach darf kein neuer Versuch starten.
+        calls.clear(); sleeps.clear()
+        ev = threading.Event(); ev.set()
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 503", {}))[1]
+        try:
+            core.fetch_html_multi(["https://example.invalid"], cancel=ev)
+            abbruch = None
+        except core.ScanAbgebrochen:
+            abbruch = "abgebrochen"
+        check("Abbruch vor erstem Versuch", len(calls), 0)
+        check("Abbruch wird gemeldet", abbruch, "abgebrochen")
+        # Der Scan misst seine Dauer mit time.time(); dafuer wieder das echte
+        # time-Modul einsetzen (nur sleep war oben ersetzt).
+        core.time = echt_zeit
+        check("scan_einen respektiert Abbruch",
+              core.scan_einen({"name": "X", "land": "DE",
+                               "urls": ["https://example.invalid"]}, cancel=ev), None)
     finally:
         core._try_url = echt
         core.time = echt_zeit
@@ -357,6 +376,15 @@ def radar_tests():
     check("radar Pause behaelt Zwischenzeit", (z, acc, step), (False, 0.05, 0.0))
 
 
+def progress_tests():
+    """Die Kopfzeile bleibt kompakt, zeigt aber Fortschritt und Restzeit."""
+    check("progress start", main.scan_fortschritt(0, 42, 0, 0), "SCANNE 0/42")
+    check("progress mit Treffer und Restzeit",
+          main.scan_fortschritt(7, 42, 2, 14), "SCANNE 7/42 · 2 TREFFER · REST ~70S")
+    check("progress am Ende ohne Restzeit",
+          main.scan_fortschritt(42, 42, 2, 80), "SCANNE 42/42 · 2 TREFFER")
+
+
 def service_tests():
     """Hintergrund-Service: Intervall-Untergrenze und Treffer-Deduplizierung."""
     check("bg intervall 5m wird 15m", core.bg_intervall(300), 900)
@@ -378,7 +406,7 @@ def service_tests():
 
     # scan_alle nutzt dieselbe Klassifizierung wie die App.
     alt = core._safe_scan
-    def fake(h):
+    def fake(h, cancel=None):
         return {"haendler": h["name"], "preis": 800.0 if h["name"] == "A" else 950.0,
                 "klass": "hit", "url": h["urls"][0], "land": h["land"],
                 "dauer": 0.1, "zeit": "10:00", "fehler": None}
@@ -419,8 +447,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "2.0")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "8")
+    check("spec version", c.get("app", "version"), "3.0")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "9")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -588,7 +616,7 @@ def feature_tests():
             # End-to-End: scan_einen nutzt die Remote-Regel vor dem Fallback.
             alt_fetch = core.fetch_mit_cache
             try:
-                core.fetch_mit_cache = lambda urls: (html_rules, urls[0], None, {})
+                core.fetch_mit_cache = lambda urls, cancel=None: (html_rules, urls[0], None, {})
                 core.reset_http_cache()
                 hrr = {"name": "Amazon DE", "land": "DE",
                        "urls": ["https://www.amazon.de/dp/REMOTE-RULES"],
@@ -805,6 +833,7 @@ if __name__ == "__main__":
         main_tests()
         retry_tests()
         radar_tests()
+        progress_tests()
         service_tests()
         feature_tests()
         adaptive_boot_tests()

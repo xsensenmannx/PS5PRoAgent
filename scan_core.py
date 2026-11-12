@@ -622,6 +622,30 @@ def flush_http_cache():
     except Exception: return False
 
 
+class ScanAbgebrochen(Exception):
+    """Der Benutzer hat den Scan abgebrochen; Retries und Parser entfallen."""
+
+
+def _abgebrochen(cancel):
+    """True, wenn ein optionales threading.Event gesetzt wurde."""
+    try:
+        return bool(cancel is not None and cancel.is_set())
+    except Exception:
+        return False
+
+
+def _warte(sekunden, cancel):
+    """Unterbrechbare Retry-Pause; True bedeutet abgebrochen."""
+    if cancel is None:
+        time.sleep(sekunden)
+        return False
+    try:
+        return bool(cancel.wait(sekunden))
+    except Exception:
+        time.sleep(sekunden)
+        return _abgebrochen(cancel)
+
+
 def _try_url(u, att, proxy=None):
     """Eine Anfrage. Rueckgabe (html, fehler, meta).
 
@@ -682,15 +706,23 @@ def _try_url(u, att, proxy=None):
         return None,f"HTTP {e.code}",meta
     except Exception as e: return None,str(e)[:50],meta
 
-def fetch_mit_cache(urls):
-    """Wie fetch_html_multi, liefert zusaetzlich ein 304-Ergebnis aus dem Cache."""
+def fetch_mit_cache(urls, cancel=None):
+    """Wie fetch_html_multi, liefert zusaetzlich ein 304-Ergebnis aus dem Cache.
+
+    ``cancel`` ist ein optionales threading.Event. Es wird vor jedem Versuch
+    und vor jeder Retry-Pause geprueft; ein laufender HTTP-Request selbst kann
+    nicht unterbrochen werden, aber danach wird kein weiterer Versuch gestartet.
+    """
     last=None
     proxy=os.environ.get("PS5_PROXY","").strip() or None
     cache=http_cache()
     for att in range(3):
+        if _abgebrochen(cancel): raise ScanAbgebrochen
         dauerhaft=False
         for u in urls:
+            if _abgebrochen(cancel): raise ScanAbgebrochen
             h,e,meta=_try_url(u,att,proxy)
+            if _abgebrochen(cancel): raise ScanAbgebrochen
             if meta.get("not_modified"):
                 eintrag=cache.get(u)
                 if eintrag and isinstance(eintrag.get("result"),dict):
@@ -715,13 +747,14 @@ def fetch_mit_cache(urls):
             # auf den man warten koennte. Der alte Sleep kostete bei jedem
             # endgueltig fehlgeschlagenen Shop noch einmal bis zu ~6 s.
             if att<2:
-                time.sleep((0.4,2.0,5.0)[att]+random.uniform(0,1.0))
+                if _warte((0.4,2.0,5.0)[att]+random.uniform(0,1.0), cancel):
+                    raise ScanAbgebrochen
         if dauerhaft: break
     raise RuntimeError(last or "alle URLs fehlgeschlagen")
 
-def fetch_html_multi(urls):
+def fetch_html_multi(urls, cancel=None):
     """Kompatible Fassung fuer Aufrufer, die nur HTML und URL brauchen."""
-    h,u,_cached,_meta=fetch_mit_cache(urls)
+    h,u,_cached,_meta=fetch_mit_cache(urls, cancel=cancel)
     return h,u
 
 def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
@@ -732,10 +765,12 @@ def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
             "signal":signal or "unbekannt","condition":condition,"seller":seller,
             "verfuegbarkeit":verfuegbarkeit,"sofort":sofort}
 
-def scan_einen(h):
+def scan_einen(h, cancel=None):
     st=time.time()
     try:
-        html,fu,cached,meta=fetch_mit_cache(h["urls"]); d=time.time()-st
+        if _abgebrochen(cancel): raise ScanAbgebrochen
+        html,fu,cached,meta=fetch_mit_cache(h["urls"], cancel=cancel); d=time.time()-st
+        if _abgebrochen(cancel): raise ScanAbgebrochen
         if cached is not None:
             p=cached.get("preis"); v=bool(cached.get("verfuegbar"))
             res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,
@@ -762,6 +797,7 @@ def scan_einen(h):
         sofort=remote.get("sofort")
         if sofort is None: sofort=s.get("sofort")
         if sofort is None and v: sofort=ist_sofort_verfuegbar(html)
+        if _abgebrochen(cancel): raise ScanAbgebrochen
         res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,
                  signal=signal,condition=s.get("condition"),seller=s.get("seller"),
                  verfuegbarkeit=s.get("verfuegbarkeit"),sofort=sofort)
@@ -775,13 +811,16 @@ def scan_einen(h):
                              meta.get("etag"),meta.get("last_modified"),persist=False)
         except Exception: pass
         return res
+    except ScanAbgebrochen:
+        return None
     except Exception as e:
         return _res(h,None,"error",time.time()-st,str(e)[:60])
 
-def _safe_scan(h):
+def _safe_scan(h, cancel=None):
     st=time.time()
-    try: r=scan_einen(h)
+    try: r=scan_einen(h,cancel=cancel)
     except Exception as e: r=_res(h,None,"error",time.time()-st,str(e)[:60])
+    if r is None: return None
     try: health().record(r)
     except Exception: pass
     return r
@@ -804,15 +843,19 @@ def _data_dir():
 def data_dir():
     return _data_dir()
 
-def scan_alle(haendler, max_preis=None, fortschritt=None):
+def scan_alle(haendler, max_preis=None, fortschritt=None, cancel=None):
     """Alle Haendler parallel scannen - dieselbe Logik wie im Vordergrund."""
     mp = MAX_PREIS if max_preis is None else max_preis
     ergebnisse = []
     ex = ThreadPoolExecutor(max_workers=WORKER)
     try:
-        futs = {ex.submit(_safe_scan, h): h for h in haendler}
+        futs = {ex.submit(_safe_scan, h, cancel): h for h in haendler}
         for f in as_completed(futs):
+            if _abgebrochen(cancel):
+                for fut in futs: fut.cancel()
+                break
             r = f.result()
+            if r is None: continue
             if r.get("klass") not in ("error", "challenge", "unavail"):
                 r["klass"] = classify(True, r.get("preis"), mp)
             ergebnisse.append(r)

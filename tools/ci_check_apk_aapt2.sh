@@ -4,7 +4,7 @@
 # buildozer.spec, damit ein Release nicht versehentlich mit alten Werten
 # veroeffentlicht wird.
 #
-# Aufruf: bash tools/ci_check_apk_aapt2.sh bin/ps5prosearchagent-2.0-arm64-v8a-debug.apk
+# Aufruf: bash tools/ci_check_apk_aapt2.sh bin/ps5prosearchagent-3.0-arm64-v8a-debug.apk
 # Optional: SPEC=/pfad/buildozer.spec AAPT2=/pfad/zu/aapt2 ...
 set -euo pipefail
 

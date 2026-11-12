@@ -34,7 +34,7 @@ source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .ven
 source.exclude_patterns = ps5pro.zip, ps5pro_settings.json, ps5pro_history.json, *.ipynb, *.md, *.log
 
 # (str) Application versioning (method 1)
-version = 2.0
+version = 3.0
 
 # (str) Application versioning (method 2)
 # version.regex = __version__ = ['"](.*)['"]
@@ -341,7 +341,7 @@ android.archs = arm64-v8a
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # Google Play verlangt fuer JEDEN Upload einen hoeheren versionCode. Vor dem
 # naechsten Play-Upload hier +1 (die Anzeige-Version oben bleibt davon unabhaengig).
-android.numeric_version = 8
+android.numeric_version = 9
 
 # (str) The format used to package the app for release mode (aab or apk or aar).
 # Play nimmt nur AABs an; die Debug-APK fuer Sideloading bleibt wie gehabt.

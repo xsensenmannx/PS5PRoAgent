@@ -3,6 +3,15 @@
 Ziel: ein **signiertes App Bundle (.aab)** mit **targetSdk 36**, das Google Play
 annimmt. Die Debug-APK fuer Sideloading bleibt unabhaengig davon bestehen.
 
+## 0. Status des v3.0-Releases
+
+Der v3.0-Release enthaelt **nur die Debug-APK**.
+Der AAB-Job des Tag-Laufs nahm den Smoke-Test-Pfad (`real=false`), weil kein
+Release-Keystore hinterlegt ist. Die dabei gebaute AAB liegt nur als
+Workflow-Artefakt `ps5pro-aab-smoketest` vor und ist **nicht fuer Google Play
+gesignet**. Das Release-Asset `ps5prosearchagent-3.0-arm64-v8a-release.aab` fehlt
+daher noch.
+
 ## 1. Release-Keystore erzeugen (einmalig, auf deinem Rechner)
 
 Der Keystore ist der **Upload-Key**. Ohne ihn sind spaetere Updates nicht mehr
@@ -53,8 +62,17 @@ GitHub → **Settings → Secrets and variables → Actions → New repository s
 | `ANDROID_KEY_ALIAS` | Alias, z. B. `upload` |
 | `ANDROID_KEY_PASSWORD` | Key-Passwort (oft identisch mit dem Keystore-Passwort) |
 
-Optional, nur fuer automatisches Hochladen zu Play:
-| `PLAY_SERVICE_ACCOUNT_JSON` | Base64 des Service-Account-JSON aus der Google-Cloud-Console (Play Developer API) |
+**Signing-Status v3.0:** Bestaetigt fehlt `ANDROID_KEYSTORE_BASE64`; deshalb
+zeigt der Lauf `real=false` und erzeugt nur das Smoke-Test-Artefakt. Die drei
+weiteren Secrets `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` und
+`ANDROID_KEY_PASSWORD` werden ohne Base64 gar nicht ausgewertet; fuer Play
+muessen alle vier zusammen gesetzt sein. Ob einzelne davon bereits im Repository
+hinterlegt sind, laesst sich ohne Admin-Zugriff auf die Repository-Secrets nicht
+feststellen.
+
+`PLAY_SERVICE_ACCOUNT_JSON` ist **nicht** Teil dieses Workflows. Ein
+automatischer Upload zur Play Developer API ist nicht implementiert; das AAB
+wird nach dem Download manuell in der Play Console hochgeladen.
 
 Die vier `ANDROID_*`-Secrets werden vom Workflow zu
 `P4A_RELEASE_KEYSTORE`, `P4A_RELEASE_KEYSTORE_PASSWD`,
@@ -67,7 +85,7 @@ und **nicht** im Release – es ist ausdruecklich nicht fuer Play geeignet.
 
 ## 4. Was der Tag-Lauf baut
 
-Bei `git tag v2.0 && git push origin refs/tags/v2.0` laufen zwei Jobs (die
+Bei `git tag v3.0 && git push origin refs/tags/v3.0` laufen zwei Jobs (die
 vorherigen Releases bleiben unveraendert bestehen):
 
 1. **release** – Debug-APK wie bisher (Sideloading) → Release-Asset `*.apk`.
@@ -79,7 +97,7 @@ Beide Jobs pruefen das Ergebnis: die APK mit `aapt2` auf `versionCode`,
 Python-Version; das AAB auf `base/manifest/AndroidManifest.xml`,
 `BundleConfig.pb`, eine `META-INF/*.RSA`-Signatur und `libpython3.11.so`.
 
-Lokal (Linux/WSL) derselbe Weg:
+Lokal (Linux/WSL) derselbe Weg (die vier Variablen muessen gesetzt sein):
 ```bash
 export P4A_RELEASE_KEYSTORE=~/ps5pro-upload.jks
 export P4A_RELEASE_KEYSTORE_PASSWD='...'
@@ -88,11 +106,33 @@ export P4A_RELEASE_KEYALIAS_PASSWD='...'
 ARTIFACT=aab bash tools/ci_build.sh
 ```
 
+## 4.1 v3.0 nachtraeglich als AAB veroeffentlichen
+
+Der v3.0-Tag und das bestehende Release bleiben unveraendert; fuer denselben
+Stand wird **kein neuer Tag** angelegt. Nachdem die vier Secrets aus Abschnitt 3
+gesetzt wurden:
+
+1. **Actions → Release → Lauf fuer `v3.0` → Re-run all jobs** auswaehlen.
+   Dadurch wird derselbe Commit erneut gebaut; die Secrets werden neu geladen.
+2. Im AAB-Job muss `Signierschluessel bereitstellen` den Wert `real=true`
+   ausgeben. Danach laufen `AAB bauen`, `AAB als Artefakt (echter Schluessel)`
+   und `AAB ans Release haengen` erfolgreich.
+3. Unter **Releases → v3.0 → Assets** erscheint zusaetzlich
+   `ps5prosearchagent-3.0-arm64-v8a-release.aab` neben der bereits vorhandenen
+   Debug-APK.
+4. Die AAB herunterladen und in der Play Console unter **Interner Test**
+   hochladen; Play App Signing aktivieren (Abschnitt 6). Die AAB aus
+   `ps5pro-aab-smoketest` niemals dafuer verwenden.
+
+Ein erneuter Lauf mit denselben Secrets ersetzt die Assets des bestehenden
+Releases, statt ein zweites Release anzulegen. Der versionCode bleibt fuer v3.0
+bei **9**; erst ein neuer App-Stand bekommt 10.
+
 ## 5. versionCode
 
-`buildozer.spec` setzt fuer v2.0 `android.numeric_version = 8`. Google Play verlangt
+`buildozer.spec` setzt fuer v3.0 `android.numeric_version = 9`. Google Play verlangt
 fuer **jeden** Upload einen **hoeheren** versionCode – vor dem naechsten Upload
-erhoehen (9, 10, …). Die sichtbare Version (`version = 2.0`) ist davon unabhaengig;
+erhoehen (10, 11, …). Die sichtbare Version (`version = 3.0`) ist davon unabhaengig;
 bei einem echten Release beide anheben.
 
 ## 6. Play Console – einmalige Einrichtung
@@ -151,10 +191,10 @@ dafuer die Debug-APK aus demselben Release verwenden.
 
 ```bash
 # Signatur des AAB
-keytool -printcert -jarfile bin/ps5prosearchagent-2.0-arm64-v8a-release.aab | head
+keytool -printcert -jarfile bin/ps5prosearchagent-3.0-arm64-v8a-release.aab | head
 
 # targetSdk im gebauten Bundle (aapt2 aus den Android build-tools)
-aapt2 dump badging bin/ps5prosearchagent-2.0-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
+aapt2 dump badging bin/ps5prosearchagent-3.0-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
 ```
 
 Erwartet: `targetSdkVersion:'36'`, Paket `de.ps5pro.ps5prosearchagent`,

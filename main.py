@@ -491,6 +491,19 @@ class Toast(Label):
 RADAR_FPS_IDLE = 12.0   # Leerlauf: der Sweep dreht nur 30 Grad/s
 RADAR_FPS_SCAN = 30.0   # waehrend eines Scans
 
+def scan_fortschritt(done, total, treffer, sekunden):
+    """Kompakte Fortschrittszeile fuer die Kopfleiste (ohne UI-Abhaengigkeit)."""
+    if total <= 0:
+        return "SCANNE"
+    text = f"SCANNE {done}/{total}"
+    if treffer:
+        text += f" · {treffer} TREFFER"
+    if 0 < done < total and sekunden >= 2:
+        rest = max(1, int((sekunden / done) * (total - done)))
+        text += f" · REST ~{rest}S"
+    return text
+
+
 def radar_frame_step(acc, dt, scanning, paused):
     """Reine Entscheidung, ob dieser Tick gezeichnet wird (testbar ohne Kivy).
 
@@ -1215,7 +1228,7 @@ class MainUI(FloatLayout):
         self._known_hits=set(); self.queue=queue.Queue()
         self._bg_seen_ts=0.0; self._insets=(0.0,0.0,0.0,0.0)
         self._wide=False; self._results_mode_set=False
-        self._scan_token=0
+        self._scan_token=0; self._scan_cancel_event=None
         self.history=History(); self._scan_t0=0.0; self._scan_done=0
         self._scan_total=0; self._rerender_event=None; self._drain_event=None
         self._resize_event=None; self._placeholder=None; self._last_sig=None
@@ -1268,7 +1281,8 @@ class MainUI(FloatLayout):
         self.results_status=Label(text="BEREIT ZUM SCANNEN",
                                   color=PS1_SILVER,font_size=sp(9),
                                   bold=True,font_name=SST_FONT,
-                                  halign="left",valign="middle")
+                                  halign="left",valign="middle",
+                                  shorten=True,shorten_from="right")
         self.results_status.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         self.results_header.add_widget(self.results_status)
 
@@ -2054,6 +2068,7 @@ class MainUI(FloatLayout):
         # nur die auffaelligen Shops neu abfragen.
         if nur is None: self.scanned={}
         self._scan_token+=1; tok=self._scan_token
+        cancel=threading.Event(); self._scan_cancel_event=cancel
         self._drain_stale()
         if nur is None: self.radar.blips=[]
         self.radar.scanning=True
@@ -2063,8 +2078,8 @@ class MainUI(FloatLayout):
         self._scan_t0=time.time(); self._scan_done=0
         self._scan_total=len(aktive)
         self.results_count.text=f"0/{len(aktive)}"
-        self.results_status.text=f"SCANNE 0 / {len(aktive)}"
-        threading.Thread(target=self._scan_worker,args=(aktive,tok),daemon=True).start()
+        self.results_status.text=scan_fortschritt(0,len(aktive),0,0)
+        threading.Thread(target=self._scan_worker,args=(aktive,tok,cancel),daemon=True).start()
         if self._drain_event is not None: Clock.unschedule(self._drain_event)
         self._drain_event=Clock.schedule_interval(self._drain_queue,0.08)
     def _drain_stale(self):
@@ -2075,19 +2090,28 @@ class MainUI(FloatLayout):
     def _scan_cancel(self):
         if not self.scanning: return
         self._scan_token+=1
+        # Das Event erreicht die HTTP-Retry-Schleifen. Eine bereits laufende
+        # Anfrage kann nicht abgebrochen werden, aber danach wird kein Retry
+        # und kein weiterer Shop mehr gestartet.
+        try:
+            if self._scan_cancel_event is not None: self._scan_cancel_event.set()
+        except Exception: pass
         haptic(0.03); self._scan_end(abgebrochen=True)
-    def _scan_worker(self,hl,tok):
+    def _scan_worker(self,hl,tok,cancel=None):
         # cancel_futures + wait=False: STOP wirkt sofort. Ein "with"-Block
         # wartet beim Verlassen auf alle laufenden Anfragen (bis zu TIMEOUT
         # pro Haendler) - und ein direkt danach gestarteter Scan laeuft dann
         # mit doppelt so vielen gleichzeitigen Verbindungen.
         ex=ThreadPoolExecutor(max_workers=WORKER)
         try:
-            futs={ex.submit(_safe_scan,h):h for h in hl}
+            futs={ex.submit(_safe_scan,h,cancel):h for h in hl}
             for f in as_completed(futs):
-                if tok!=self._scan_token: break
+                if tok!=self._scan_token or (cancel is not None and cancel.is_set()):
+                    for fut in futs: fut.cancel()
+                    break
                 try: r=f.result()
                 except Exception as e: r=_res(futs[f],None,"error",0,str(e)[:60])
+                if r is None: continue
                 self.queue.put((tok,r))
         finally:
             # Der Cache puffert 304-Ergebnisse waehrend des Scans; hier wird
@@ -2118,8 +2142,8 @@ class MainUI(FloatLayout):
             self._update_blip(name,r["klass"])
             hits=sum(1 for x in self.scanned.values() if x["klass"]=="hit"
                      and not ist_gebraucht(x.get("condition")))
-            self.results_status.text=(f"SCANNE {self._scan_done}/{self._scan_total}"
-                                      + (f" · {hits} TREFFER" if hits else ""))
+            self.results_status.text=scan_fortschritt(
+                self._scan_done,self._scan_total,hits,time.time()-self._scan_t0)
             self.results_count.text=f"{hits}/{self._scan_done}" if self.filter_mode=="verfuegbar" else f"{self._scan_done}/{self._scan_total}"
             if r["klass"]=="hit" and r["preis"] is not None:
                 self._maybe_notify(r)

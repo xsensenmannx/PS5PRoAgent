@@ -23,7 +23,7 @@ eigenes.
 | `PLAY_STORE.md` | Keystore, GitHub-Secrets, AAB und Play-Console-Schritte |
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
-| `tools/selftest.py` | Logiktests ohne Kivy (531 Zusicherungen) |
+| `tools/selftest.py` | Logiktests ohne Kivy (537 Zusicherungen) |
 | `tools/kivy_smoke.py` | echte Kivy-Smoke-Tests für Alarm-Regeln, Shop-Health und Detailansicht |
 | `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
@@ -58,7 +58,7 @@ eigenes.
    **Beim ersten Lauf nach einem Toolchain-Wechsel auf `False` lassen.**
 6. Zelle 5: baut die APK. 10–40 Minuten, je nach Cache. Zeilen mit
    `[INFO]: Building ...` sind normal; am Ende steht `Exit-Code: 0` und ein Pfad
-   `bin/ps5prosearchagent-2.0-arm64-v8a-debug.apk`.
+   `bin/ps5prosearchagent-3.0-arm64-v8a-debug.apk`.
 7. Zelle 6: lädt die APK herunter.
 
 **Wenn Colab die Sitzung trennt** (Inaktivität, Verbindungsabbruch, 12-Stunden-Limit):
@@ -205,7 +205,7 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 
 | Einstellung | Wert | Grund |
 | --- | --- | --- |
-| `android.api` / `android.minapi` | 34 / 24 | Ab targetSdk 35 erzwingt Android Edge-to-Edge; Kivy 2.3 zeichnet dann unter Status- und Navigationsleiste, bei 36 ist der Opt-out entfernt. 34 hält Fullscreen intakt, läuft ab Android 7.0. |
+| `android.api` / `android.minapi` | 36 / 24 | Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates. Ab targetSdk 35 zeichnet Android Edge-to-Edge; die App liest die Insets per pyjnius und verschiebt Titel, ErgebnisPanel und Buttons. minapi 24 deckt Android 7.0+ ab. |
 | `android.ndk` / `android.ndk_api` | 28c / 24 | Aktuelle p4a-Empfehlung, inkl. 16-KB-Page-Support für Android 15+. |
 | `p4a.branch` | `master` | Dessen `python3`-Rezept ist 3.14.2; der Pin in `requirements` setzt 3.11.9 durch. |
 | `icon.filename` | `icon.png` | Legacy-Icon (Android 7 und Fallback). |
@@ -226,22 +226,26 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 
 1. Keystore erzeugen:
    ```bash
-   keytool -genkey -v -keystore ps5pro.keystore -alias ps5pro \
+   keytool -genkey -v -keystore ps5pro.keystore -alias upload \
        -keyalg RSA -keysize 2048 -validity 10000
    ```
-2. In der `buildozer.spec`: `android.release_artifact = aab` und
-   `android.api = 35` (Play verlangt mindestens 35). Damit greift Edge-to-Edge — die
+2. In der `buildozer.spec` ist `android.release_artifact = aab` bereits gesetzt;
+   `android.api = 36` ist die aktuelle Play-Vorgabe. Damit greift Edge-to-Edge — die
    Kopf- und Fußleiste brauchen dann zusätzlichen Abstand, sonst liegen sie unter
    Systemleisten.
 3. Signiert bauen:
    ```bash
    export P4A_RELEASE_KEYSTORE=$PWD/ps5pro.keystore
    export P4A_RELEASE_KEYSTORE_PASSWD=...
-   export P4A_RELEASE_KEYALIAS=ps5pro
+   export P4A_RELEASE_KEYALIAS=upload
    export P4A_RELEASE_KEYALIAS_PASSWD=...
    buildozer android release
    ```
 4. `bin/*.aab` im Play Console hochladen. Keystore und Passwörter niemals committen.
+
+Für den GitHub-Actions-Weg werden die vier Secrets aus [PLAY_STORE.md](PLAY_STORE.md)
+benötigt. Der v3.0-Stand kann nach dem Setzen der Secrets durch **Actions → Release
+→ v3.0 → Re-run all jobs** als AAB am bestehenden Release ergänzt werden.
 
 ---
 
@@ -264,7 +268,7 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 **Geprüft in dieser Umgebung** (Windows ohne Java/SDK, daher ohne echten Build):
 
 * `main.py` kompiliert fehlerfrei (CPython 3.12.10).
-* `tools/selftest.py`: 531 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
+* `tools/selftest.py`: 537 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
   (`1.299,00 €`, `799,99`, `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`,
   Zubehör-Ausschluss („DualSense Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung,
   Verfügbarkeits-Heuristik, Klassifizierung, Kürzel, 42 eindeutige Händler-URLs und der
@@ -280,7 +284,7 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 * Radar-Bildrate als reine Funktion `radar_frame_step()` abgesichert: 12 Bilder/s im
   Leerlauf, 30 beim Scan, Pause zeichnet nie, und die gezeichnete Bewegungszeit bleibt
   pro Sekunde exakt 1,0 s (der Sweep läuft dadurch bei beiden Bildraten gleich schnell).
-* `buildozer.spec` parst (API 34, NDK 28c, minapi 24, p4a master), Notebook-JSON valide.
+* `buildozer.spec` parst (API 36, NDK 28c, minapi 24, p4a master), Notebook-JSON valide.
 * Icon-Assets: 432×432, korrekte Modi, mit der echten Adaptive-Icon-Maske (72 von
   108 dp) auf Kreis und Squircle geprüft. Der vollflächig deckende Vordergrund ist
   gewollt: sein Rahmen liegt außerhalb der Maske, sichtbar bleibt das Radar.

@@ -43,7 +43,11 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Tablet- und Foldable-Layout**: Im Querformat ab 600 dp werden Treffer zu
   einer vertikalen Liste am rechten Rand, das Radar bleibt links. Dialoge sind
   in der Breite begrenzt; linke/rechte System-Insets werden berücksichtigt.
-* **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**.
+* **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**. STOP und
+  App-Pause setzen ein Abbruchsignal; laufende Requests laufen höchstens noch
+  bis zum Timeout, danach starten keine Retries oder weiteren Shops mehr.
+* **Fortschritt**: die Kopfzeile zeigt kompakt `SCANNE 7/42 · 2 TREFFER ·
+  REST ~70S`, ohne die Ergebnisliste zu verschieben.
 * **Ressourcen-schonend:** das Radar zeichnet im Leerlauf 12 statt 30 Bilder/s und
   pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert. Der
   Scan nutzt ETag/Last-Modified (304 spart den Download) und bricht Antworten über
@@ -110,7 +114,7 @@ python3 tools/kivy_smoke.py
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
 HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
-Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 531 Zusicherungen,
+Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 537 Zusicherungen,
 ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test ist ebenfalls
 ein eigenes CI-Gate und braucht kein Android-Gerät.
 
@@ -152,8 +156,11 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
-* **v2.0** – Finaler Abschluss-Release (versionCode 8); enthält den
-  vollständigen Stand aus v1.6. Die Entwicklung ist damit abgeschlossen.
+* **v3.0** – Finaler Feinschliff (versionCode 9): STOP und App-Pause brechen
+  laufende Retry-Schleifen kooperativ ab; die Kopfzeile zeigt Fortschritt und
+  eine geschätzte Restzeit. Enthält den vollständigen Stand aus v2.0.
+* **v2.0** – Vorheriger Abschluss-Release (versionCode 8); enthält den
+  vollständigen Stand aus v1.6.
 * **v1.6** – Effizienterer Scan: HTTP-Cache wird einmal pro Lauf statt pro
   Shop geschrieben, und der letzte fehlgeschlagene Versuch wartet nicht mehr
   unnötig (versionCode 7).
