@@ -25,6 +25,7 @@ Die eigentliche Arbeit steckt in drei Skripten, die mit dem Projekt hochgeladen 
 | `tools/ci_licenses.sh` | schreibt die akzeptierten SDK-Lizenzen in ein **fertig installiertes** SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb heruntergeladene SDK/NDK-Bäume, an denen buildozer sonst dauerhaft scheitert |
 | `tools/ci_check_apk.sh` | prüft die fertige APK: plausible Größe und die gepinnte Python-Version wirklich enthalten |
+| `tools/ci_log_failure.sh` | zieht die erste Fehlerzeile samt Kontext aus `buildozer.log` – genau die Zeilen, die bei einem roten Lauf in der Zusammenfassung erscheinen |
 
 Beide laufen auch lokal auf Linux/WSL: `bash tools/ci_build.sh`.
 
@@ -176,6 +177,8 @@ Häufige Fälle:
 | `UnicodeDecodeError` direkt beim Start von buildozer | Locale ist ASCII, die `buildozer.spec` enthält Umlaute | `ci_build.sh` setzt `LANG`/`PYTHONUTF8`; lokal zusätzlich `export LANG=C.UTF-8` |
 | Abbruch mitten im Kivy-Build, im Log `window_info.c` oder `_PyLong_AsByteArray` | p4a baut ohne Pin gegen CPython 3.14.2, und Cython 0.29 kann nur bis 3.12 | `buildozer.spec` pinnt `python3==3.11.9, hostpython3==3.11.9`; `tools/ci_fix_cache.sh` setzt den Pin auch im p4a-Checkout durch und verwirft alte python3-Builds. |
 | `Invalid workflow file` | YAML beim Einfügen zerstört | Datei löschen und über **Create new file** neu anlegen; die YAML ist inzwischen nur ~80 Zeilen |
+| `Node.js 20 is deprecated … actions/checkout@v4` | Action-Version zu alt | Im Projekt laufen `checkout@v5`, `setup-java@v6`, `cache@v5`, `upload-artifact@v6` und `action-gh-release@v3` (alle Node 24). Eine alte Kopie im Repo durch den Stand aus dem Projektordner ersetzen. |
+| `ubuntu-latest label will migrate to Ubuntu 26` | Hinweis, kein Fehler | Alle drei Workflows pinnen `runs-on: ubuntu-24.04`; damit bleibt die Toolchain reproduzierbar. |
 | Actions-Minuten leer / Lauf startet nicht | privates Repo | Repo auf **Public** stellen |
 | `Resource not accessible by integration` | Workflow-Rechte | **Settings → Actions → General → Workflow permissions → Read and write** |
 | grün, aber kein Artifact | `bin/*.apk` fehlt | im Job-Log steht der tatsächliche Pfad; meist wurde der Build übersprungen |
