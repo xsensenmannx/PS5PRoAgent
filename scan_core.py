@@ -5,7 +5,8 @@ Der Service laeuft in einem eigenen Prozess ohne UI - dort darf kein Kivy
 importiert werden, deshalb liegt diese Logik hier getrennt.
 """
 import os, sys, json, re, time, random, threading, traceback
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -50,6 +51,10 @@ PRICE_OPTIONS = [700.0, 800.0, 900.0, None]
 SORT_OPTIONS = ["Preis","Händler","Zeit"]
 AUTO_INTERVALS = [(300,"5m"),(600,"10m"),(900,"15m"),(1800,"30m"),(3600,"60m")]
 TIMEOUT, WORKER = 20, 6
+# Ein Shop darf den Scan nicht mit einem sehr langen Retry-After blockieren.
+# Bis zu diesem Wert wird der Server-Wunsch respektiert, danach wird der Shop
+# als Rate-Limit gewertet und der naechste Shop gescannt.
+RETRY_AFTER_MAX = 15
 HISTORY_FILE, SETTINGS_FILE = "ps5pro_history.json", "ps5pro_settings.json"
 HTTP_CACHE_FILE = "ps5pro_http_cache.json"
 # Obergrenze fuer eine HTML-Antwort. Manche Shops liefern riesige Kategorieseiten;
@@ -646,6 +651,31 @@ def _warte(sekunden, cancel):
         return _abgebrochen(cancel)
 
 
+def _retry_after(wert, jetzt=None):
+    """Sekunden aus Retry-After (Zahl oder HTTP-Datum), sonst 8."""
+    try:
+        return max(0, int(float(str(wert).strip())))
+    except (TypeError, ValueError):
+        pass
+    try:
+        dt = parsedate_to_datetime(str(wert))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        jetzt = jetzt or datetime.now(timezone.utc)
+        if jetzt.tzinfo is None:
+            jetzt = jetzt.replace(tzinfo=timezone.utc)
+        return max(0, int((dt - jetzt).total_seconds()))
+    except (TypeError, ValueError, OverflowError):
+        return 8
+
+
+def fehler_klasse(fehler):
+    """Netzfehler, die eine Sperre sind, werden wie Bot-Schutz angezeigt."""
+    text = str(fehler or "")
+    return ("challenge" if text.startswith(("Rate-Limit", "Bot-Schutz", "Bot-Challenge"))
+            else "error")
+
+
 def _try_url(u, att, proxy=None):
     """Eine Anfrage. Rueckgabe (html, fehler, meta).
 
@@ -676,11 +706,10 @@ def _try_url(u, att, proxy=None):
             if r.status_code==304:
                 meta["not_modified"]=True; r.close(); return None,"HTTP 304",meta
             if r.status_code==429:
-                # Retry-After respektieren, aber gedeckelt - ein Shop mit
-                # "3600" soll den Scan nicht eine Stunde blockieren.
-                try: ra=int(r.headers.get("Retry-After","8"))
-                except (TypeError,ValueError): ra=8
-                r.close(); time.sleep(min(max(ra,1),15)); return None,"HTTP 429",meta
+                # Nicht hier schlafen: fetch_mit_cache wartet unterbrechbar
+                # und entscheidet, ob ein einziger Retry noch sinnvoll ist.
+                meta["retry_after"]=_retry_after(r.headers.get("Retry-After"))
+                r.close(); return None,"HTTP 429",meta
             if r.status_code>=400:
                 r.close(); return None,f"HTTP {r.status_code}",meta
             roh,zu_gross=_read_capped(r)
@@ -703,6 +732,8 @@ def _try_url(u, att, proxy=None):
             meta["etag"]=e.headers.get("ETag") if e.headers else None
             meta["last_modified"]=e.headers.get("Last-Modified") if e.headers else None
             return None,"HTTP 304",meta
+        if e.code==429:
+            meta["retry_after"]=_retry_after(e.headers.get("Retry-After") if e.headers else None)
         return None,f"HTTP {e.code}",meta
     except Exception as e: return None,str(e)[:50],meta
 
@@ -719,6 +750,7 @@ def fetch_mit_cache(urls, cancel=None):
     for att in range(3):
         if _abgebrochen(cancel): raise ScanAbgebrochen
         dauerhaft=False
+        rate_limited=False
         for u in urls:
             if _abgebrochen(cancel): raise ScanAbgebrochen
             h,e,meta=_try_url(u,att,proxy)
@@ -732,13 +764,31 @@ def fetch_mit_cache(urls, cancel=None):
                 cache.drop(u); last="HTTP 304"; continue
             if h:
                 # Nur den Kopf pruefen - h.lower() auf einer 5-MB-Seite kostet
-                # unnoetig Zeit und Speicher.
-                if detect_challenge(h[:3000].lower()): last="Bot-Challenge"; continue
+                # unnoetig Zeit und Speicher. Eine Challenge-Seite ist keine
+                # temporaere Netzstoerung: kein zweiter Versuch mit anderem UA.
+                if detect_challenge(h[:3000].lower()):
+                    last="Bot-Challenge"; dauerhaft=True; break
                 return h,u,None,meta
             last=e
+            # 429: genau eine Chance, und nur wenn der Server nicht mehr als
+            # RETRY_AFTER_MAX verlangt. Die Pause ist ueber STOP abrechbar.
+            if e == "HTTP 429":
+                last = "Rate-Limit (HTTP 429)"
+                try: ra = int(meta.get("retry_after", 8))
+                except (TypeError, ValueError): ra = 8
+                if att == 0 and ra <= RETRY_AFTER_MAX:
+                    if _warte(max(1, ra), cancel): raise ScanAbgebrochen
+                    rate_limited=True; break
+                dauerhaft=True; break
+            # 403/401/451 sind keine temporaeren Aussetzer. Weitere Versuche
+            # mit anderem User-Agent oder Cache-Buster waeren nur Last und
+            # wuerden eine Bot-Sperre nicht legitim aufheben.
+            if e in ("HTTP 403", "HTTP 401", "HTTP 451"):
+                last = "Bot-Schutz (HTTP 403)" if e == "HTTP 403" else e
+                dauerhaft=True; break
             # 404/410 bleiben bei jedem User-Agent bestehen. Drei Versuche kosten
             # hier nur ~7 s Wartezeit pro umgezogenem Haendler, ohne Chance auf
-            # Erfolg; alles andere (Timeout, 403, 429, 5xx) wird weiter probiert.
+            # Erfolg; Timeouts/5xx werden dagegen weiter probiert.
             if e in ("HTTP 404","HTTP 410","Antwort zu gross"):
                 if len(urls)==1:
                     dauerhaft=True; break
@@ -750,6 +800,7 @@ def fetch_mit_cache(urls, cancel=None):
                 if _warte((0.4,2.0,5.0)[att]+random.uniform(0,1.0), cancel):
                     raise ScanAbgebrochen
         if dauerhaft: break
+        if rate_limited: continue
     raise RuntimeError(last or "alle URLs fehlgeschlagen")
 
 def fetch_html_multi(urls, cancel=None):
@@ -814,7 +865,8 @@ def scan_einen(h, cancel=None):
     except ScanAbgebrochen:
         return None
     except Exception as e:
-        return _res(h,None,"error",time.time()-st,str(e)[:60])
+        err=str(e)[:60]
+        return _res(h,None,fehler_klasse(err),time.time()-st,err)
 
 def _safe_scan(h, cancel=None):
     st=time.time()

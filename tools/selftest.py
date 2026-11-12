@@ -266,9 +266,9 @@ def main_tests():
 def retry_tests():
     """Dauerhafte Fehler duerfen keine Wartezeit kosten, temporaere schon.
 
-    404/410 bringen bei jedem User-Agent dasselbe Ergebnis: drei Versuche mit
-    0,4 s + 2 s + 5 s Pause werfen pro umgezogenem Haendler rund 7 s Scan-Zeit
-    weg. 5xx/Timeout muessen dagegen weiter probiert werden.
+    404/410 und 403 sind dauerhaft; dafuer darf kein Retry bezahlt werden.
+    Bei 429 wird Retry-After respektiert, aber hoechstens einmal wiederholt.
+    5xx/Timeout muessen dagegen weiter probiert werden.
     """
     echt = core._try_url
     echt_zeit = core.time
@@ -298,9 +298,53 @@ def retry_tests():
         core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 403", {}))[1]
         try:
             core.fetch_html_multi(["https://example.invalid"])
+        except RuntimeError as e:
+            fehler403 = str(e)
+        check("403 nur ein Versuch", len(calls), 1)
+        check("403 als Bot-Schutz gemeldet", fehler403, "Bot-Schutz (HTTP 403)")
+
+        # Eine HTML-Challenge darf ebenfalls nicht mit neuen UAs wiederholt werden.
+        calls.clear()
+        core._try_url = lambda u, a, p=None: (
+            calls.append(a), ("<html>Just a moment...</html>", None, {}))[1]
+        try:
+            core.fetch_html_multi(["https://example.invalid"])
+        except RuntimeError as e:
+            fehler_challenge = str(e)
+        check("challenge nur ein Versuch", len(calls), 1)
+        check("challenge Fehlertext", fehler_challenge, "Bot-Challenge")
+
+        # 429: der Server bestimmt die Pause; danach genau ein Retry.
+        calls.clear(); sleeps.clear()
+        core._try_url = lambda u, a, p=None: (
+            calls.append(a), (None, "HTTP 429", {"retry_after": 2}))[1]
+        try:
+            core.fetch_html_multi(["https://example.invalid"])
+        except RuntimeError as e:
+            fehler429 = str(e)
+        check("429 Fehlertext", fehler429, "Rate-Limit (HTTP 429)")
+        check("429 genau zwei Versuche", len(calls), 2)
+        check("429 wartet Retry-After", sleeps, [2])
+
+        # Ein sehr langes Retry-After blockiert den Scan nicht.
+        calls.clear(); sleeps.clear()
+        core._try_url = lambda u, a, p=None: (
+            calls.append(a), (None, "HTTP 429", {"retry_after": 3600}))[1]
+        try:
+            core.fetch_html_multi(["https://example.invalid"])
         except RuntimeError:
             pass
-        check("403 dreimal probiert", len(calls), 3)
+        check("langes Retry-After nur ein Versuch", len(calls), 1)
+        check("langes Retry-After keine Wartezeit", sleeps, [])
+
+        check("retry-after sekunden", core._retry_after("12"), 12)
+        check("retry-after datum", core._retry_after(
+            "Thu, 12 Nov 2026 12:00:10 GMT",
+            core.datetime(2026, 11, 12, 12, 0, 0, tzinfo=core.timezone.utc)), 10)
+        check("retry-after fallback", core._retry_after("spaeter"), 8)
+        check("rate-limit klasse", core.fehler_klasse("Rate-Limit (HTTP 429)"), "challenge")
+        check("challenge klasse", core.fehler_klasse("Bot-Challenge"), "challenge")
+        check("timeout klasse", core.fehler_klasse("timed out"), "error")
 
         # Nach dem letzten Versuch gibt es keinen Retry mehr. Ein Sleep dort
         # kostete pro endgueltig fehlgeschlagenem Shop noch bis zu ~6 Sekunden.
@@ -447,8 +491,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "3.0")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "9")
+    check("spec version", c.get("app", "version"), "3.1")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "10")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.

@@ -3,7 +3,7 @@
 # Ein unsigniertes AAB laedt Google Play nicht hoch - deshalb ist die Signatur
 # hier ein harter Fehler und keine Warnung.
 #
-# Aufruf: bash tools/ci_check_aab.sh bin/ps5prosearchagent-3.0-arm64-v8a-release.aab 3.11.9
+# Aufruf: bash tools/ci_check_aab.sh bin/ps5prosearchagent-3.1-arm64-v8a-release.aab 3.11.9
 set -euo pipefail
 
 AAB="${1:-}"

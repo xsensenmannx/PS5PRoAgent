@@ -15,6 +15,9 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
   was nicht die 2-TB-Konsole ist.
 * **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen),
   sonst „ZU TEUER"; Bot-Schutz und Fehler werden getrennt ausgewiesen.
+* **Fairer Bot-Schutz:** 403/CAPTCHA wird erkannt und nicht wiederholt; 429
+  respektiert `Retry-After` und wird höchstens einmal erneut versucht. Kein
+  Captcha-Solver, keine Proxy-Rotation, kein JavaScript-Challenge-Bypass.
 * **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`),
   Sparkline und 30-Tage-Tief auf jeder Trefferkarte.
 * **Trefferqualität**: erkennt Zustand (neu/gebraucht), Verkäufer, Vorbestellung
@@ -114,7 +117,7 @@ python3 tools/kivy_smoke.py
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
 HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
-Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 537 Zusicherungen,
+Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 551 Zusicherungen,
 ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test ist ebenfalls
 ein eigenes CI-Gate und braucht kein Android-Gerät.
 
@@ -156,6 +159,9 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v3.1** – Fairer Scan (versionCode 10): 429 wartet gemäß `Retry-After` und
+  wird höchstens einmal wiederholt; 403/CAPTCHA wird ohne weitere Versuche als
+  Bot-Schutz gemeldet. Enthält den vollständigen Stand aus v3.0.
 * **v3.0** – Finaler Feinschliff (versionCode 9): STOP und App-Pause brechen
   laufende Retry-Schleifen kooperativ ab; die Kopfzeile zeigt Fortschritt und
   eine geschätzte Restzeit. Enthält den vollständigen Stand aus v2.0.

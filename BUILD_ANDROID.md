@@ -23,7 +23,7 @@ eigenes.
 | `PLAY_STORE.md` | Keystore, GitHub-Secrets, AAB und Play-Console-Schritte |
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
-| `tools/selftest.py` | Logiktests ohne Kivy (537 Zusicherungen) |
+| `tools/selftest.py` | Logiktests ohne Kivy (551 Zusicherungen) |
 | `tools/kivy_smoke.py` | echte Kivy-Smoke-Tests für Alarm-Regeln, Shop-Health und Detailansicht |
 | `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
@@ -58,7 +58,7 @@ eigenes.
    **Beim ersten Lauf nach einem Toolchain-Wechsel auf `False` lassen.**
 6. Zelle 5: baut die APK. 10–40 Minuten, je nach Cache. Zeilen mit
    `[INFO]: Building ...` sind normal; am Ende steht `Exit-Code: 0` und ein Pfad
-   `bin/ps5prosearchagent-3.0-arm64-v8a-debug.apk`.
+   `bin/ps5prosearchagent-3.1-arm64-v8a-debug.apk`.
 7. Zelle 6: lädt die APK herunter.
 
 **Wenn Colab die Sitzung trennt** (Inaktivität, Verbindungsabbruch, 12-Stunden-Limit):
@@ -244,8 +244,8 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 4. `bin/*.aab` im Play Console hochladen. Keystore und Passwörter niemals committen.
 
 Für den GitHub-Actions-Weg werden die vier Secrets aus [PLAY_STORE.md](PLAY_STORE.md)
-benötigt. Der v3.0-Stand kann nach dem Setzen der Secrets durch **Actions → Release
-→ v3.0 → Re-run all jobs** als AAB am bestehenden Release ergänzt werden.
+benötigt. Der v3.1-Stand kann nach dem Setzen der Secrets durch **Actions → Release
+→ v3.1 → Re-run all jobs** als AAB am bestehenden Release ergänzt werden.
 
 ---
 
@@ -253,9 +253,11 @@ benötigt. Der v3.0-Stand kann nach dem Setzen der Secrets durch **Actions → R
 
 * **URL-Rot:** Shops ändern Produktpfade. Ein Händler, der dauerhaft „nicht PS5 Pro 2 TB"
   meldet, hat meist eine neue URL — in `HAENDLER` in `main.py` anpassen.
-* **Bot-Schutz:** Die App nutzt normale Browser-Header und Retries. Härtere Sperren
-  (Cloudflare „Just a moment") lassen sich ohne Browser-Engine nicht umgehen; solche
-  Shops bleiben gelb. Das ist bewusst so, statt an Captchas vorbeizuarbeiten.
+* **Bot-Schutz:** Die App nutzt normale Browser-Header, aber keinen Captcha-Solver,
+  keine Proxy-Rotation und keinen JavaScript-Challenge-Bypass. 403 wird nach einem
+  Versuch als Bot-Schutz gemeldet, 429 respektiert `Retry-After` und wird höchstens
+  einmal wiederholt. Härtere Sperren (Cloudflare „Just a moment") bleiben gelb;
+  das ist bewusst so.
 * **Nach Änderungen an `main.py`:** Keystore/API unverändert lassen, dann
   `buildozer android debug` — es wird nur der Python-Teil neu gepackt (schnell).
 * **Tests vor jedem Build:** `python3 tools/selftest.py` und
@@ -268,7 +270,7 @@ benötigt. Der v3.0-Stand kann nach dem Setzen der Secrets durch **Actions → R
 **Geprüft in dieser Umgebung** (Windows ohne Java/SDK, daher ohne echten Build):
 
 * `main.py` kompiliert fehlerfrei (CPython 3.12.10).
-* `tools/selftest.py`: 537 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
+* `tools/selftest.py`: 551 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
   (`1.299,00 €`, `799,99`, `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`,
   Zubehör-Ausschluss („DualSense Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung,
   Verfügbarkeits-Heuristik, Klassifizierung, Kürzel, 42 eindeutige Händler-URLs und der
