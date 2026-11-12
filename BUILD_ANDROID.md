@@ -20,12 +20,14 @@ eigenes.
 | `buildozer.spec` | Build-Konfiguration (API, NDK, Icon, Rechte) |
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
-| `tools/selftest.py` | Logiktests ohne Kivy (35 Zusicherungen) |
+| `tools/selftest.py` | Logiktests ohne Kivy (46 Zusicherungen) |
 | `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb geladene SDK/NDK-Bäume (sonst überspringt buildozer die Installation) |
+| `tools/ci_check_apk.sh` | prüft die fertige APK (Größe, enthält `libpython3.11.so`) |
 | `PS5Pro_APK_Colab.ipynb` | Build-Notebook für Colab |
 | `.github/workflows/build-apk.yml` | CI-Build mit Artifact |
+| `.github/workflows/diagnose.yml` | manueller Diagnose-Lauf (SDK/NDK, venv, letzter Fehler) |
 | `ps5pro.zip` | Upload-Paket für Colab (main.py, spec, icons, `assets/`) |
 | `GITHUB_ANLEITUNG.md` | Build über GitHub Actions, Schritt für Schritt |
 | `.gitignore` | hält `.buildozer/`, `bin/` und Caches aus dem Repo |
@@ -48,7 +50,7 @@ eigenes.
    **Beim ersten Lauf nach einem Toolchain-Wechsel auf `False` lassen.**
 6. Zelle 5: baut die APK. 10–40 Minuten, je nach Cache. Zeilen mit
    `[INFO]: Building ...` sind normal; am Ende steht `Exit-Code: 0` und ein Pfad
-   `bin/ps5prosearchagent-1.0-arm64-v8a_armeabi-v7a-debug.apk`.
+   `bin/ps5prosearchagent-1.0-arm64-v8a-debug.apk`.
 7. Zelle 6: lädt die APK herunter.
 
 **Wenn Colab die Sitzung trennt** (Inaktivität, Verbindungsabbruch, 12-Stunden-Limit):
@@ -171,6 +173,7 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | `No module named 'distutils'` / `pkg_resources` | zu neues Host-Python | venv mit 3.11.9 anlegen (`uv venv --python 3.11.9`), `setuptools` installieren. |
 | `python3 should have same version as hostpython3` | Host-Python ≠ Ziel-Python | venv mit der Rezeptversion anlegen: `uv venv --python 3.11.9` (Zelle 2 / `tools/ci_build.sh`). |
 | Fehler in `Cython.Compiler…` | Cython 3 statt 0.29 | `cython==0.29.37` installieren, `.buildozer` löschen. |
+| Abbruch mitten im Kivy-Build, im Log `window_info.c` und `_PyLong_AsByteArray` | p4a baut ohne Pin CPython 3.14.2; Cython 0.29 kann nur bis 3.12 | `requirements` in `buildozer.spec` pinnt `python3==3.11.9, hostpython3==3.11.9`; `tools/ci_fix_cache.sh` setzt das auch im p4a-Checkout durch und verwirft alte python3-Builds. |
 | `Can not perform a '--user' install` | Buildozer erkennt das venv nicht und ruft `pip install --user` auf | `VIRTUAL_ENV` setzen oder das venv aktivieren — Zelle 5 im Notebook und der Actions-Workflow tun das bereits. |
 | `No module named pip` | venv ohne pip (z. B. frisches `uv venv`) | `uv pip install --python <venv>/bin/python pip` (Zelle 2 erledigt das). |
 | `Aidl not found` | fehlendes Build-Tool | `sudo apt install aidl` (oder `android-sdk-build-tools`). |
@@ -194,7 +197,7 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | --- | --- | --- |
 | `android.api` / `android.minapi` | 34 / 24 | Ab targetSdk 35 erzwingt Android Edge-to-Edge; Kivy 2.3 zeichnet dann unter Status- und Navigationsleiste, bei 36 ist der Opt-out entfernt. 34 hält Fullscreen intakt, läuft ab Android 7.0. |
 | `android.ndk` / `android.ndk_api` | 28c / 24 | Aktuelle p4a-Empfehlung, inkl. 16-KB-Page-Support für Android 15+. |
-| `p4a.branch` | `master` | Dessen `python3`-Rezept ist 3.11.9 — der venv-Host muss dieselbe Version haben. |
+| `p4a.branch` | `master` | Dessen `python3`-Rezept ist 3.14.2; der Pin in `requirements` setzt 3.11.9 durch. |
 | `icon.filename` | `icon.png` | Legacy-Icon (Android 7 und Fallback). |
 | `icon.adaptive_*` | `assets/icon_fg.png`, `assets/icon_bg.png` | Android 8+ maskiert das Icon (Kreis/Squircle); ohne Adaptive-Variante wird das Logo verkleinert in eine weiße Fläche gesetzt. |
 | `fullscreen` | `1` | Konsolen-Look, keine Titelleiste. |
@@ -203,7 +206,7 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | `android.accept_sdk_license` | `True` | Keine interaktive Lizenzabfrage in Colab/CI. |
 | `android.archs` | `arm64-v8a` | Alle aktuellen Geräte sind 64-Bit; der 32-Bit-Pfad verdoppelte die Bauzeit und war die häufigste Fehlerquelle. Für alte Geräte `, armeabi-v7a` ergänzen. |
 | `android.permissions` | INTERNET, VIBRATE, POST_NOTIFICATIONS | Scan, haptisches Feedback, Alarm. |
-| `source.exclude_*` | `.buildozer, bin, _verify, .github`; `*.zip, *.ipynb, *.md, *.log` | Doku und Upload-Paket landen nicht in der APK. |
+| `source.exclude_*` | `.buildozer, bin, __pycache__, _verify, .github, .git, .venv, fonts, tools`; `*.zip, *.ipynb, *.md, *.log` | Doku, Git-Historie, Build-Werkzeuge und Upload-Paket landen nicht in der APK. |
 
 ---
 
@@ -249,11 +252,13 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 
 **Geprüft in dieser Umgebung** (Windows ohne Java/SDK, daher ohne echten Build):
 
-* `main.py` kompiliert fehlerfrei (CPython 3.12).
-* `tools/selftest.py`: 35 Zusicherungen grün — Preis-Parsing (`1.299,00 €`, `799,99`,
-  `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`, Zubehör-Ausschluss („DualSense
-  Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung, Verfügbarkeits-Heuristik,
-  Klassifizierung, Kürzel, 42 eindeutige Händler-URLs.
+* `main.py` kompiliert fehlerfrei (CPython 3.12.8).
+* `tools/selftest.py`: 46 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
+  (`1.299,00 €`, `799,99`, `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`,
+  Zubehör-Ausschluss („DualSense Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung,
+  Verfügbarkeits-Heuristik, Klassifizierung, Kürzel, 42 eindeutige Händler-URLs und der
+  Python-Pin in der `buildozer.spec`.
+* Alle Shell-Skripte (`bash -n`) und beide Workflow-YAMLs sind syntaktisch gültig.
 * `buildozer.spec` parst (API 34, NDK 28c, minapi 24, p4a master), Notebook-JSON valide.
 * Icon-Assets: 432×432, korrekte Modi, in Kreis-Maske visuell geprüft.
 

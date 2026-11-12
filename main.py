@@ -54,7 +54,8 @@ def _session():
     return s
 
 FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
-os.makedirs(FONT_DIR, exist_ok=True)
+try: os.makedirs(FONT_DIR, exist_ok=True)
+except OSError: pass   # schreibgeschuetztes Installationsverzeichnis: Roboto bleibt
 SST_FONT = "Roboto"
 for _fn in ("SST.ttf","Inter-Bold.ttf","Inter-Regular.ttf"):
     _fp = os.path.join(FONT_DIR,_fn)
@@ -142,6 +143,7 @@ BRAND_COLORS = {
 
 MAX_PREIS, MIN_PREIS, MSRP_ZIEL = 900.0, 550.0, 799.99
 PRICE_OPTIONS = [700.0, 800.0, 900.0, None]
+SORT_OPTIONS = ["Preis","Händler","Zeit"]
 AUTO_INTERVALS = [(300,"5m"),(600,"10m"),(900,"15m"),(1800,"30m"),(3600,"60m")]
 TIMEOUT, WORKER = 20, 6
 HISTORY_FILE, SETTINGS_FILE = "ps5pro_history.json", "ps5pro_settings.json"
@@ -266,6 +268,10 @@ def notify(t,m):
                     b.setChannelId("ps5pro_hits")
             except Exception: pass
             nm=a.getSystemService(C.NOTIFICATION_SERVICE)
+            # Ab Android 13 kann das Recht fehlen; notify() wirft dann nicht,
+            # sondern die Meldung verschwindet. Der Aufrufer zeigt stattdessen
+            # einen Toast, wenn hier False zurueckkommt.
+            if not nm.areNotificationsEnabled(): return False
             nm.notify(int(time.time())%100000,b.build()); return True
         except Exception: pass
     try:
@@ -454,7 +460,8 @@ class History:
     def __init__(self):
         self.path=os.path.join(_data_dir(),HISTORY_FILE)
         try:
-            with open(self.path,"r",encoding="utf-8") as f: self.data=json.load(f)
+            with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
+            self.data=data if isinstance(data,dict) else {}
         except Exception: self.data={}
     def get_last(self,n): return self.data.get(n,{}).get("preis")
     def update(self,results):
@@ -473,7 +480,8 @@ class Settings:
     def __init__(self):
         self.path=os.path.join(_data_dir(),SETTINGS_FILE)
         try:
-            with open(self.path,"r",encoding="utf-8") as f: self.data=json.load(f)
+            with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
+            self.data=data if isinstance(data,dict) else {}
         except Exception: self.data={}
     def get(self,k,d=None): return self.data.get(k,d)
     def set(self,k,v): self.data[k]=v; self.save()
@@ -1175,7 +1183,9 @@ class MainUI(FloatLayout):
         else:
             self.active_haendler={h["name"] for h in HAENDLER}
         self.filter_mode=self.settings.get("filter","verfuegbar")
+        if self.filter_mode not in ("verfuegbar","alle"): self.filter_mode="verfuegbar"
         self.sort_mode=self.settings.get("sort","Preis")
+        if self.sort_mode not in SORT_OPTIONS: self.sort_mode="Preis"
         mp=self.settings.get("max_preis",MAX_PREIS)
         self.max_preis=mp if mp in PRICE_OPTIONS else MAX_PREIS
         self.auto_scan=bool(self.settings.get("auto_scan",False))
@@ -1394,8 +1404,9 @@ class MainUI(FloatLayout):
         self.chip_all.state=("down" if m=="alle" else "normal")
         self.settings.set("filter",m); self._rerender()
     def _cycle_sort(self):
-        o=["Preis","Händler","Zeit"]
-        self.sort_mode=o[(o.index(self.sort_mode)+1)%3]
+        try: i=SORT_OPTIONS.index(self.sort_mode)
+        except ValueError: i=-1
+        self.sort_mode=SORT_OPTIONS[(i+1)%len(SORT_OPTIONS)]
         self.sort_chip.text=self._sort_text()
         self.settings.set("sort",self.sort_mode); self._rerender()
     def _cycle_max_preis(self):
@@ -1598,13 +1609,20 @@ class MainUI(FloatLayout):
         self._scan_token+=1
         haptic(0.03); self._scan_end(abgebrochen=True)
     def _scan_worker(self,hl,tok):
-        with ThreadPoolExecutor(max_workers=WORKER) as ex:
+        # cancel_futures + wait=False: STOP wirkt sofort. Ein "with"-Block
+        # wartet beim Verlassen auf alle laufenden Anfragen (bis zu TIMEOUT
+        # pro Haendler) - und ein direkt danach gestarteter Scan laeuft dann
+        # mit doppelt so vielen gleichzeitigen Verbindungen.
+        ex=ThreadPoolExecutor(max_workers=WORKER)
+        try:
             futs={ex.submit(_safe_scan,h):h for h in hl}
             for f in as_completed(futs):
-                if tok!=self._scan_token: return
+                if tok!=self._scan_token: break
                 try: r=f.result()
                 except Exception as e: r=_res(futs[f],None,"error",0,str(e)[:60])
                 self.queue.put((tok,r))
+        finally:
+            ex.shutdown(wait=False,cancel_futures=True)
     def _drain_queue(self,dt):
         while True:
             try: tok,r=self.queue.get_nowait()

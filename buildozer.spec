@@ -27,7 +27,7 @@ source.include_exts = py,png,jpg,kv,atlas,json,ttf
 #source.exclude_exts = spec
 
 # (list) List of directory to exclude (leave empty to not exclude anything)
-source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, tools
+source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .venv, fonts, tools
 
 # (list) List of exclusions using pattern matching
 # Do not prefix with './'
@@ -42,7 +42,15 @@ version = 1.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
+# Python MUSS gepinnt werden. p4a master baut ohne Pin CPython 3.14.2; damit
+# laesst sich Kivy 2.3.0 nicht kompilieren: ab 3.13 aendert sich die Signatur
+# von _PyLong_AsByteArray, und der von Cython 0.29.36 (fest im p4a-Recipe)
+# erzeugte C-Code ruft sie mit zu wenigen Argumenten auf - der Build bricht
+# mitten in window_info.c ab. 3.11.9 entspricht dem Host im venv
+# (tools/ci_build.sh), damit kann keine Version auseinanderlaufen. hostpython3
+# muss identisch sein, sonst bricht p4a mit "python3 should have same version
+# as hostpython3" ab.
+requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
 
 
 # (str) Custom source folders for requirements
