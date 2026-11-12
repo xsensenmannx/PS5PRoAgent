@@ -253,7 +253,7 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 
 **Geprüft in dieser Umgebung** (Windows ohne Java/SDK, daher ohne echten Build):
 
-* `main.py` kompiliert fehlerfrei (CPython 3.12.8).
+* `main.py` kompiliert fehlerfrei (CPython 3.12.10).
 * `tools/selftest.py`: 67 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
   (`1.299,00 €`, `799,99`, `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`,
   Zubehör-Ausschluss („DualSense Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung,
