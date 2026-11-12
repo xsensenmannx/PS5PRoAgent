@@ -31,7 +31,7 @@ source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .ven
 
 # (list) List of exclusions using pattern matching
 # Do not prefix with './'
-source.exclude_patterns = ps5pro.zip, *.ipynb, *.md, *.log
+source.exclude_patterns = ps5pro.zip, ps5pro_settings.json, ps5pro_history.json, *.ipynb, *.md, *.log
 
 # (str) Application versioning (method 1)
 version = 1.0
