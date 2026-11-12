@@ -102,8 +102,10 @@ bei einem echten Release beide anheben (z. B. `1.1` / `2`).
      trotzdem der einfachste Weg (GitHub Pages/Notion-Seite genuegt).
    * **Datensicherheit**: „Es werden keine Daten erfasst oder geteilt" –
      Ausnahme: Netzwerkzugriffe zu Haendlern sind keine Datenerhebung durch dich.
-   * **Foreground-Service-Typen**: `dataSync` angeben und begruenden
-     („periodische Preisabfrage im Hintergrund, vom Nutzer per AUTO aktiviert").
+   * **Foreground-Service-Typen**: `specialUse` angeben und begruenden
+     („periodische Preis-/Verfuegbarkeitspruefung fuer ein vom Nutzer
+     beobachtetes Produkt, per AUTO-Schalter gestartet"). Der Subtyp steht
+     zusaetzlich als `<property>` im Manifest (siehe Abschnitt 7).
    * Werbung: nein. Altersfreigabe: IARC-Fragebogen.
 3. **Produktion → Interner Test** anlegen, das AAB aus dem Release hochladen.
 4. **Play App Signing** aktivieren (Google verwaltet den App-Signaturschluessel,
@@ -115,7 +117,7 @@ bei einem echten Release beide anheben (z. B. `1.1` / `2`).
 Hinweis: Ein AAB laesst sich **nicht** direkt per `adb install` installieren –
 dafuer die Debug-APK aus demselben Release verwenden.
 
-## 7. Warum targetSdk 36 und Edge-to-Edge
+## 7. Warum targetSdk 36, specialUse und Edge-to-Edge
 
 * Seit **31.08.2026** verlangt Play fuer neue Apps und Updates **API 36**
   (Android 16). `android.api = 36` setzt compileSdk und targetSdk.
@@ -124,6 +126,13 @@ dafuer die Debug-APK aus demselben Release verwenden.
   verschiebt Titel, ErgebnisPanel und Buttons; der Gestenbereich unten wird
   mit `mandatorySystemGestures` freigehalten. `android.display_cutout = shortEdges`
   erlaubt die Nutzung der Notch-Flaeche, der Ausschnitt kommt als oberer Rand zurueck.
+* Der Hintergrund-Service nutzt **`specialUse`**, nicht `dataSync`: Android 15
+  beendet `dataSync`-Foreground-Services nach **6 Stunden pro 24 h** und wirft
+  eine Exception, wenn der Dienst nicht selbst stoppt. Ein dauerhaft laufender
+  Preis-Beobachter wuerde also nach sechs Stunden abbrechen. `specialUse` hat
+  dieses Limit nicht; Play verlangt dafuer den Subtyp im Manifest, den
+  `tools/p4a_hook.py` beim Build eintraegt. Im Play-Console-Formular denselben
+  Zweck angeben – der Reviewer sieht beides.
 * Die nativen Bibliotheken sind 16-KB-Seiten-faehig (NDK 28c) – Play-Voraussetzung
   fuer Apps mit targetSdk 35+.
 
