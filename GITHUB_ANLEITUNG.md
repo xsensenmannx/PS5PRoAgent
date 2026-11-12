@@ -213,32 +213,32 @@ Release — der Link ist danach ohne Login auf dem Handy zu öffnen.
 **Tag setzen, ohne Kommandozeile:**
 
 1. **Code** → rechts **Releases** → **Draft a new release**.
-2. Bei **Choose a tag** `v1.6` eintippen → **Create new tag: v1.6 on publish**.
-3. Titel z. B. `v1.6` → **Publish release**.
+2. Bei **Choose a tag** `v2.0` eintippen → **Create new tag: v2.0 on publish**.
+3. Titel z. B. `v2.0` → **Publish release**.
 
 Der Tag zeigt damit auf den aktuellen Stand von `main`, und der Workflow **Release**
 startet. Nach 20–40 Minuten (erster Lauf länger) liegt die APK am Release:
-**Releases → v1.6 → Assets → `ps5prosearchagent-1.6-arm64-v8a-debug.apk`**.
+**Releases → v2.0 → Assets → `ps5prosearchagent-2.0-arm64-v8a-debug.apk`**.
 
 **Mit der Kommandozeile:**
 
 ```bash
-git tag v1.6
-git push origin v1.6
+git tag v2.0
+git push origin v2.0
 ```
 
-Der Workflow legt das Release selbst an (Titel = Tag, hier `v1.6`). Ein schon
+Der Workflow legt das Release selbst an (Titel = Tag, hier `v2.0`). Ein schon
 publiziertes Release stört nicht — die APK wird dort ergänzt, der Titel bleibt.
 
-**Beim nächsten Release:** in `buildozer.spec` `version = 1.6` committen, dann `v1.6`
-taggen. Tag und Spec-Version dürfen abweichen, aber der Dateiname der APK enthält die
+**Release-Stand:** `buildozer.spec` setzt `version = 2.0`; der finale Tag heißt
+`v2.0`. Tag und Spec-Version dürfen abweichen, aber der Dateiname der APK enthält die
 Version aus der Spec — gleiche Nummern halten die Zuordnung eindeutig.
 
 **Tag am falschen Commit oder vertippt?** Lokal und auf GitHub löschen, neu setzen:
 
 ```bash
-git tag -d v1.6
-git push origin :refs/tags/v1.6
+git tag -d v2.0
+git push origin :refs/tags/v2.0
 ```
 
 Ein bereits angelegtes Release bleibt dabei bestehen (samt alter APK) — im Zweifel im

@@ -67,7 +67,7 @@ und **nicht** im Release – es ist ausdruecklich nicht fuer Play geeignet.
 
 ## 4. Was der Tag-Lauf baut
 
-Bei `git tag v1.6 && git push origin refs/tags/v1.6` laufen zwei Jobs (die
+Bei `git tag v2.0 && git push origin refs/tags/v2.0` laufen zwei Jobs (die
 vorherigen Releases bleiben unveraendert bestehen):
 
 1. **release** – Debug-APK wie bisher (Sideloading) → Release-Asset `*.apk`.
@@ -90,9 +90,9 @@ ARTIFACT=aab bash tools/ci_build.sh
 
 ## 5. versionCode
 
-`buildozer.spec` setzt fuer v1.6 `android.numeric_version = 7`. Google Play verlangt
+`buildozer.spec` setzt fuer v2.0 `android.numeric_version = 8`. Google Play verlangt
 fuer **jeden** Upload einen **hoeheren** versionCode – vor dem naechsten Upload
-erhoehen (8, 9, …). Die sichtbare Version (`version = 1.6`) ist davon unabhaengig;
+erhoehen (9, 10, …). Die sichtbare Version (`version = 2.0`) ist davon unabhaengig;
 bei einem echten Release beide anheben.
 
 ## 6. Play Console – einmalige Einrichtung
@@ -151,10 +151,10 @@ dafuer die Debug-APK aus demselben Release verwenden.
 
 ```bash
 # Signatur des AAB
-keytool -printcert -jarfile bin/ps5prosearchagent-1.6-arm64-v8a-release.aab | head
+keytool -printcert -jarfile bin/ps5prosearchagent-2.0-arm64-v8a-release.aab | head
 
 # targetSdk im gebauten Bundle (aapt2 aus den Android build-tools)
-aapt2 dump badging bin/ps5prosearchagent-1.6-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
+aapt2 dump badging bin/ps5prosearchagent-2.0-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
 ```
 
 Erwartet: `targetSdkVersion:'36'`, Paket `de.ps5pro.ps5prosearchagent`,

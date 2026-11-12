@@ -152,6 +152,8 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v2.0** – Finaler Abschluss-Release (versionCode 8); enthält den
+  vollständigen Stand aus v1.6. Die Entwicklung ist damit abgeschlossen.
 * **v1.6** – Effizienterer Scan: HTTP-Cache wird einmal pro Lauf statt pro
   Shop geschrieben, und der letzte fehlgeschlagene Versuch wartet nicht mehr
   unnötig (versionCode 7).

@@ -419,8 +419,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "1.6")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "7")
+    check("spec version", c.get("app", "version"), "2.0")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "8")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
