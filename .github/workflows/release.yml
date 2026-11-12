@@ -55,4 +55,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: bin/*.apk
+          # Ein erneuter Tag-Lauf soll das vorhandene Asset ersetzen, statt
+          # mit "asset already exists" abzubrechen.
+          overwrite_files: true
           fail_on_unmatched_files: true
