@@ -25,6 +25,7 @@ eigenes.
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb geladene SDK/NDK-Bäume (sonst überspringt buildozer die Installation) |
 | `tools/ci_check_apk.sh` | prüft die fertige APK (Größe, enthält `libpython3.11.so`) |
+| `tools/ci_log_failure.sh` | holt die erste echte Fehlerstelle aus `buildozer.log` (für die Job-Zusammenfassung) |
 | `PS5Pro_APK_Colab.ipynb` | Build-Notebook für Colab |
 | `.github/workflows/build-apk.yml` | CI-Build mit Artifact |
 | `.github/workflows/release.yml` | bei Tag `v*`: Build + APK als Release-Asset |

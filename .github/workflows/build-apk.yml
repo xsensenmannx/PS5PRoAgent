@@ -61,18 +61,15 @@ jobs:
 
       - name: Fehlerbericht in die Zusammenfassung
         if: failure()
+        # Nicht die letzten 60 Zeilen (das ist nur der ENVIRONMENT-Block von
+        # buildozer), sondern die erste echte Fehlerzeile mit Kontext.
         run: |
           {
             echo "## Build fehlgeschlagen"
             echo ""
-            echo "### Letzte Zeilen"
-            echo "\`\`\`"
-            if [ -f buildozer.log ]; then
-              tail -n 60 buildozer.log
-            else
-              echo "kein buildozer.log vorhanden - der Fehler lag vor dem Build (z. B. Logiktests)"
-            fi
-            echo "\`\`\`"
+            echo '```'
+            bash tools/ci_log_failure.sh buildozer.log
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log bei Fehler
