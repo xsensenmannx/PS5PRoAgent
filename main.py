@@ -28,6 +28,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 from kivy.animation import Animation
@@ -35,7 +36,8 @@ from kivy.utils import get_color_from_hex, platform
 
 from scan_core import (
     HAENDLER, MAX_PREIS, BG_STATUS_FILE, format_preis, classify,
-    _safe_scan, _res, WORKER, History, Settings, data_dir,
+    _safe_scan, _res, WORKER, History, Settings, data_dir, Health, health, reset_health,
+    alarm_erlaubt, ist_gebraucht, install_crash_hook, read_crash_log,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -187,6 +189,21 @@ def haptic(d=0.05):
         v=PA.mActivity.getSystemService(C.VIBRATOR_SERVICE)
         if v.hasVibrator(): v.vibrate(int(max(1,d*1000)))
     except Exception: pass
+
+def share_text(text):
+    """Text (z. B. Crash-Log) ueber den Android-Teilen-Dialog ausgeben."""
+    if platform=="android":
+        try:
+            from jnius import autoclass
+            PA=autoclass("org.kivy.android.PythonActivity")
+            Intent=autoclass("android.content.Intent")
+            i=Intent(Intent.ACTION_SEND); i.setType("text/plain")
+            i.putExtra(Intent.EXTRA_TEXT,str(text))
+            PA.mActivity.startActivity(Intent.createChooser(i,"Fehlerbericht teilen"))
+            return True
+        except Exception: pass
+    try: print(text); return True
+    except Exception: return False
 
 _NOTIFY_SEQ=[int(time.time())%100000]
 
@@ -878,12 +895,13 @@ class Sparkline(Widget):
             Line(points=pts,width=dp(1.2))
 
 class ResultCard(ButtonBehavior, BoxLayout):
-    def __init__(self,result,is_new,prev,serie=None,**kw):
+    def __init__(self,result,is_new,prev,serie=None,detail_cb=None,**kw):
         super().__init__(**kw)
         self.result=result
         self._is_new=is_new; self._prev=prev
         self._serie=serie or []
         self._down=None; self._moved=False
+        self._detail_cb=detail_cb; self._long_event=None; self._long_done=False
         self.orientation="vertical"
         self.size_hint=(None,1)
         self.width=CARD_W
@@ -1013,19 +1031,38 @@ class ResultCard(ButtonBehavior, BoxLayout):
         bottom.add_widget(s)
         if self._is_new:
             bottom.add_widget(Tag("NEU",PS1_YELLOW))
+        if ist_gebraucht(r.get("condition")):
+            bottom.add_widget(Tag("GEBRAUCHT",PS1_YELLOW))
+        elif r.get("sofort") is False:
+            bottom.add_widget(Tag("VORBESTELLUNG",PS1_BLUE))
         bottom.add_widget(Widget())
         self.add_widget(bottom)
 
     def on_touch_down(self,touch):
         if self.collide_point(*touch.pos):
             self._down=touch.pos; self._moved=False
+            self._long_done=False
+            if self._long_event is not None: Clock.unschedule(self._long_event)
+            self._long_event=Clock.schedule_once(self._fire_long,0.55)
         return super().on_touch_down(touch)
+    def _fire_long(self,dt):
+        self._long_event=None
+        if self._moved or not self._down: return
+        self._long_done=True
+        haptic(0.03)
+        if self._detail_cb:
+            try: self._detail_cb(self.result,self._serie)
+            except Exception: pass
     def on_touch_move(self,touch):
         if self._down and (abs(touch.x-self._down[0])+abs(touch.y-self._down[1]))>dp(14):
             self._moved=True
+            if self._long_event is not None:
+                Clock.unschedule(self._long_event); self._long_event=None
         return super().on_touch_move(touch)
     def on_release(self):
-        if self._moved: return
+        if self._long_event is not None:
+            Clock.unschedule(self._long_event); self._long_event=None
+        if self._moved or self._long_done: return
         haptic(0.02); open_url(self.result["url"])
 # ══════════ PICKER ══════════
 class HandlerPickerContent(BoxLayout):
@@ -1103,12 +1140,19 @@ class MainUI(FloatLayout):
         self.sort_mode=self.settings.get("sort","Preis")
         if self.sort_mode not in SORT_OPTIONS: self.sort_mode="Preis"
         mp=self.settings.get("max_preis",MAX_PREIS)
-        self.max_preis=mp if mp in PRICE_OPTIONS else MAX_PREIS
+        try:
+            self.max_preis=(None if mp is None else float(mp))
+            if self.max_preis is not None and not (400<=self.max_preis<=1500):
+                self.max_preis=MAX_PREIS
+        except (TypeError,ValueError): self.max_preis=MAX_PREIS
         self.auto_scan=bool(self.settings.get("auto_scan",False))
         ai=self.settings.get("auto_interval",600)
         self.auto_interval=ai if ai in [x[0] for x in AUTO_INTERVALS] else 600
         self.next_scan_at=0.0; self._auto_event=None
         self.notify_enabled=bool(self.settings.get("notify",True))
+        self.notify_low_only=bool(self.settings.get("notify_low_only",False))
+        self.notify_sofort=bool(self.settings.get("notify_sofort",True))
+        self.quiet_hours=bool(self.settings.get("quiet_hours",False))
         self._known_hits=set(); self.queue=queue.Queue()
         self._bg_seen_ts=0.0; self._insets=(0.0,0.0)
         self._scan_token=0
@@ -1243,6 +1287,14 @@ class MainUI(FloatLayout):
                                width=dp(58))
         self.notify_chip.bind(on_release=lambda *_:self._toggle_notify())
         chips.add_widget(self.notify_chip)
+
+        self.rules_chip=Chip(text="REGELN",accent=PS1_PINK,width=dp(64))
+        self.rules_chip.bind(on_release=lambda *_:self._open_alarm_rules())
+        chips.add_widget(self.rules_chip)
+
+        self.health_chip=Chip(text="SHOPS",accent=PS1_BLUE,width=dp(58))
+        self.health_chip.bind(on_release=lambda *_:self._open_health())
+        chips.add_widget(self.health_chip)
 
         self.max_preis_chip=Chip(text=self._max_text(),accent=PS1_RED,width=dp(80))
         self.max_preis_chip.bind(on_release=lambda *_:self._cycle_max_preis())
@@ -1399,19 +1451,215 @@ class MainUI(FloatLayout):
         self.notify_enabled=not self.notify_enabled
         self.notify_chip.state=("down" if self.notify_enabled else "normal")
         self.settings.set("notify",self.notify_enabled)
-    def _maybe_notify(self,name,preis,is_new,url=None):
+    def _maybe_notify(self,r):
         if not self.notify_enabled: return
+        name=r.get("haendler","?"); preis=r.get("preis")
+        if preis is None: return
+        # Dieselbe Regel wie im Hintergrund: keine Vorbestellung, keine
+        # Gebrauchtware, keine stummgeschalteten Shops, ggf. Ruhezeit.
+        if not alarm_erlaubt(r,self.history.get_tief(name),self.settings): return
         key=(name,round(preis,2))
         if key in self._known_hits: return
         self._known_hits.add(key)
         if len(self._known_hits)>200:
             self._known_hits=set(list(self._known_hits)[-100:])
         msg=f"{name}: {format_preis(preis)}"
-        try: ok=notify("PS5 PRO 2TB VERFÜGBAR",msg,url=url)
+        try: ok=notify("PS5 PRO 2TB VERFÜGBAR",msg,url=r.get("url"))
         except Exception: ok=False
         if not ok:
             try: self._toast(msg,color=CARD_STATUS["hit"])
             except Exception: pass
+
+    def _send_test_alarm(self):
+        try:
+            ok=notify("PS5 PRO TESTALARM","Benachrichtigungen funktionieren.",
+                      url="https://direct.playstation.com/de-de/buy-consoles/playstation5-pro-console-2-tb")
+        except Exception: ok=False
+        self._toast("TESTALARM GESENDET" if ok else "TESTALARM FEHLGESCHLAGEN",
+                    color=CARD_STATUS["hit"] if ok else PS1_YELLOW)
+
+    def _open_alarm_rules(self):
+        box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(9))
+        t=Label(text="[b]ALARM-REGELN[/b]",markup=True,color=PS1_SILVER,
+                font_size=sp(14),font_name=SST_FONT,size_hint_y=None,height=dp(26))
+        box.add_widget(t)
+        hint=Label(text="Gilt fuer Vordergrund und Hintergrund.",color=PS1_GREY,
+                   font_size=sp(8.5),font_name=SST_FONT,size_hint_y=None,height=dp(18))
+        box.add_widget(hint)
+
+        def add_toggle(key,default,label_on,label_off,accent):
+            b=PS1Button(text="",accent=accent,font_size=sp(10),
+                        size_hint_y=None,height=dp(33))
+            def sync():
+                b.text=label_on if bool(self.settings.get(key,default)) else label_off
+            def flip(*_):
+                self.settings.set(key,not bool(self.settings.get(key,default)))
+                sync(); haptic(0.02)
+            b.bind(on_release=flip); sync(); box.add_widget(b)
+
+        add_toggle("notify_sofort",True,"NUR SOFORT: AN","NUR SOFORT: AUS",PS1_GREEN)
+        add_toggle("notify_low_only",False,"NUR TIEFSTPREIS: AN","NUR TIEFSTPREIS: AUS",PS1_YELLOW)
+        add_toggle("quiet_hours",False,"RUHEZEIT 23-07: AN","RUHEZEIT 23-07: AUS",PS1_BLUE)
+
+        row=BoxLayout(size_hint_y=None,height=dp(35),spacing=dp(5))
+        ti=TextInput(text=("" if self.max_preis is None else str(int(self.max_preis))),
+                     multiline=False,input_filter="float",font_size=sp(11),
+                     halign="center",size_hint_x=1)
+        sb=PS1Button(text="PREIS SETZEN",accent=PS1_RED,font_size=sp(9),
+                     size_hint_x=None,width=dp(102))
+        def set_preis(*_):
+            try: p=float(str(ti.text).replace(",","."))
+            except (TypeError,ValueError): p=None
+            if p is None or not (400<=p<=1500):
+                self._toast("PREIS 400-1500 EUR",color=PS1_YELLOW); return
+            self.max_preis=p; self.max_preis_chip.text=self._max_text()
+            self.settings.set("max_preis",p)
+            self._reclassify_all(); self._rerender()
+            self._toast(f"MAX {int(p)} EUR",color=PS1_GREEN)
+        sb.bind(on_release=set_preis); row.add_widget(ti); row.add_widget(sb)
+        box.add_widget(row)
+
+        tb=PS1Button(text="TESTALARM SENDEN",accent=PS1_PINK,font_size=sp(10),
+                     size_hint_y=None,height=dp(34))
+        tb.bind(on_release=lambda *_:self._send_test_alarm()); box.add_widget(tb)
+
+        stumm=self.settings.get("mute_haendler",[]) or []
+        mb=PS1Button(text=f"STUMME SHOPS: {len(stumm)}  ·  LISTE LEEREN",accent=PS1_SILVER,
+                     font_size=sp(9),size_hint_y=None,height=dp(30))
+        def clear_mute(*_):
+            self.settings.set("mute_haendler",[])
+            mb.text="STUMME SHOPS: 0  ·  LISTE LEEREN"
+            self._toast("STUMM-LISTE GELEERT",color=PS1_GREY)
+        mb.bind(on_release=clear_mute); box.add_widget(mb)
+
+        cb=PS1Button(text="SCHLIESSEN",accent=PS1_BLUE,font_size=sp(10),
+                     size_hint_y=None,height=dp(34))
+        p=Popup(title="",content=box,size_hint=(0.92,None),
+                height=min(dp(440),Window.height*0.82),
+                background_color=(0.08,0.08,0.09,1),separator_height=0)
+        cb.bind(on_release=lambda *_:p.dismiss()); box.add_widget(cb)
+        p.open()
+
+    def _age_text(self,ts):
+        try: s=max(0,int(time.time()-float(ts)))
+        except (TypeError,ValueError): return "?"
+        if s>=86400: return f"{s//86400}T"
+        if s>=3600: return f"{s//3600}H"
+        return f"{max(1,s//60)}M"
+
+    def _open_health(self):
+        daten=Health().all()
+        fehler=[]
+        for h in HAENDLER:
+            e=daten.get(h["name"]) or {}
+            if e.get("last_status") in ("error","challenge","unknown"):
+                fehler.append(h["name"])
+        box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(8))
+        titel=f"SHOP-HEALTH · {len(HAENDLER)} SHOPS · {len(fehler)} AUFFAELLIG"
+        box.add_widget(Label(text=f"[b]{titel}[/b]",markup=True,color=PS1_SILVER,
+                             font_size=sp(12),font_name=SST_FONT,
+                             size_hint_y=None,height=dp(26)))
+        sv=ScrollView(bar_width=dp(4))
+        inner=BoxLayout(orientation="vertical",size_hint_y=None,spacing=dp(2))
+        inner.bind(minimum_height=inner.setter("height"))
+        order=sorted(HAENDLER,key=lambda h:(0 if h["name"] in fehler else 1,h["name"]))
+        for h in order:
+            e=daten.get(h["name"]) or {}; status=e.get("last_status") or "NOCH NICHT GEPRUEFT"
+            ok=e.get("ok_ts"); last=e.get("last_ts")
+            if ok: age=self._age_text(ok)
+            elif last: age="seit "+self._age_text(last)
+            else: age=""
+            row=BoxLayout(size_hint_y=None,height=dp(26),spacing=dp(4))
+            farbe=(CARD_STATUS.get(status,PS1_GREY) if status in CARD_STATUS
+                   else PS1_GREY)
+            row.add_widget(Dot(farbe))
+            lb=Label(text=h["name"],color=PS1_TEXT,font_size=sp(9.5),font_name=SST_FONT,
+                     halign="left",valign="middle",shorten=True,shorten_from="right")
+            lb.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); row.add_widget(lb)
+            st=Label(text=f"{status.upper()} {age}",color=farbe,font_size=sp(8),
+                     font_name=SST_FONT,halign="right",valign="middle",
+                     size_hint_x=None,width=dp(120))
+            st.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); row.add_widget(st)
+            inner.add_widget(row)
+        sv.add_widget(inner); box.add_widget(sv)
+        btns=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
+        rb=PS1Button(text="FEHLER PRUEFEN",accent=PS1_YELLOW,font_size=sp(9))
+        lb=PS1Button(text="LOG TEILEN",accent=PS1_BLUE,font_size=sp(9))
+        cb=PS1Button(text="ZU",accent=PS1_SILVER,font_size=sp(9))
+        p=Popup(title="",content=box,size_hint=(0.95,0.82),
+                background_color=(0.08,0.08,0.09,1),separator_height=0)
+        def retry(*_):
+            if not fehler:
+                self._toast("ALLE SHOPS UNVERDAECHTIG",color=PS1_GREEN); return
+            p.dismiss(); self._scan_start(nur=fehler)
+        def log(*_):
+            txt=read_crash_log()
+            if not txt: self._toast("KEIN CRASH-LOG VORHANDEN",color=PS1_GREY); return
+            share_text(txt)
+        rb.bind(on_release=retry); lb.bind(on_release=log)
+        cb.bind(on_release=lambda *_:p.dismiss())
+        btns.add_widget(rb); btns.add_widget(lb); btns.add_widget(cb)
+        box.add_widget(btns); p.open()
+
+    def _open_detail(self,r,serie):
+        name=r.get("haendler","?")
+        box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(10))
+        titel=name + (" · " + format_preis(r["preis"]) if r.get("preis") is not None else "")
+        box.add_widget(Label(text=f"[b]{titel}[/b]",markup=True,color=PS1_TEXT,
+                             font_size=sp(15),font_name=SST_FONT,
+                             size_hint_y=None,height=dp(28)))
+        cond=r.get("condition"); cond_txt=("GEBRAUCHT/REFURB" if ist_gebraucht(cond)
+                                          else "NEU" if cond=="new" else "UNBEKANNT")
+        sofort=r.get("sofort"); sofort_txt=("SOFORT" if sofort is True else
+                                            "VORBESTELLUNG" if sofort is False else "UNBEKANNT")
+        zeilen=[("ZUSTAND",cond_txt),("VERKAEUFER",r.get("seller") or "—"),
+                ("LIEFERBAR",sofort_txt),("SIGNAL",str(r.get("signal") or "—").upper()),
+                ("VERFUEGBARKEIT",str(r.get("verfuegbarkeit") or "—"))]
+        hzustand=Health().all().get(name) or {}
+        if hzustand.get("last_ts"):
+            zeilen.append(("ZULETZT GEPRUEFT", self._age_text(hzustand["last_ts"])+" alt"))
+        for k,v in zeilen:
+            row=BoxLayout(size_hint_y=None,height=dp(20))
+            a=Label(text=k,color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
+                    halign="left",valign="middle")
+            b=Label(text=str(v),color=PS1_TEXT,font_size=sp(8.5),font_name=SST_FONT,
+                    halign="right",valign="middle",shorten=True,shorten_from="right")
+            for x in (a,b): x.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            row.add_widget(a); row.add_widget(b); box.add_widget(row)
+        tief30=tief_30(serie); allzeit=self.history.get_tief(name)
+        info=Label(text=f"30-TAGE-TIEF: {format_preis(tief30) if tief30 else '—'}\n"
+                         f"ALLZEIT-TIEF: {format_preis(allzeit) if allzeit else '—'}",
+                   color=PS1_SILVER,font_size=sp(9),font_name=SST_FONT,
+                   size_hint_y=None,height=dp(32),halign="left")
+        box.add_widget(info)
+        if len(serie)>=2:
+            box.add_widget(Sparkline(serie,color=CARD_STATUS.get(r.get("klass"),PS1_GREEN),
+                                     size_hint_y=None,height=dp(64)))
+        else:
+            box.add_widget(Label(text="Noch zu wenig Preisverlauf fuer eine Kurve.",
+                                 color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
+                                 size_hint_y=None,height=dp(24)))
+        mute=set(self.settings.get("mute_haendler",[]) or [])
+        mb=PS1Button(text=("HANDLER LAUT" if name in mute else "HANDLER STUMM"),
+                     accent=PS1_YELLOW,font_size=sp(9),size_hint_y=None,height=dp(32))
+        def toggle_mute(*_):
+            if name in mute: mute.discard(name)
+            else: mute.add(name)
+            self.settings.set("mute_haendler",sorted(mute))
+            mb.text="HANDLER LAUT" if name in mute else "HANDLER STUMM"
+            self._toast("HANDLER STUMM" if name in mute else "HANDLER LAUT",
+                        color=PS1_GREY)
+        mb.bind(on_release=toggle_mute); box.add_widget(mb)
+        row=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
+        ob=PS1Button(text="SHOP OEFFNEN",accent=PS1_GREEN,font_size=sp(9))
+        cb=PS1Button(text="SCHLIESSEN",accent=PS1_SILVER,font_size=sp(9))
+        p=Popup(title="",content=box,size_hint=(0.94,None),
+                height=min(dp(420),Window.height*0.82),
+                background_color=(0.08,0.08,0.09,1),separator_height=0)
+        ob.bind(on_release=lambda *_: (p.dismiss(),open_url(r.get("url"))))
+        cb.bind(on_release=lambda *_:p.dismiss())
+        row.add_widget(ob); row.add_widget(cb); box.add_widget(row)
+        p.open()
     def _open_haendler_picker(self):
         haptic(0.02); ref={"p":None}
         def on_apply(sel,err):
@@ -1442,6 +1690,10 @@ class MainUI(FloatLayout):
         if ts<=self._bg_seen_ts: return
         self._bg_seen_ts=ts
         self._bg_text_at=0.0
+        # Der Service hat die Health-Datei fortgeschrieben; Singleton neu laden,
+        # damit der naechste Speichervorgang die Hintergrunddaten nicht ueberschreibt.
+        try: reset_health()
+        except Exception: pass
         for r in d.get("results") or []:
             if not isinstance(r,dict) or not r.get("haendler"): continue
             try:
@@ -1565,7 +1817,9 @@ class MainUI(FloatLayout):
             self.results_count.text="0/0"
             self._show_placeholder("SYSTEM BEREIT","TIPPE AUF SCAN"); return
         namen=[n for n in self.scanned
-               if self.filter_mode=="alle" or self.scanned[n]["klass"]=="hit"]
+               if self.filter_mode=="alle" or
+               (self.scanned[n]["klass"]=="hit"
+                and not ist_gebraucht(self.scanned[n].get("condition")))]
         self.results_count.text=f"{len(namen)}/{len(self.scanned)}"
         if not namen:
             if self.filter_mode=="alle":
@@ -1583,7 +1837,8 @@ class MainUI(FloatLayout):
             namen.sort(key=lambda n:self.scanned[n]["zeit"],reverse=True)
 
         sig=tuple((n,self.scanned[n]["klass"],self.scanned[n]["preis"],
-                   self.scanned[n].get("_is_new"),len(self.history.get_serie(n)))
+                   self.scanned[n].get("_is_new"),len(self.history.get_serie(n)),
+                   self.scanned[n].get("condition"),self.scanned[n].get("sofort"))
                   for n in namen)
         if sig==self._last_sig and self._placeholder is None:
             return
@@ -1594,7 +1849,7 @@ class MainUI(FloatLayout):
             r=self.scanned[n]
             self.results_row.add_widget(
                 ResultCard(r,r.get("_is_new",False),r.get("_prev"),
-                           self.history.get_serie(n)))
+                           self.history.get_serie(n),detail_cb=self._open_detail))
         if sx>0:
             Clock.schedule_once(lambda dt:setattr(self.results_scroll,"scroll_x",sx),0)
 
@@ -1609,15 +1864,20 @@ class MainUI(FloatLayout):
     def _scan_toggle(self):
         if self.scanning: self._scan_cancel()
         else: self._scan_start()
-    def _scan_start(self):
+    def _scan_start(self,nur=None):
         if self.scanning: return
-        aktive=[h for h in HAENDLER if h["name"] in self.active_haendler]
+        namen=set(nur) if nur is not None else self.active_haendler
+        aktive=[h for h in HAENDLER if h["name"] in namen]
         if not aktive:
             self._toast("MINDESTENS EINEN HÄNDLER WÄHLEN",PS1_YELLOW); return
-        haptic(0.05); self.scanning=True; self.scanned={}
+        haptic(0.05); self.scanning=True
+        # Ein Health-Retry soll die bereits sichtbaren Ergebnisse behalten und
+        # nur die auffaelligen Shops neu abfragen.
+        if nur is None: self.scanned={}
         self._scan_token+=1; tok=self._scan_token
         self._drain_stale()
-        self.radar.blips=[]; self.radar.scanning=True
+        if nur is None: self.radar.blips=[]
+        self.radar.scanning=True
         self._clear_results()
         self._show_placeholder("SCANNE...","TIPPE STOP ZUM ABBRECHEN")
         self.scan_btn.text="STOP"
@@ -1669,15 +1929,17 @@ class MainUI(FloatLayout):
                 r["klass"]=classify(True,r["preis"],self.max_preis)
             prev=self.history.get_last(name); r["_prev"]=prev
             r["_is_new"]=(r["klass"]=="hit" and r["preis"] is not None
+                         and not ist_gebraucht(r.get("condition"))
                          and (prev is None or r["preis"]<prev-0.01))
             self.scanned[name]=r
             self._update_blip(name,r["klass"])
-            hits=sum(1 for x in self.scanned.values() if x["klass"]=="hit")
+            hits=sum(1 for x in self.scanned.values() if x["klass"]=="hit"
+                     and not ist_gebraucht(x.get("condition")))
             self.results_status.text=(f"SCANNE {self._scan_done}/{self._scan_total}"
                                       + (f" · {hits} TREFFER" if hits else ""))
             self.results_count.text=f"{hits}/{self._scan_done}" if self.filter_mode=="verfuegbar" else f"{self._scan_done}/{self._scan_total}"
             if r["klass"]=="hit" and r["preis"] is not None:
-                self._maybe_notify(name,r["preis"],r["_is_new"],r.get("url"))
+                self._maybe_notify(r)
             self._rerender_throttled()
         except Exception as e:
             print(f"[Scan] {name}: {e}")
@@ -1693,8 +1955,11 @@ class MainUI(FloatLayout):
         self.scanning=False; self.radar.scanning=False
         self.scan_btn.text="SCAN"
         d=time.time()-self._scan_t0
-        hits=[x for x in self.scanned.values() if x["klass"]=="hit"]
+        hits=[x for x in self.scanned.values() if x["klass"]=="hit"
+              and not ist_gebraucht(x.get("condition"))]
         new=sum(1 for x in self.scanned.values() if x.get("_is_new"))
+        try: health().save()
+        except Exception: pass
         self.history.update(self.scanned.values()); self._rerender()
         ts=datetime.now().strftime("%H:%M")
         if abgebrochen:
@@ -1731,6 +1996,7 @@ class PS5ProApp(App):
         u=consume_deep_link()
         if u: open_url(u)
     def build(self):
+        install_crash_hook("app")
         Window.clearcolor=C_BG
         try:
             if platform in ("android","ios"): Window.fullscreen='auto'
@@ -1744,6 +2010,9 @@ class PS5ProApp(App):
         try:
             ui=self.root_layout.main_ui
             # AUTO an = auch im Hintergrund weiterscannen (Foreground-Service).
+            # Ein laufender Vordergrund-Scan wuerde sonst parallel dieselben
+            # Shops abfragen; der Service uebernimmt nach dem Abbruch.
+            if ui.scanning: ui._scan_cancel()
             if ui.auto_scan: bg_service_start(ui.auto_interval)
         except Exception: pass
         return True

@@ -175,6 +175,7 @@ def _warten(sekunden):
 
 
 def main():
+    core.install_crash_hook("service")
     arg = _argument()
     if arg.get("data_dir"):
         core.set_data_dir(arg["data_dir"])
@@ -206,9 +207,13 @@ def main():
             for r in core.treffer_aus(ergebnisse):
                 # Flags mitgeben: die App zeigt daraus "NEU" und den Preisunterschied.
                 letzter = hist.get_last(r["haendler"])
+                tief = hist.get_tief(r["haendler"])
                 r["_prev"] = letzter
                 r["_is_new"] = core.ist_neuer_treffer(r["preis"], letzter)
-                if r["_is_new"]:
+                # Ein neuer Treffer ist nicht automatisch ein guter Alarm:
+                # Quiet Hours, stummgeschaltete Shops, Vorbestellungen und
+                # Gebrauchtware filtert die gemeinsame Regel.
+                if r["_is_new"] and core.alarm_erlaubt(r, tief, settings):
                     neu.append(r)
             hist.update(ergebnisse)
             _status_schreiben(ergebnisse, neu, intervall=intervall)

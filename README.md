@@ -17,6 +17,14 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
   sonst „ZU TEUER"; Bot-Schutz und Fehler werden getrennt ausgewiesen.
 * **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`),
   Sparkline und 30-Tage-Tief auf jeder Trefferkarte.
+* **Trefferqualität**: erkennt Zustand (neu/gebraucht), Verkäufer, Vorbestellung
+  und Bot-Schutz. Gebrauchtware und Vorbestellungen lösen standardmäßig keinen
+  Alarm aus; Details stehen beim langen Tippen auf einer Karte.
+* **Shop-Health**: zeigt pro Händler den letzten Zustand, Fehlerzähler und
+  Alter des letzten erfolgreichen Scans; auffällige Shops lassen sich einzeln
+  erneut prüfen.
+* **Alarm-Regeln**: nur sofort verfügbar, nur echte Tiefstpreise, Ruhezeit
+  23–07, eigene Preisgrenze und Händler-Stummschaltung.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
   Treffer eines Laufs werden gruppiert.
@@ -59,6 +67,7 @@ assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
 assets/notify_icon.png        Statusleisten-Icon des Hintergrund-Service
 tools/selftest.py             Logiktests ohne Kivy (CI-Gate)
+tools/fixtures/               minimale Shop-Ausschnitte fuer Parser-Tests
 tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal, APK oder AAB)
 tools/ci_check_apk.sh         prüft die fertige APK (Größe, Python-Version)
 tools/ci_check_aab.sh         prüft das AAB (Struktur, Signatur, Python-Version)
@@ -82,11 +91,14 @@ python3 tools/selftest.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
-HTTP-Cache, Preisverlauf und die Händlerdaten — 113 Zusicherungen, ohne Kivy und ohne
-Android. Der Workflow führt sie vor jedem Build aus.
+HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health und kleine Shop-Fixtures —
+145 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie vor jedem
+Build aus.
 
 ## Versionen
 
+* **v1.2** – Shop-Health, Fixtures, Treffer-Metadaten (Zustand/Verkäufer/
+  Vorbestellung), Alarm-Regeln, Detailansicht und Crash-Log (versionCode 3).
 * **v1.1** – HTTP-Cache/304, Preisverlauf mit Sparkline, Heartbeat-Warnung,
   Notification-Deep-Links und Gruppierung (versionCode 2).
 * **v1.0** – erster Play-vorbereiteter Build (targetSdk 36, signierbares AAB);

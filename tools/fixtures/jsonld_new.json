@@ -1,0 +1,12 @@
+{
+  "name": "jsonld_new",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB (E-Chassis)\",\"offers\":{\"price\":\"799.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/NewCondition\",\"seller\":{\"name\":\"MediaMarkt\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 799.0,
+    "verfuegbar": true,
+    "condition": "new",
+    "seller": "MediaMarkt",
+    "sofort": true
+  }
+}

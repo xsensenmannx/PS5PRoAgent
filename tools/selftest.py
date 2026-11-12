@@ -113,6 +113,7 @@ def _stub_kivy():
     _mod("kivy.uix.label", Label=_Label)
     _mod("kivy.uix.popup", Popup=_W)
     _mod("kivy.uix.scrollview", ScrollView=_W)
+    _mod("kivy.uix.textinput", TextInput=_W)
     _mod("kivy.uix.togglebutton", ToggleButton=_ToggleButton)
     _mod("kivy.uix.widget", Widget=_W)
     _mod("kivy.animation", Animation=_Animation)
@@ -406,8 +407,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "1.1")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "2")
+    check("spec version", c.get("app", "version"), "1.2")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "3")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -479,6 +480,34 @@ def feature_tests():
         hist.update([{"haendler": "Shop A", "klass": "hit", "preis": 999.0}])
         check("Serie gedeckelt", len(hist.get_serie("Shop A")), core.MAX_SERIE_PUNKTE)
 
+        # Health: ein Fehler erhoeht den Zaehler, ein Erfolg setzt ihn zurueck.
+        core.reset_health()
+        hh = core.health()
+        hh.record({"haendler": "Shop A", "klass": "challenge", "fehler": "Bot"})
+        hh.record({"haendler": "Shop A", "klass": "error", "fehler": "Timeout"})
+        check("Health Fehlerzaehler", hh.all()["Shop A"]["fail_streak"], 2)
+        hh.record({"haendler": "Shop A", "klass": "hit", "preis": 799.0})
+        check("Health Erfolg setzt zurueck", hh.all()["Shop A"]["fail_streak"], 0)
+        core._crash_schreiben("test", "Traceback: Testfehler")
+        check("Crash-Log schreibbar", "Testfehler" in core.read_crash_log(), True)
+        core.clear_crash_log()
+
+        # Alarm-Regeln: Vorbestellung, Gebrauchtware, Mute, Tiefstpreis, Ruhezeit.
+        neu = {"haendler": "Shop A", "preis": 799.0, "condition": "new", "sofort": True}
+        check("Alarm normal", core.alarm_erlaubt(neu, None, {}), True)
+        check("Alarm Vorbestellung", core.alarm_erlaubt(
+            {**neu, "sofort": False}, None, {}), False)
+        check("Alarm Gebrauchtware", core.alarm_erlaubt(
+            {**neu, "condition": "used"}, None, {}), False)
+        check("Alarm Mute", core.alarm_erlaubt(
+            neu, None, {"mute_haendler": ["Shop A"]}), False)
+        check("Alarm nur Tiefstpreis", core.alarm_erlaubt(
+            neu, 749.0, {"notify_low_only": True}), False)
+        check("Alarm neuer Tiefstpreis", core.alarm_erlaubt(
+            neu, 749.0, {"notify_low_only": False}), True)
+        check("Alarm Ruhezeit", core.alarm_erlaubt(
+            neu, None, {"quiet_hours": True}, __import__("datetime").datetime(2026, 1, 1, 23, 30)), False)
+
         service_q = open(os.path.join(ROOT, "service.py"), encoding="utf-8").read()
         check("Heartbeat next_ts", '"next_ts"' in service_q, True)
         check("Notification Deep-Link", 'ps5pro_url' in service_q, True)
@@ -490,7 +519,35 @@ def feature_tests():
     finally:
         core.MAX_HTML_BYTES = alt_max
         core.set_data_dir(alt_dir); core.reset_http_cache()
+        core.reset_health()
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def fixture_tests():
+    """Kleine, lizenzfreie HTML-Ausschnitte statt kompletter Shop-Seiten."""
+    ordner = os.path.join(ROOT, "tools", "fixtures")
+    namen = sorted(n for n in os.listdir(ordner) if n.endswith(".json"))
+    check("Fixtures vorhanden", len(namen) >= 5, True)
+    for name in namen:
+        with open(os.path.join(ordner, name), encoding="utf-8") as f:
+            fx = json.load(f)
+        html, exp = fx["html"], fx["expect"]
+        if exp.get("challenge"):
+            check("fixture %s challenge" % name, core.detect_challenge(html.lower()), True)
+            continue
+        st = core.extract_structured(html)
+        check("fixture %s ist konsole" % name, core.pruefe_nur_konsole(html, st), True)
+        for feld in ("preis", "condition", "seller", "verfuegbar", "sofort"):
+            if feld not in exp: continue
+            if feld == "verfuegbar":
+                wert = core.pruefe_verfuegbar(html, st)
+            elif feld == "preis" and st.get("preis") is None:
+                wert = core.extract_meta_preis(html)
+            elif feld == "sofort" and st.get("sofort") is None:
+                wert = core.ist_sofort_verfuegbar(html)
+            else:
+                wert = st.get(feld)
+            check("fixture %s %s" % (name, feld), wert, exp[feld])
 
 
 if __name__ == "__main__":
@@ -500,6 +557,7 @@ if __name__ == "__main__":
         radar_tests()
         service_tests()
         feature_tests()
+        fixture_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.

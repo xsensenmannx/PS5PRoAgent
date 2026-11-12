@@ -1,0 +1,7 @@
+{
+  "name": "challenge",
+  "html": "<html><head><title>Just a moment...</title></head><body>Checking your browser before accessing the shop.</body></html>",
+  "expect": {
+    "challenge": true
+  }
+}

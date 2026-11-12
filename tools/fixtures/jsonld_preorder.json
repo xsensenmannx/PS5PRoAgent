@@ -1,0 +1,11 @@
+{
+  "name": "jsonld_preorder",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB\",\"offers\":{\"price\":\"799.00\",\"availability\":\"https://schema.org/PreOrder\",\"itemCondition\":\"https://schema.org/NewCondition\"}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 799.0,
+    "verfuegbar": true,
+    "condition": "new",
+    "sofort": false
+  }
+}

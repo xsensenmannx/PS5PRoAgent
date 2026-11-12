@@ -1,0 +1,11 @@
+{
+  "name": "jsonld_used",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB\",\"offers\":{\"price\":\"649.00\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/UsedCondition\",\"seller\":{\"name\":\"Refurb Shop\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 649.0,
+    "condition": "used",
+    "seller": "Refurb Shop",
+    "sofort": true
+  }
+}

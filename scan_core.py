@@ -4,7 +4,7 @@ Wird von der App (main.py) und vom Hintergrund-Service (service.py) benutzt.
 Der Service laeuft in einem eigenen Prozess ohne UI - dort darf kein Kivy
 importiert werden, deshalb liegt diese Logik hier getrennt.
 """
-import os, json, re, time, random, threading
+import os, sys, json, re, time, random, threading, traceback
 from datetime import datetime
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -56,6 +56,8 @@ HTTP_CACHE_FILE = "ps5pro_http_cache.json"
 MAX_HTML_BYTES = 5 * 1024 * 1024
 MAX_SERIE_PUNKTE = 120
 BG_STATUS_FILE = "ps5pro_bg.json"
+HEALTH_FILE = "ps5pro_health.json"
+CRASH_FILE = "ps5pro_crash.log"
 
 # ── Händler ─────────────────────────────────────────────────────────
 def _h(n,l,u): return {"name":n,"land":l,"urls":[u]}
@@ -126,6 +128,10 @@ PRODUKT_2TB = re.compile(r"\b2\s*(?:tb|terabyte)\b",re.I)
 PRODUKT_AUSSCHLUSS = ["dualsense edge","edge controller","ps portal","portal remote",
     "pulse headset","pulse explore","psvr2","vr2 headset","faceplate","face plate",
     "disc drive","laufwerk"]
+VORBESTELL_MUSTER = ["vorbestell","vorbestellung","preorder","pre-order","backorder",
+                     "back-order","reservier"]
+GEBRAUCHT_MUSTER = ["usedcondition","used condition","refurbished","refurb",
+                    "gebraucht","generalüberholt","generalueberholt","b-ware","b ware"]
 
 def format_preis(p):
     return "{:,.2f}".format(p).replace(",","X").replace(".",",").replace("X",".")+" €"
@@ -178,8 +184,31 @@ def walk_products(node, acc):
     elif isinstance(node,list):
         for i in node: walk_products(i,acc)
 
+def _condition_norm(v):
+    s=str(v or "").lower()
+    if "used" in s: return "used"
+    if "refurb" in s: return "refurbished"
+    if "damaged" in s: return "damaged"
+    if "new" in s: return "new"
+    return None
+
+def _seller_name(v):
+    if isinstance(v,dict): return str(v.get("name") or "").strip()
+    if isinstance(v,str): return v.strip()
+    return ""
+
+def _availability_flags(av):
+    """(verfuegbar, sofort) aus einem schema.org-availability-Wert."""
+    a=str(av or "").lower()
+    if any(k in a for k in ("preorder","backorder","presale")): return True,False
+    if any(k in a for k in ("instock","instoreonly","limited","onlineonly")): return True,True
+    if any(k in a for k in ("outofstock","soldout","discontinued")): return False,False
+    return None,None
+
 def extract_structured(html):
-    res={"ist_konsole":False,"preis":None,"verfuegbar":None}
+    res={"ist_konsole":False,"preis":None,"verfuegbar":None,
+         "signal":"jsonld","condition":None,"seller":None,
+         "verfuegbarkeit":None,"sofort":None}
     try: jl=extract_jsonld(html)
     except Exception: jl=[]
     prods=[]
@@ -200,15 +229,19 @@ def extract_structured(html):
             # gemeldet (Alarm fuer 0 Euro). Nach oben begrenzt gegen
             # Phantasiewerte aus kaputten Feeds.
             if pv is not None and MIN_PREIS<=pv<=5000: res["preis"]=pv
-            av=str(off.get("availability","")).lower()
-            if any(k in av for k in ("instock","preorder","backorder","instoreonly","limited")):
-                res["verfuegbar"]=True
-            elif any(k in av for k in ("outofstock","soldout","discontinued")):
-                res["verfuegbar"]=False
+            av=str(off.get("availability",""))
+            res["verfuegbarkeit"]=av or None
+            v,sofort=_availability_flags(av)
+            if v is not None: res["verfuegbar"]=v
+            if sofort is not None: res["sofort"]=sofort
+            cond=_condition_norm(off.get("itemCondition") or p.get("itemCondition"))
+            if cond: res["condition"]=cond
+            seller=(_seller_name(off.get("seller")) or _seller_name(p.get("seller")))
+            if seller: res["seller"]=seller
         # Weitere Product-Eintraege ansehen, solange noch kein brauchbarer
         # Preis gefunden wurde: manche Shops liefern erst im zweiten Eintrag
         # ein Angebot (der erste ist dann z. B. eine Variante ohne offers).
-        if res["preis"] is not None: break
+        if res["preis"] is not None and not ist_gebraucht(res.get("condition")): break
     return res
 
 def extract_meta_preis(html):
@@ -245,6 +278,16 @@ def pruefe_verfuegbar(html, st):
     neg=sum(1 for kw in AUSVERKAUFT if kw in low)
     pos=sum(1 for kw in POSITIV if kw in low)
     return False if neg>pos else True
+
+def ist_sofort_verfuegbar(html):
+    """Text-Fallback: Vorbestellung/Backorder ist keine sofortige Verfuegbarkeit."""
+    low=html.lower()
+    if any(k in low for k in VORBESTELL_MUSTER): return False
+    if any(k in low for k in POSITIV): return True
+    return None
+
+def ist_gebraucht(condition):
+    return str(condition or "").lower() in ("used","refurbished","damaged")
 
 def classify(v,p,m):
     if not v: return "unavail"
@@ -412,10 +455,13 @@ def fetch_html_multi(urls):
     h,u,_cached,_meta=fetch_mit_cache(urls)
     return h,u
 
-def _res(h,preis,klass,dauer,err,final_url=None):
+def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
+         seller=None,verfuegbarkeit=None,sofort=None):
     return {"haendler":h["name"],"url":final_url or h["urls"][0],"land":h["land"],
             "preis":preis,"klass":klass,"dauer":round(dauer,1),
-            "zeit":datetime.now().strftime("%H:%M:%S"),"fehler":err}
+            "zeit":datetime.now().strftime("%H:%M:%S"),"fehler":err,
+            "signal":signal or "unbekannt","condition":condition,"seller":seller,
+            "verfuegbarkeit":verfuegbarkeit,"sofort":sofort}
 
 def scan_einen(h):
     st=time.time()
@@ -423,7 +469,11 @@ def scan_einen(h):
         html,fu,cached,meta=fetch_mit_cache(h["urls"]); d=time.time()-st
         if cached is not None:
             p=cached.get("preis"); v=bool(cached.get("verfuegbar"))
-            res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu)
+            res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,
+                     signal=cached.get("signal"),condition=cached.get("condition"),
+                     seller=cached.get("seller"),
+                     verfuegbarkeit=cached.get("verfuegbarkeit"),
+                     sofort=cached.get("sofort"))
             res["_cache"]=True
             return res
         if detect_challenge(html[:3000].lower()):
@@ -433,12 +483,20 @@ def scan_einen(h):
             return _res(h,None,"unknown",d,"nicht PS5 Pro 2TB",fu)
         v=pruefe_verfuegbar(html,s)
         p=(s.get("preis") or extract_meta_preis(html))
-        res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu)
+        signal=("jsonld" if s.get("preis") is not None else
+                "meta" if p is not None else "text")
+        sofort=s.get("sofort")
+        if sofort is None and v: sofort=ist_sofort_verfuegbar(html)
+        res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,
+                 signal=signal,condition=s.get("condition"),seller=s.get("seller"),
+                 verfuegbarkeit=s.get("verfuegbarkeit"),sofort=sofort)
         # Auch "nicht verfuegbar" cachen: der naechste 304 spart die Seite
         # komplett, und die Verfuegbarkeit stammt aus demselben Abruf.
         try:
             http_cache().put(fu or h["urls"][0],
-                             {"preis":p,"verfuegbar":bool(v)},
+                             {"preis":p,"verfuegbar":bool(v),"signal":signal,
+                              "condition":s.get("condition"),"seller":s.get("seller"),
+                              "verfuegbarkeit":s.get("verfuegbarkeit"),"sofort":sofort},
                              meta.get("etag"),meta.get("last_modified"))
         except Exception: pass
         return res
@@ -447,8 +505,11 @@ def scan_einen(h):
 
 def _safe_scan(h):
     st=time.time()
-    try: return scan_einen(h)
-    except Exception as e: return _res(h,None,"error",time.time()-st,str(e)[:60])
+    try: r=scan_einen(h)
+    except Exception as e: r=_res(h,None,"error",time.time()-st,str(e)[:60])
+    try: health().record(r)
+    except Exception: pass
+    return r
 
 _DATA_DIR = None
 
@@ -484,11 +545,14 @@ def scan_alle(haendler, max_preis=None, fortschritt=None):
                 try: fortschritt(len(ergebnisse), len(haendler))
                 except Exception: pass
     finally:
+        try: health().save()
+        except Exception: pass
         ex.shutdown(wait=False, cancel_futures=True)
     return ergebnisse
 
 def treffer_aus(results):
-    return [r for r in results if r.get("klass") == "hit" and r.get("preis") is not None]
+    return [r for r in results if r.get("klass") == "hit"
+            and r.get("preis") is not None and not ist_gebraucht(r.get("condition"))]
 
 def ist_neuer_treffer(preis, letzter):
     """True, wenn es noch keinen Preis gab oder der neue niedriger ist."""
@@ -520,6 +584,11 @@ class History:
     def get_serie(self,n):
         e=self.data.get(n)
         return self._saubere_serie(e.get("serie")) if isinstance(e,dict) else []
+    def get_tief(self,n):
+        """Niedrigster je gespeicherter Preis einer Serie (nicht nur letzter Scan)."""
+        serie=self.get_serie(n)
+        if serie: return min(p for _,p in serie)
+        return self.get_last(n)
     def _saubere_serie(self,serie):
         out=[]
         if not isinstance(serie,list): return out
@@ -569,4 +638,134 @@ class Settings:
                 json.dump(self.data,f,ensure_ascii=False,indent=1)
             os.replace(tmp,self.path)
         except Exception: pass
+
+
+def _setting(settings,k,d=None):
+    try: return settings.get(k,d)
+    except Exception: return d
+
+def alarm_erlaubt(r,tief,settings,jetzt=None):
+    """Zentrale Alarm-Regel fuer App und Service.
+
+    Ein Treffer darf nur melden, wenn er neu, sofort lieferbar, kein
+    Gebraucht-/Refurbished-Angebot und nicht stummgeschaltet ist. Optional
+    zaehlen nur echte Tiefstpreise und es gelten Ruhezeiten.
+    """
+    if not isinstance(r,dict) or r.get("preis") is None: return False
+    if ist_gebraucht(r.get("condition")): return False
+    if _setting(settings,"notify_sofort",True) and r.get("sofort") is False:
+        return False
+    stumm=_setting(settings,"mute_haendler",[]) or []
+    try:
+        if r.get("haendler") in set(stumm): return False
+    except TypeError: pass
+    if _setting(settings,"quiet_hours",False):
+        try:
+            start=int(_setting(settings,"quiet_start",23)); end=int(_setting(settings,"quiet_end",7))
+            h=(jetzt or datetime.now()).hour
+            in_ruhe=(start<=h<end) if start<end else (h>=start or h<end)
+            if in_ruhe: return False
+        except (TypeError,ValueError): pass
+    if _setting(settings,"notify_low_only",False) and tief is not None:
+        try:
+            if float(r["preis"])>=float(tief)-0.005: return False
+        except (TypeError,ValueError): pass
+    return True
+
+
+class Health:
+    """Letzter Zustand pro Shop - macht stille Parser-Ausfaelle sichtbar."""
+    def __init__(self,pfad=None):
+        self.path=pfad or os.path.join(_data_dir(),HEALTH_FILE)
+        self._lock=threading.Lock()
+        try:
+            with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
+            self.data=data if isinstance(data,dict) else {}
+        except Exception: self.data={}
+    def record(self,r):
+        name=r.get("haendler")
+        if not name: return
+        ts=time.time(); status=r.get("klass") or "unknown"
+        fehler=bool(status in ("error","challenge"))
+        with self._lock:
+            e=dict(self.data.get(name) or {})
+            e["last_ts"]=ts; e["last_status"]=status
+            e["last_error"]=r.get("fehler")
+            e["checks"]=int(e.get("checks") or 0)+1
+            if fehler:
+                e["fail_streak"]=int(e.get("fail_streak") or 0)+1
+            else:
+                e["ok_ts"]=ts; e["fail_streak"]=0
+                e["successes"]=int(e.get("successes") or 0)+1
+            self.data[name]=e
+    def save(self):
+        """Einmal pro Scan schreiben statt 42-mal (Flash/Akku)."""
+        with self._lock: self._save_locked()
+    def all(self):
+        with self._lock: return {k:dict(v) for k,v in self.data.items() if isinstance(v,dict)}
+    def _save_locked(self):
+        try:
+            tmp=self.path+".tmp"
+            with open(tmp,"w",encoding="utf-8") as f:
+                json.dump(self.data,f,ensure_ascii=False,indent=1)
+            os.replace(tmp,self.path)
+        except Exception: pass
+
+_HEALTH=None
+_HEALTH_LOCK=threading.Lock()
+
+def health():
+    global _HEALTH
+    with _HEALTH_LOCK:
+        if _HEALTH is None: _HEALTH=Health()
+        return _HEALTH
+
+def reset_health():
+    global _HEALTH
+    with _HEALTH_LOCK: _HEALTH=None
+
+
+def _crash_schreiben(context,text):
+    try:
+        p=os.path.join(_data_dir(),CRASH_FILE)
+        alt=""
+        try:
+            if os.path.exists(p):
+                with open(p,"r",encoding="utf-8") as f: alt=f.read()[-40000:]
+        except Exception: pass
+        neu=alt+("\n\n=== %s %s ===\n"%(context,datetime.now().isoformat(timespec="seconds"))+
+                 str(text)[-30000:])
+        with open(p,"w",encoding="utf-8") as f: f.write(neu[-60000:])
+    except Exception: pass
+
+def install_crash_hook(context="app"):
+    """Python-Ausnahmen landen sonst nur im Logcat und nicht in Play Vitals."""
+    if getattr(sys,"_ps5pro_crash_hook",False): return
+    sys._ps5pro_crash_hook=True
+    alt=sys.excepthook
+    def hook(typ,wert,tb):
+        try: _crash_schreiben(context,"".join(traceback.format_exception(typ,wert,tb)))
+        except Exception: pass
+        try: alt(typ,wert,tb)
+        except Exception: pass
+    sys.excepthook=hook
+    alt_t=threading.excepthook
+    def thread_hook(args):
+        try:
+            _crash_schreiben(context,"Thread %s\n%s"%(getattr(args.thread,"name","?"),
+                "".join(traceback.format_exception(args.exc_type,args.exc_value,args.exc_traceback))))
+        except Exception: pass
+        try: alt_t(args)
+        except Exception: pass
+    threading.excepthook=thread_hook
+
+def read_crash_log(max_chars=12000):
+    try:
+        with open(os.path.join(_data_dir(),CRASH_FILE),"r",encoding="utf-8") as f:
+            return f.read()[-max_chars:]
+    except Exception: return ""
+
+def clear_crash_log():
+    try: os.remove(os.path.join(_data_dir(),CRASH_FILE))
+    except Exception: pass
 
