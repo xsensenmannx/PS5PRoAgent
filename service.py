@@ -27,15 +27,20 @@ def _argument():
         return {}
 
 
-def _status_schreiben(ergebnisse, neu, fehler=None):
+def _status_schreiben(ergebnisse, neu, fehler=None, intervall=None):
+    jetzt = time.time()
     daten = {
-        "ts": time.time(),
+        "ts": jetzt,
         "zeit": datetime.now().strftime("%H:%M"),
         "geprueft": len(ergebnisse),
         "treffer": len(core.treffer_aus(ergebnisse)),
         "neu": len(neu),
         "results": ergebnisse,
     }
+    if intervall:
+        # Heartbeat: die App erkennt daran, ob der Dienst noch planmaessig laeuft.
+        daten["intervall"] = int(intervall)
+        daten["next_ts"] = jetzt + int(intervall)
     if fehler:
         daten["fehler"] = str(fehler)[:200]
     pfad = os.path.join(core.data_dir(), STATUS_DATEI)
@@ -48,7 +53,14 @@ def _status_schreiben(ergebnisse, neu, fehler=None):
         print("[BG] Status:", e)
 
 
-def _benachrichtige(titel, text):
+_NOTIFY_ID = [4200]
+
+def _naechste_id():
+    _NOTIFY_ID[0] = (_NOTIFY_ID[0] + 1) % 100000
+    return _NOTIFY_ID[0]
+
+
+def _benachrichtige(titel, text, url=None):
     """Treffer-Meldung im Service-Prozess (dort gibt es keine Activity)."""
     try:
         from jnius import autoclass
@@ -71,6 +83,7 @@ def _benachrichtige(titel, text):
             b.setPriority(autoclass("android.app.Notification").PRIORITY_HIGH)
         b.setContentTitle(titel)
         b.setContentText(text)
+        b.setGroup("ps5pro_hits")
         # System-Drawable: das App-Icon ist seit API 26 ein adaptives Icon und
         # als Small-Icon ungueltig (Meldung wuerde verworfen).
         b.setSmallIcon(autoclass("android.R$drawable").stat_notify_chat)
@@ -79,16 +92,73 @@ def _benachrichtige(titel, text):
         PendingIntent = autoclass("android.app.PendingIntent")
         Activity = autoclass("org.kivy.android.PythonActivity")
         intent = Intent(service, Activity)
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if url:
+            intent.putExtra("ps5pro_url", url)
         b.setContentIntent(PendingIntent.getActivity(
-            service, 0, intent,
+            service, _naechste_id(), intent,
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
         if not nm.areNotificationsEnabled():
             return False
-        nm.notify(int(time.time()) % 100000, b.build())
+        nm.notify(_naechste_id(), b.build())
         return True
     except Exception as e:
         print("[BG] notify:", e)
+        return False
+
+
+def _benachrichtige_summary(neu):
+    """Eine sammelbare Meldung fuer alle Treffer eines Laufs."""
+    if not neu:
+        return False
+    try:
+        from jnius import autoclass
+
+        service = autoclass("org.kivy.android.PythonService").mService
+        if service is None:
+            return False
+        Context = autoclass("android.content.Context")
+        nm = service.getSystemService(Context.NOTIFICATION_SERVICE)
+        if not nm.areNotificationsEnabled():
+            return False
+        Builder = autoclass("android.app.Notification$Builder")
+        if autoclass("android.os.Build$VERSION").SDK_INT >= 26:
+            NM = autoclass("android.app.NotificationManager")
+            kanal = autoclass("android.app.NotificationChannel")(
+                "ps5pro_hits", "PS5 Pro Treffer", NM.IMPORTANCE_HIGH)
+            nm.createNotificationChannel(kanal)
+            b = Builder(service, "ps5pro_hits")
+        else:
+            b = Builder(service)
+            b.setPriority(autoclass("android.app.Notification").PRIORITY_HIGH)
+        titel = "PS5 Pro: %d Treffer" % len(neu)
+        b.setContentTitle(titel)
+        b.setContentText("Tippen fuer Details")
+        b.setSmallIcon(autoclass("android.R$drawable").stat_notify_chat)
+        b.setAutoCancel(True)
+        b.setGroup("ps5pro_hits")
+        b.setGroupSummary(True)
+        try:
+            style = autoclass("android.app.Notification$InboxStyle")()
+            style.setBigContentTitle(titel)
+            for r in neu[:5]:
+                style.addLine("%s - %s" % (r.get("haendler", "?"),
+                                           core.format_preis(r.get("preis"))))
+            b.setStyle(style)
+        except Exception:
+            pass
+        Intent = autoclass("android.content.Intent")
+        PendingIntent = autoclass("android.app.PendingIntent")
+        Activity = autoclass("org.kivy.android.PythonActivity")
+        intent = Intent(service, Activity)
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        b.setContentIntent(PendingIntent.getActivity(
+            service, 4000, intent,
+            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+        nm.notify(4000, b.build())
+        return True
+    except Exception as e:
+        print("[BG] summary:", e)
         return False
 
 
@@ -127,7 +197,7 @@ def main():
             ergebnisse = core.scan_alle(haendler, max_preis)
         except Exception as e:
             print("[BG] Scan:", e)
-            _status_schreiben([], [], fehler=e)
+            _status_schreiben([], [], fehler=e, intervall=intervall)
             ergebnisse = []
 
         if ergebnisse:
@@ -141,18 +211,19 @@ def main():
                 if r["_is_new"]:
                     neu.append(r)
             hist.update(ergebnisse)
-            _status_schreiben(ergebnisse, neu)
+            _status_schreiben(ergebnisse, neu, intervall=intervall)
             if settings.get("notify", True):
                 # Bei einem Ausverkauf koennen viele Shops gleichzeitig melden -
                 # fuenf Meldungen reichen, der Rest steht in der App.
                 for r in neu[:5]:
                     _benachrichtige(
                         "PS5 Pro 2 TB: " + core.format_preis(r["preis"]),
-                        r["haendler"] + " - jetzt verfuegbar")
+                        r["haendler"] + " - jetzt verfuegbar", r.get("url"))
+                _benachrichtige_summary(neu[:5])
             print("[BG] %s geprueft, %s Treffer, %s neu"
                   % (len(ergebnisse), len(core.treffer_aus(ergebnisse)), len(neu)))
         else:
-            _status_schreiben([], [], fehler="keine Ergebnisse")
+            _status_schreiben([], [], fehler="keine Ergebnisse", intervall=intervall)
         _warten(intervall)
 
 

@@ -9,9 +9,12 @@ Exit-Code 0 = alles gruen. Wird in .github/workflows/build-apk.yml als Gate
 vor dem APK-Build ausgefuehrt, damit ein kaputtes Parsing nie in die APK geht.
 """
 import configparser
+import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -271,7 +274,7 @@ def retry_tests():
     core.time = types.SimpleNamespace(sleep=lambda s: None)
     try:
         calls = []
-        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 404"))[1]
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 404", {}))[1]
         try:
             core.fetch_html_multi(["https://example.invalid"])
             fehler = None
@@ -281,7 +284,7 @@ def retry_tests():
         check("404 nur ein Versuch", len(calls), 1)
 
         calls.clear()
-        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 500"))[1]
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 500", {}))[1]
         try:
             core.fetch_html_multi(["https://example.invalid"])
         except RuntimeError:
@@ -289,7 +292,7 @@ def retry_tests():
         check("500 dreimal probiert", len(calls), 3)
 
         calls.clear()
-        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 403"))[1]
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 403", {}))[1]
         try:
             core.fetch_html_multi(["https://example.invalid"])
         except RuntimeError:
@@ -403,7 +406,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "1")
+    check("spec version", c.get("app", "version"), "1.1")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "2")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -419,12 +423,83 @@ def spec_tests():
     check("hook-datei vorhanden", os.path.exists(os.path.join(ROOT, "tools", "p4a_hook.py")), True)
 
 
+def feature_tests():
+    """Cache, Groessenlimit und Preisverlauf - die Zutaten fuer 1.1."""
+    alt_dir = core._data_dir()
+    tmp = tempfile.mkdtemp(prefix="ps5pro-test-")
+
+    class _Antwort:
+        def __init__(self, stuecke):
+            self.stuecke = stuecke; self.closed = False
+        def iter_content(self, n):
+            for s in self.stuecke: yield s
+        def close(self): self.closed = True
+
+    alt_max = core.MAX_HTML_BYTES
+    try:
+        core.set_data_dir(tmp); core.reset_http_cache()
+        core.MAX_HTML_BYTES = 10
+        roh, gross = core._read_capped(_Antwort([b"123456", b"78901"]))
+        check("Antwort-Limit greift", gross, True)
+        check("Antwort-Limit liefert nichts", roh, None)
+        roh, gross = core._read_capped(_Antwort([b"12345"]))
+        check("kleine Antwort bleibt", (roh, gross), (b"12345", False))
+
+        pfad = os.path.join(tmp, "cache.json")
+        c = core.HttpCache(pfad)
+        c.put("https://shop/x", {"preis": 799.0, "verfuegbar": True}, "etag-1", None)
+        c2 = core.HttpCache(pfad)
+        check("Cache ueberlebt Neuladen", c2.get("https://shop/x")["result"]["preis"], 799.0)
+        check("Cache speichert ETag", c2.get("https://shop/x")["etag"], "etag-1")
+        c2.drop("https://shop/x")
+        check("Cache loescht Eintrag", core.HttpCache(pfad).get("https://shop/x"), None)
+
+        # 304 ohne erneutes Parsen: fetch_mit_cache liefert das gespeicherte Ergebnis.
+        core.http_cache().put("https://shop/304", {"preis": 749.0, "verfuegbar": True}, "e", None)
+        echt = core._try_url
+        core._try_url = lambda u, a, p=None: (None, "HTTP 304", {"not_modified": True})
+        try:
+            _h, _u, cached, _m = core.fetch_mit_cache(["https://shop/304"])
+            check("304 nutzt Cache", cached["preis"], 749.0)
+        finally:
+            core._try_url = echt
+
+        # Alter Eintrag ohne Serie wird migriert, gleiche Preise fluten nicht.
+        with open(os.path.join(tmp, core.HISTORY_FILE), "w", encoding="utf-8") as f:
+            json.dump({"Shop A": {"preis": 800.0, "zeit": "2026-01-01T10:00:00"}}, f)
+        hist = core.History()
+        check("Serie migriert", len(hist.get_serie("Shop A")), 1)
+        hist.update([{"haendler": "Shop A", "klass": "hit", "preis": 800.0}])
+        check("gleicher Preis kein Punkt", len(hist.get_serie("Shop A")), 1)
+        hist.update([{"haendler": "Shop A", "klass": "hit", "preis": 749.0}])
+        check("Preiswechsel neuer Punkt", len(hist.get_serie("Shop A")), 2)
+        check("letzter Serienpreis", hist.get_serie("Shop A")[-1][1], 749.0)
+        hist.data["Shop A"]["serie"] = [["2026-01-01T10:00:00", 700.0 + i]
+                                         for i in range(130)]
+        hist.update([{"haendler": "Shop A", "klass": "hit", "preis": 999.0}])
+        check("Serie gedeckelt", len(hist.get_serie("Shop A")), core.MAX_SERIE_PUNKTE)
+
+        service_q = open(os.path.join(ROOT, "service.py"), encoding="utf-8").read()
+        check("Heartbeat next_ts", '"next_ts"' in service_q, True)
+        check("Notification Deep-Link", 'ps5pro_url' in service_q, True)
+        check("Notification Gruppe", "setGroupSummary" in service_q, True)
+        main_q = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+        check("Deep-Link gelesen", "consume_deep_link" in main_q, True)
+        check("Sparkline vorhanden", "class Sparkline" in main_q, True)
+        check("30-Tage-Tief", "def tief_30" in main_q, True)
+    finally:
+        core.MAX_HTML_BYTES = alt_max
+        core.set_data_dir(alt_dir); core.reset_http_cache()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
         retry_tests()
         radar_tests()
         service_tests()
+        feature_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.

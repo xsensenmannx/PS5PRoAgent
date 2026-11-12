@@ -145,6 +145,40 @@ def open_url(u):
         import webbrowser; webbrowser.open(u)
     except Exception: pass
 
+def open_app_settings():
+    """Systemseite der App - dort liegen Akku-Optimierung und Benachrichtigungen."""
+    if platform=="android":
+        try:
+            from jnius import autoclass
+            PA=autoclass("org.kivy.android.PythonActivity")
+            Intent=autoclass("android.content.Intent")
+            Uri=autoclass("android.net.Uri")
+            Settings=autoclass("android.provider.Settings")
+            i=Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                     Uri.parse("package:"+PA.mActivity.getPackageName()))
+            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            PA.mActivity.startActivity(i); return
+        except Exception: pass
+    try:
+        import webbrowser
+        webbrowser.open("https://support.google.com/android/answer/7664352")
+    except Exception: pass
+
+def consume_deep_link():
+    """URL aus einer angetippten Benachrichtigung holen und danach entfernen."""
+    if platform!="android": return None
+    try:
+        from jnius import autoclass
+        act=autoclass("org.kivy.android.PythonActivity").mActivity
+        intent=act.getIntent()
+        if intent is None: return None
+        u=intent.getStringExtra("ps5pro_url")
+        if not u: return None
+        # Extra entfernen, damit ein Resume/Rotation den Shop nicht erneut oeffnet.
+        intent.removeExtra("ps5pro_url"); act.setIntent(intent)
+        return u
+    except Exception: return None
+
 def haptic(d=0.05):
     if platform!="android": return
     try:
@@ -154,7 +188,13 @@ def haptic(d=0.05):
         if v.hasVibrator(): v.vibrate(int(max(1,d*1000)))
     except Exception: pass
 
-def notify(t,m):
+_NOTIFY_SEQ=[int(time.time())%100000]
+
+def _next_notify_id():
+    _NOTIFY_SEQ[0]=(_NOTIFY_SEQ[0]+1)%100000
+    return _NOTIFY_SEQ[0]
+
+def notify(t,m,url=None):
     if platform=="android":
         try:
             from jnius import autoclass
@@ -170,6 +210,18 @@ def notify(t,m):
             except Exception:
                 si=a.getApplicationInfo().icon
             b.setSmallIcon(si); b.setAutoCancel(True)
+            b.setGroup("ps5pro_hits")
+            try:
+                Intent=autoclass("android.content.Intent")
+                PendingIntent=autoclass("android.app.PendingIntent")
+                intent=Intent(a,PA)
+                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                if url: intent.putExtra("ps5pro_url",url)
+                b.setContentIntent(PendingIntent.getActivity(
+                    a,_next_notify_id(),intent,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+            except Exception: pass
             # Android 8+: ohne NotificationChannel wird die Meldung verworfen
             try:
                 if autoclass("android.os.Build$VERSION").SDK_INT>=26:
@@ -185,7 +237,7 @@ def notify(t,m):
             # sondern die Meldung verschwindet. Der Aufrufer zeigt stattdessen
             # einen Toast, wenn hier False zurueckkommt.
             if not nm.areNotificationsEnabled(): return False
-            nm.notify(int(time.time())%100000,b.build()); return True
+            nm.notify(_next_notify_id(),b.build()); return True
         except Exception: pass
     try:
         from plyer import notification
@@ -788,11 +840,49 @@ class LogoWidget(FloatLayout):
 # ══════════ RESULT CARD (PS1 style, horizontal) ══════════
 CARD_W = dp(246)
 
+def tief_30(serie):
+    """Niedrigster Preis der letzten 30 Tage aus [[iso_ts, preis], ...]."""
+    if not serie: return None
+    grenze=time.time()-30*86400; werte=[]
+    for punkt in serie:
+        try:
+            ts=datetime.fromisoformat(str(punkt[0])).timestamp(); p=float(punkt[1])
+        except (TypeError,ValueError): continue
+        if ts>=grenze: werte.append(p)
+    if werte: return min(werte)
+    try: return min(float(p[1]) for p in serie)
+    except (TypeError,ValueError,IndexError): return None
+
+class Sparkline(Widget):
+    """Kleine Preiskurve ohne zusaetzliche Abhaengigkeit."""
+    def __init__(self,serie,color=(1,1,1,1),**kw):
+        super().__init__(**kw)
+        self.serie=serie or []; self.farbe=color
+        self.bind(pos=self._draw,size=self._draw)
+        Clock.schedule_once(self._draw,0)
+    def _draw(self,*_):
+        self.canvas.clear()
+        werte=[]
+        for p in self.serie:
+            try: werte.append(float(p[1]))
+            except (TypeError,ValueError,IndexError): continue
+        if len(werte)<2 or self.width<=0 or self.height<=0: return
+        mn,mx=min(werte),max(werte); span=max(0.01,mx-mn)
+        schritt=self.width/(len(werte)-1)
+        pts=[]
+        for i,w in enumerate(werte):
+            pts += [self.x+i*schritt,
+                    self.y+dp(1)+(w-mn)/span*max(dp(1),self.height-dp(2))]
+        with self.canvas:
+            Color(self.farbe[0],self.farbe[1],self.farbe[2],0.85)
+            Line(points=pts,width=dp(1.2))
+
 class ResultCard(ButtonBehavior, BoxLayout):
-    def __init__(self,result,is_new,prev,**kw):
+    def __init__(self,result,is_new,prev,serie=None,**kw):
         super().__init__(**kw)
         self.result=result
         self._is_new=is_new; self._prev=prev
+        self._serie=serie or []
         self._down=None; self._moved=False
         self.orientation="vertical"
         self.size_hint=(None,1)
@@ -891,6 +981,22 @@ class ResultCard(ButtonBehavior, BoxLayout):
             d.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             prow.add_widget(d)
         self.add_widget(prow)
+
+        # ── 30-Tage-Tief + Sparkline (nur wenn es schon Messpunkte gibt)
+        if len(self._serie)>=2:
+            tief=tief_30(self._serie)
+            if tief is not None:
+                srow=BoxLayout(orientation="horizontal",size_hint_y=None,
+                               height=dp(17),spacing=dp(5))
+                tl=Label(text=f"TIEF {format_preis(tief)}",color=PS1_GREY,
+                         font_size=sp(8),font_name=SST_FONT,
+                         halign="left",valign="middle",
+                         size_hint_x=None,width=dp(78),
+                         shorten=True,shorten_from="right")
+                tl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+                srow.add_widget(tl)
+                srow.add_widget(Sparkline(self._serie,color=co,size_hint_x=1))
+                self.add_widget(srow)
 
         # ── status line
         st_map={"hit":"VERFÜGBAR","expensive":"ZU TEUER","unknown":"PREIS OFFEN",
@@ -1009,6 +1115,8 @@ class MainUI(FloatLayout):
         self.history=History(); self._scan_t0=0.0; self._scan_done=0
         self._scan_total=0; self._rerender_event=None; self._drain_event=None
         self._resize_event=None; self._placeholder=None; self._last_sig=None
+        self._bg_warn_until=0.0
+        self._bg_text=None; self._bg_text_at=0.0
         self._build_ui()
         Window.bind(size=self._on_window_size)
         Clock.schedule_once(lambda dt:self._apply_sizes(),0)
@@ -1275,7 +1383,9 @@ class MainUI(FloatLayout):
         if rem<=0 and not self.scanning:
             self.next_scan_at=time.time()+self.auto_interval; self._scan_start()
         elif rem>0 and not self.scanning:
-            self.results_status.text=f"NÄCHSTER SCAN IN {int(rem//60):02d}:{int(rem%60):02d}"
+            txt=f"NÄCHSTER SCAN IN {int(rem//60):02d}:{int(rem%60):02d}"
+            bg=self._bg_last_text()
+            self.results_status.text=txt+(f" · BG {bg}" if bg else "")
         return True
     def _cycle_interval(self):
         iv=[x[0] for x in AUTO_INTERVALS]
@@ -1289,7 +1399,7 @@ class MainUI(FloatLayout):
         self.notify_enabled=not self.notify_enabled
         self.notify_chip.state=("down" if self.notify_enabled else "normal")
         self.settings.set("notify",self.notify_enabled)
-    def _maybe_notify(self,name,preis,is_new):
+    def _maybe_notify(self,name,preis,is_new,url=None):
         if not self.notify_enabled: return
         key=(name,round(preis,2))
         if key in self._known_hits: return
@@ -1297,7 +1407,7 @@ class MainUI(FloatLayout):
         if len(self._known_hits)>200:
             self._known_hits=set(list(self._known_hits)[-100:])
         msg=f"{name}: {format_preis(preis)}"
-        try: ok=notify("PS5 PRO 2TB VERFÜGBAR",msg)
+        try: ok=notify("PS5 PRO 2TB VERFÜGBAR",msg,url=url)
         except Exception: ok=False
         if not ok:
             try: self._toast(msg,color=CARD_STATUS["hit"])
@@ -1331,6 +1441,7 @@ class MainUI(FloatLayout):
         except (TypeError,ValueError): ts=0.0
         if ts<=self._bg_seen_ts: return
         self._bg_seen_ts=ts
+        self._bg_text_at=0.0
         for r in d.get("results") or []:
             if not isinstance(r,dict) or not r.get("haendler"): continue
             try:
@@ -1338,6 +1449,10 @@ class MainUI(FloatLayout):
                     r["klass"]=classify(True,r.get("preis"),self.max_preis)
                 self.scanned[r["haendler"]]=r
             except Exception: continue
+        # Der Service hat die History bereits fortgeschrieben - neu einlesen,
+        # damit die Sparkline den Stand des Hintergrund-Scans zeigt.
+        try: self.history=History()
+        except Exception: pass
         if self.scanned: self._rerender()
         # Der Service hat gerade gescannt - nicht sofort erneut loslegen.
         if ts>self.next_scan_at: self.next_scan_at=ts+self.auto_interval
@@ -1345,11 +1460,66 @@ class MainUI(FloatLayout):
         except (TypeError,ValueError): n=neu=0
         # Alte Meldungen nach einem Neustart nicht erneut als Neuigkeit zeigen.
         frisch=(time.time()-ts)<=max(7200,self.auto_interval*2)
+        alter=self._bg_alter_text(ts)
         if n and frisch:
-            self._toast("HINTERGRUND: %d TREFFER%s"%(n,(" \u00b7 %d NEU"%neu) if neu else ""),
+            self._toast("HINTERGRUND (%s): %d TREFFER%s"%(alter,n,(" \u00b7 %d NEU"%neu) if neu else ""),
                         color=PS1_YELLOW)
         elif d.get("geprueft"):
-            self._toast("HINTERGRUND: KEINE TREFFER",color=PS1_GREY)
+            self._toast("HINTERGRUND (%s): KEINE TREFFER"%alter,color=PS1_GREY)
+
+    def _bg_alter_text(self,ts):
+        try: s=max(0,int(time.time()-float(ts)))
+        except (TypeError,ValueError): return "?"
+        return f"{s//3600}H" if s>=3600 else f"{max(1,s//60)}M"
+
+    def _bg_last_text(self):
+        """Heartbeat fuer die Statuszeile - hoechstens einmal pro Minute von Platte."""
+        jetzt=time.time()
+        if jetzt-self._bg_text_at<60: return self._bg_text
+        self._bg_text_at=jetzt; self._bg_text=None
+        try:
+            with open(os.path.join(data_dir(),BG_STATUS_FILE),"r",encoding="utf-8") as f:
+                ts=float(json.load(f).get("ts") or 0)
+            if ts>0: self._bg_text=self._bg_alter_text(ts)
+        except Exception: pass
+        return self._bg_text
+
+    def _warn_if_bg_stale(self):
+        """Ein toter Hintergrund-Service soll nicht still bleiben."""
+        if not self.auto_scan: return
+        try:
+            with open(os.path.join(data_dir(),BG_STATUS_FILE),"r",encoding="utf-8") as f:
+                d=json.load(f)
+            ts=float(d.get("ts") or 0)
+        except Exception: return
+        if ts<=0: return
+        alter=time.time()-ts
+        grenze=max(1800,int(self.auto_interval)*2+600)
+        if alter<=grenze or time.time()<self._bg_warn_until: return
+        self._bg_warn_until=time.time()+6*3600
+        txt=self._bg_alter_text(ts)
+        self._toast(f"HINTERGRUND SEIT {txt} AUS",color=PS1_YELLOW)
+        box=BoxLayout(orientation="vertical",spacing=dp(8),padding=dp(12))
+        t=Label(text="[b]HINTERGRUND-SCAN PAUSIERT[/b]",markup=True,
+                color=PS1_SILVER,font_size=sp(12),font_name=SST_FONT,
+                halign="center",valign="middle",size_hint_y=None,height=dp(28))
+        t.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); box.add_widget(t)
+        m=Label(text=f"Letzter Lauf vor {txt}. Android oder der Akku-Manager\n"
+                     "hat den Dienst beendet. In den App-Einstellungen\n"
+                     "lassen sich Akku-Optimierung und Benachrichtigungen prüfen.",
+                color=PS1_GREY,font_size=sp(9),font_name=SST_FONT,
+                halign="center",valign="middle")
+        m.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); box.add_widget(m)
+        row=BoxLayout(size_hint_y=None,height=dp(38),spacing=dp(8))
+        b1=PS1Button(text="EINSTELLUNGEN",accent=PS1_BLUE,font_size=sp(10))
+        b2=PS1Button(text="SPÄTER",accent=PS1_SILVER,font_size=sp(10))
+        ref={"p":None}
+        b1.bind(on_release=lambda *_: (ref["p"] and ref["p"].dismiss(),open_app_settings()))
+        b2.bind(on_release=lambda *_: ref["p"] and ref["p"].dismiss())
+        row.add_widget(b1); row.add_widget(b2); box.add_widget(row)
+        p=Popup(title="",content=box,size_hint=(0.9,None),height=dp(220),
+                background_color=(0.08,0.08,0.09,1),separator_height=0)
+        ref["p"]=p; p.open()
 
     def _toast(self,text,color=None):
         app=App.get_running_app()
@@ -1413,7 +1583,8 @@ class MainUI(FloatLayout):
             namen.sort(key=lambda n:self.scanned[n]["zeit"],reverse=True)
 
         sig=tuple((n,self.scanned[n]["klass"],self.scanned[n]["preis"],
-                   self.scanned[n].get("_is_new")) for n in namen)
+                   self.scanned[n].get("_is_new"),len(self.history.get_serie(n)))
+                  for n in namen)
         if sig==self._last_sig and self._placeholder is None:
             return
         sx=self.results_scroll.scroll_x
@@ -1422,7 +1593,8 @@ class MainUI(FloatLayout):
         for n in namen:
             r=self.scanned[n]
             self.results_row.add_widget(
-                ResultCard(r,r.get("_is_new",False),r.get("_prev")))
+                ResultCard(r,r.get("_is_new",False),r.get("_prev"),
+                           self.history.get_serie(n)))
         if sx>0:
             Clock.schedule_once(lambda dt:setattr(self.results_scroll,"scroll_x",sx),0)
 
@@ -1505,7 +1677,7 @@ class MainUI(FloatLayout):
                                       + (f" · {hits} TREFFER" if hits else ""))
             self.results_count.text=f"{hits}/{self._scan_done}" if self.filter_mode=="verfuegbar" else f"{self._scan_done}/{self._scan_total}"
             if r["klass"]=="hit" and r["preis"] is not None:
-                self._maybe_notify(name,r["preis"],r["_is_new"])
+                self._maybe_notify(name,r["preis"],r["_is_new"],r.get("url"))
             self._rerender_throttled()
         except Exception as e:
             print(f"[Scan] {name}: {e}")
@@ -1523,7 +1695,7 @@ class MainUI(FloatLayout):
         d=time.time()-self._scan_t0
         hits=[x for x in self.scanned.values() if x["klass"]=="hit"]
         new=sum(1 for x in self.scanned.values() if x.get("_is_new"))
-        self._rerender(); self.history.update(self.scanned.values())
+        self.history.update(self.scanned.values()); self._rerender()
         ts=datetime.now().strftime("%H:%M")
         if abgebrochen:
             self.results_status.text=(f"ABGEBROCHEN · {self._scan_done}/{self._scan_total}"
@@ -1552,6 +1724,12 @@ class RootLayout(FloatLayout):
 
 class PS5ProApp(App):
     title="Playstation 5 Pro Search Agent"
+    def on_start(self):
+        # Kalter Start ueber eine Benachrichtigung: nach dem ersten Frame oeffnen.
+        Clock.schedule_once(self._open_deep_link,0.8)
+    def _open_deep_link(self,*_):
+        u=consume_deep_link()
+        if u: open_url(u)
     def build(self):
         Window.clearcolor=C_BG
         try:
@@ -1576,6 +1754,8 @@ class PS5ProApp(App):
             ui.radar.resume()
             ui._refresh_insets()
             ui._bg_merge()
+            ui._warn_if_bg_stale()
+            Clock.schedule_once(self._open_deep_link,0.3)
             if ui.auto_scan and not ui.scanning:
                 if time.time()>=ui.next_scan_at: ui._scan_start()
         except Exception: pass

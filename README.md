@@ -15,16 +15,21 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
   was nicht die 2-TB-Konsole ist.
 * **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen),
   sonst „ZU TEUER"; Bot-Schutz und Fehler werden getrennt ausgewiesen.
-* **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`).
+* **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`),
+  Sparkline und 30-Tage-Tief auf jeder Trefferkarte.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
-  sobald ein neuer Treffer auftaucht.
+  sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
+  Treffer eines Laufs werden gruppiert.
 * **Hintergrund-Scan**: mit aktivem AUTO läuft der Scan als Foreground-Service
   weiter, wenn die App geschlossen oder das Display aus ist — inklusive Alarm.
   Im Hintergrund höchstens alle 15 Minuten, damit Akku und Datenvolumen tragen.
+  Ein Heartbeat zeigt, wann zuletzt gescannt wurde; bleibt der Dienst wegen
+  Akku-Optimierung stehen, warnt die App und verlinkt die Systemeinstellungen.
 * **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**.
 * **Ressourcen-schonend:** das Radar zeichnet im Leerlauf 12 statt 30 Bilder/s und
-  pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert, und die
-  Bot-Schutz-Prüfung liest nur die ersten 3 KB statt die ganze Seite zu kopieren.
+  pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert. Der
+  Scan nutzt ETag/Last-Modified (304 spart den Download) und bricht Antworten über
+  5 MB ab; die Bot-Schutz-Prüfung liest nur die ersten 3 KB.
 * Filter (Treffer/alle), Sortierung (Preis/Händler/Zeit), Händler-Auswahl, kurzer
   Tap auf eine Karte öffnet den Shop im Browser.
 
@@ -76,14 +81,21 @@ ps5pro.zip                    Upload-Paket für Colab
 python3 tools/selftest.py
 ```
 
-Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung und
-die Händlerdaten — 67 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie
-vor jedem Build aus.
+Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
+HTTP-Cache, Preisverlauf und die Händlerdaten — 113 Zusicherungen, ohne Kivy und ohne
+Android. Der Workflow führt sie vor jedem Build aus.
+
+## Versionen
+
+* **v1.1** – HTTP-Cache/304, Preisverlauf mit Sparkline, Heartbeat-Warnung,
+  Notification-Deep-Links und Gruppierung (versionCode 2).
+* **v1.0** – erster Play-vorbereiteter Build (targetSdk 36, signierbares AAB);
+  bleibt als eigenes Release erhalten.
 
 ## Grenzen
 
-* Hintergrund-Scans bei gesperrtem Bildschirm sind nicht garantiert (kein
-  Foreground-Service); `AUTO` läuft zuverlässig im Vordergrund.
+* Hintergrund-Scans können von OEM-Akku-Managern oder nach einem Neustart beendet
+  werden; die App erkennt das über den Heartbeat und bietet die Systemeinstellungen an.
 * Shops ändern URLs und verschärfen Bot-Schutz. Einzelne Händler können dauerhaft
   „BOT-SCHUTZ" melden — dann hilft nur eine neue URL in `HAENDLER`.
 * Debug-APK zum Sideloading; für den Play Store ist ein signierter AAB-Build nötig.

@@ -50,6 +50,11 @@ SORT_OPTIONS = ["Preis","Händler","Zeit"]
 AUTO_INTERVALS = [(300,"5m"),(600,"10m"),(900,"15m"),(1800,"30m"),(3600,"60m")]
 TIMEOUT, WORKER = 20, 6
 HISTORY_FILE, SETTINGS_FILE = "ps5pro_history.json", "ps5pro_settings.json"
+HTTP_CACHE_FILE = "ps5pro_http_cache.json"
+# Obergrenze fuer eine HTML-Antwort. Manche Shops liefern riesige Kategorieseiten;
+# alles darueber ist fuer die Preiserkennung nutzlos und kostet nur Traffic.
+MAX_HTML_BYTES = 5 * 1024 * 1024
+MAX_SERIE_PUNKTE = 120
 BG_STATUS_FILE = "ps5pro_bg.json"
 
 # ── Händler ─────────────────────────────────────────────────────────
@@ -247,58 +252,165 @@ def classify(v,p,m):
     if m is None or p<=m: return "hit"
     return "expensive"
 
+def _read_capped(resp):
+    """Liest hoechstens MAX_HTML_BYTES und meldet, ob die Antwort zu gross war."""
+    stuecke=[]; gesamt=0
+    for stueck in resp.iter_content(65536):
+        if not stueck: continue
+        gesamt+=len(stueck)
+        if gesamt>MAX_HTML_BYTES:
+            try: resp.close()
+            except Exception: pass
+            return None,True
+        stuecke.append(stueck)
+    return b"".join(stuecke),False
+
+
+class HttpCache:
+    """ETag/Last-Modified plus das letzte Extraktionsergebnis pro URL.
+
+    Gespeichert wird nur das kompakte Ergebnis (Preis/Verfuegbarkeit), nicht das
+    HTML: die Datei bleibt klein und der naechste Scan kann einen 304 direkt
+    beantworten, ohne die Seite erneut zu parsen.
+    """
+    def __init__(self,pfad=None):
+        self.path=pfad or os.path.join(_data_dir(),HTTP_CACHE_FILE)
+        self._lock=threading.Lock()
+        try:
+            with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
+            self.data=data if isinstance(data,dict) else {}
+        except Exception: self.data={}
+    def get(self,u):
+        with self._lock:
+            e=self.data.get(u)
+            return dict(e) if isinstance(e,dict) else None
+    def put(self,u,result,etag=None,last_modified=None):
+        with self._lock:
+            self.data[u]={"etag":etag,"last_modified":last_modified,"result":result}
+            self._save_locked()
+    def drop(self,u):
+        with self._lock:
+            if self.data.pop(u,None) is not None: self._save_locked()
+    def _save_locked(self):
+        try:
+            tmp=self.path+".tmp"
+            with open(tmp,"w",encoding="utf-8") as f:
+                json.dump(self.data,f,ensure_ascii=False,indent=1)
+            os.replace(tmp,self.path)
+        except Exception: pass
+
+_HTTP_CACHE=None
+_HTTP_CACHE_LOCK=threading.Lock()
+
+def http_cache():
+    global _HTTP_CACHE
+    with _HTTP_CACHE_LOCK:
+        if _HTTP_CACHE is None: _HTTP_CACHE=HttpCache()
+        return _HTTP_CACHE
+
+def reset_http_cache():
+    """Nur fuer Tests: naechster Zugriff liest die Datei neu ein."""
+    global _HTTP_CACHE
+    with _HTTP_CACHE_LOCK: _HTTP_CACHE=None
+
+
 def _try_url(u, att, proxy=None):
+    """Eine Anfrage. Rueckgabe (html, fehler, meta).
+
+    meta["not_modified"] signalisiert einen 304. Bedingte Header gehen nur beim
+    ersten Versuch mit: ein Cache-Buster im Retry wuerde den Cache ohnehin
+    umgehen, und ein 304 auf einen Retry waere wertlos.
+    """
     uu=u
     if att>0: uu+=("&" if "?" in uu else "?")+"_cb="+str(int(time.time()*1000))
     ua=UA_PROFILES[att%len(UA_PROFILES)]
     ref=REFERERS[att%len(REFERERS)]
     hd={**BASE_HEADERS,**ua,"Referer":ref}
+    meta={"not_modified":False,"etag":None,"last_modified":None}
+    # Nur der erste Versuch ist bedingt; der Cache ist prozessweit, weil die
+    # Scan-Threads dieselbe Datei teilen und _try_url so kompatibel bleibt.
+    cache=http_cache() if att==0 else None
+    eintrag=cache.get(u) if cache is not None else None
+    if eintrag:
+        if eintrag.get("etag"): hd["If-None-Match"]=eintrag["etag"]
+        if eintrag.get("last_modified"): hd["If-Modified-Since"]=eintrag["last_modified"]
     pr={"http":proxy,"https":proxy} if proxy else None
     try:
         sess=_session()
         if sess is not None:
-            r=sess.get(uu,headers=hd,timeout=TIMEOUT,allow_redirects=True,proxies=pr)
+            r=sess.get(uu,headers=hd,timeout=TIMEOUT,allow_redirects=True,
+                       proxies=pr,stream=True)
+            meta["etag"]=r.headers.get("ETag"); meta["last_modified"]=r.headers.get("Last-Modified")
+            if r.status_code==304:
+                meta["not_modified"]=True; r.close(); return None,"HTTP 304",meta
             if r.status_code==429:
                 # Retry-After respektieren, aber gedeckelt - ein Shop mit
                 # "3600" soll den Scan nicht eine Stunde blockieren.
                 try: ra=int(r.headers.get("Retry-After","8"))
                 except (TypeError,ValueError): ra=8
-                time.sleep(min(max(ra,1),15)); return None,"HTTP 429"
-            if r.status_code>=400: return None,f"HTTP {r.status_code}"
-            return r.text,None
+                r.close(); time.sleep(min(max(ra,1),15)); return None,"HTTP 429",meta
+            if r.status_code>=400:
+                r.close(); return None,f"HTTP {r.status_code}",meta
+            roh,zu_gross=_read_capped(r)
+            if zu_gross: return None,"Antwort zu gross",meta
+            enc=r.encoding or "utf-8"
+            try: return roh.decode(enc,errors="replace"),None,meta
+            except LookupError: return roh.decode("utf-8",errors="replace"),None,meta
         req=Request(uu,headers=hd)
         with urlopen(req,timeout=TIMEOUT) as resp:
-            return resp.read().decode("utf-8",errors="replace"),None
+            meta["etag"]=resp.headers.get("ETag"); meta["last_modified"]=resp.headers.get("Last-Modified")
+            roh=resp.read(MAX_HTML_BYTES+1)
+            if len(roh)>MAX_HTML_BYTES: return None,"Antwort zu gross",meta
+            return roh.decode("utf-8",errors="replace"),None,meta
     except HTTPError as e:
         # urlopen wirft bei 4xx/5xx; ohne diese Normalisierung greift die
         # 404/410-Abkürzung in fetch_html_multi nie und jeder umgezogene
         # Haendler kostet drei Versuche samt Wartezeit.
-        return None,f"HTTP {e.code}"
-    except Exception as e: return None,str(e)[:50]
+        if e.code==304:
+            meta["not_modified"]=True
+            meta["etag"]=e.headers.get("ETag") if e.headers else None
+            meta["last_modified"]=e.headers.get("Last-Modified") if e.headers else None
+            return None,"HTTP 304",meta
+        return None,f"HTTP {e.code}",meta
+    except Exception as e: return None,str(e)[:50],meta
 
-def fetch_html_multi(urls):
+def fetch_mit_cache(urls):
+    """Wie fetch_html_multi, liefert zusaetzlich ein 304-Ergebnis aus dem Cache."""
     last=None
     proxy=os.environ.get("PS5_PROXY","").strip() or None
+    cache=http_cache()
     for att in range(3):
         dauerhaft=False
         for u in urls:
-            h,e=_try_url(u,att,proxy)
+            h,e,meta=_try_url(u,att,proxy)
+            if meta.get("not_modified"):
+                eintrag=cache.get(u)
+                if eintrag and isinstance(eintrag.get("result"),dict):
+                    return "",u,dict(eintrag["result"]),meta
+                # Cache-Eintrag geloescht: Validatoren verwerfen und ohne
+                # Bedingung erneut laden, statt den Haendler als Fehler zu werten.
+                cache.drop(u); last="HTTP 304"; continue
             if h:
                 # Nur den Kopf pruefen - h.lower() auf einer 5-MB-Seite kostet
                 # unnoetig Zeit und Speicher.
                 if detect_challenge(h[:3000].lower()): last="Bot-Challenge"; continue
-                return h,u
+                return h,u,None,meta
             last=e
             # 404/410 bleiben bei jedem User-Agent bestehen. Drei Versuche kosten
             # hier nur ~7 s Wartezeit pro umgezogenem Haendler, ohne Chance auf
             # Erfolg; alles andere (Timeout, 403, 429, 5xx) wird weiter probiert.
-            if e in ("HTTP 404","HTTP 410"):
+            if e in ("HTTP 404","HTTP 410","Antwort zu gross"):
                 if len(urls)==1:
                     dauerhaft=True; break
                 continue
             time.sleep((0.4,2.0,5.0)[att]+random.uniform(0,1.0))
         if dauerhaft: break
     raise RuntimeError(last or "alle URLs fehlgeschlagen")
+
+def fetch_html_multi(urls):
+    """Kompatible Fassung fuer Aufrufer, die nur HTML und URL brauchen."""
+    h,u,_cached,_meta=fetch_mit_cache(urls)
+    return h,u
 
 def _res(h,preis,klass,dauer,err,final_url=None):
     return {"haendler":h["name"],"url":final_url or h["urls"][0],"land":h["land"],
@@ -308,7 +420,12 @@ def _res(h,preis,klass,dauer,err,final_url=None):
 def scan_einen(h):
     st=time.time()
     try:
-        html,fu=fetch_html_multi(h["urls"]); d=time.time()-st
+        html,fu,cached,meta=fetch_mit_cache(h["urls"]); d=time.time()-st
+        if cached is not None:
+            p=cached.get("preis"); v=bool(cached.get("verfuegbar"))
+            res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu)
+            res["_cache"]=True
+            return res
         if detect_challenge(html[:3000].lower()):
             return _res(h,None,"challenge",d,"Bot-Challenge",fu)
         s=extract_structured(html)
@@ -316,7 +433,15 @@ def scan_einen(h):
             return _res(h,None,"unknown",d,"nicht PS5 Pro 2TB",fu)
         v=pruefe_verfuegbar(html,s)
         p=(s.get("preis") or extract_meta_preis(html))
-        return _res(h,p,classify(v,p,MAX_PREIS),d,None,fu)
+        res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu)
+        # Auch "nicht verfuegbar" cachen: der naechste 304 spart die Seite
+        # komplett, und die Verfuegbarkeit stammt aus demselben Abruf.
+        try:
+            http_cache().put(fu or h["urls"][0],
+                             {"preis":p,"verfuegbar":bool(v)},
+                             meta.get("etag"),meta.get("last_modified"))
+        except Exception: pass
+        return res
     except Exception as e:
         return _res(h,None,"error",time.time()-st,str(e)[:60])
 
@@ -381,12 +506,46 @@ class History:
             with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
             self.data=data if isinstance(data,dict) else {}
         except Exception: self.data={}
+        # Alte Dateien haben nur den letzten Preis. Daraus einen Startpunkt der
+        # Serie machen, damit die Sparkline ohne Wartezeit etwas anzeigen kann.
+        for n,e in list(self.data.items()):
+            if not isinstance(e,dict):
+                self.data.pop(n,None); continue
+            serie=self._saubere_serie(e.get("serie"))
+            if not serie and e.get("zeit") is not None and e.get("preis") is not None:
+                try: serie=[[str(e["zeit"]),float(e["preis"])]]
+                except (TypeError,ValueError): serie=[]
+            e["serie"]=serie
     def get_last(self,n): return self.data.get(n,{}).get("preis")
+    def get_serie(self,n):
+        e=self.data.get(n)
+        return self._saubere_serie(e.get("serie")) if isinstance(e,dict) else []
+    def _saubere_serie(self,serie):
+        out=[]
+        if not isinstance(serie,list): return out
+        for punkt in serie:
+            try:
+                ts=str(punkt[0]); preis=float(punkt[1])
+            except (TypeError,ValueError,IndexError): continue
+            if not ts: continue
+            out.append([ts,preis])
+        return out[-MAX_SERIE_PUNKTE:]
     def update(self,results):
         now=datetime.now().isoformat(timespec="seconds")
         for r in results:
             if r["klass"]=="hit" and r["preis"] is not None:
-                self.data[r["haendler"]]={"preis":r["preis"],"zeit":now}
+                alt=self.data.get(r["haendler"]) or {}
+                serie=self._saubere_serie(alt.get("serie"))
+                try: preis=float(r["preis"])
+                except (TypeError,ValueError): continue
+                # Nur echte Aenderungen anhaengen, sonst wird die Serie bei
+                # jedem 15-Minuten-Scan mit identischen Preisen geflutet.
+                if not serie or abs(serie[-1][1]-preis)>0.005:
+                    serie.append([now,preis])
+                else:
+                    serie[-1][0]=now
+                self.data[r["haendler"]]={"preis":preis,"zeit":now,
+                                           "serie":serie[-MAX_SERIE_PUNKTE:]}
         try:
             tmp=self.path+".tmp"
             with open(tmp,"w",encoding="utf-8") as f:
