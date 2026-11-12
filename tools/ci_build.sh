@@ -21,8 +21,8 @@ export PYTHONIOENCODING=utf-8
 
 say "Pflichtdateien pruefen"
 missing=0
-for f in main.py buildozer.spec icon.png \
-         assets/icon_fg.png assets/icon_bg.png tools/selftest.py \
+for f in main.py scan_core.py service.py buildozer.spec icon.png \
+         assets/icon_fg.png assets/icon_bg.png assets/notify_icon.png tools/selftest.py \
          tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
          tools/ci_log_failure.sh; do
     if [ ! -f "$f" ]; then

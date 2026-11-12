@@ -120,7 +120,17 @@ icon.adaptive_background.filename = %(source.dir)s/assets/icon_bg.png
 
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions.html for all the supported syntaxes and properties)
-android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS
+android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC
+
+# Hintergrund-Scan: eigener Prozess, damit Treffer auch bei geschlossener App
+# gemeldet werden. :foreground = Pflicht-Notification, :sticky = Android startet
+# den Dienst nach einem Kill neu, foregroundServiceType ist ab Android 14 Pflicht
+# (dataSync = Netzwerk-Synchronisation, passt fuer periodische Abfragen).
+services = ps5proscan:service.py:foreground:sticky:foregroundServiceType=dataSync
+
+# Eigenes PNG als Statusleisten-Icon. Das adaptive App-Icon (XML) ist als
+# Small-Icon ungueltig - p4a wuerde es sonst nehmen und startForeground scheitert.
+android.add_resources = assets/notify_icon.png:drawable/notify_icon.png
 
 
 # (list) features (adds uses-feature -tags to manifest)

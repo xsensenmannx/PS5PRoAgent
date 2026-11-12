@@ -18,6 +18,9 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`).
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht.
+* **Hintergrund-Scan**: mit aktivem AUTO läuft der Scan als Foreground-Service
+  weiter, wenn die App geschlossen oder das Display aus ist — inklusive Alarm.
+  Im Hintergrund höchstens alle 15 Minuten, damit Akku und Datenvolumen tragen.
 * **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**.
 * **Ressourcen-schonend:** das Radar zeichnet im Leerlauf 12 statt 30 Bilder/s und
   pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert, und die
@@ -41,11 +44,14 @@ Play-Store-Release steht in **[BUILD_ANDROID.md](BUILD_ANDROID.md)**.
 ## Projektstruktur
 
 ```
-main.py                       komplette App (UI + Scanner)
+main.py                       Oberfläche (Kivy) und App-Start
+scan_core.py                  Scan-/Preis-/Speicherlogik ohne Kivy (auch im Service)
+service.py                    Hintergrund-Scan als Android-Foreground-Service
 buildozer.spec                Android-Build-Konfiguration
 icon.png                      App-Icon (512×512)
 assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
+assets/notify_icon.png        Statusleisten-Icon des Hintergrund-Service
 tools/selftest.py             Logiktests ohne Kivy (CI-Gate)
 tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal)
 tools/ci_check_apk.sh         prüft die fertige APK (Größe, Python-Version)

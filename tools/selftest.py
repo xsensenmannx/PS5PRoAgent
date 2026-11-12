@@ -118,6 +118,7 @@ def _stub_kivy():
 
 _stub_kivy()
 import main  # noqa: E402
+import scan_core as core  # noqa: E402
 
 FAILS = []
 COUNT = 0
@@ -144,45 +145,45 @@ HTML_OK = """<html><head>
 
 def main_tests():
     # Preis-Parsing und Formatierung
-    check("parse 1.299,00", main.parse_preis_str("1.299,00 €"), 1299.0)
-    check("parse 799,99", main.parse_preis_str("799,99"), 799.99)
-    check("parse EUR 1.199,00", main.parse_preis_str("EUR 1.199,00"), 1199.0)
-    check("parse 1.299,5", main.parse_preis_str("1.299,5"), 1299.5)
-    check("parse 1099,00 vierstellig", main.parse_preis_str("1099,00 €"), 1099.0)
-    check("parse 1.099 Tausenderpunkt", main.parse_preis_str("1.099 €"), 1099.0)
-    check("parse 2.099,90", main.parse_preis_str("2.099,90"), 2099.9)
-    check("parse 1.5 bleibt dezimal", main.parse_preis_str("1.5"), 1.5)
-    check("parse 799,- ohne Cent", main.parse_preis_str("799,-"), 799.0)
-    check("parse 799,– Halbgeviertstrich", main.parse_preis_str("799,–"), 799.0)
-    check("parse 1.299,-- ohne Cent", main.parse_preis_str("1.299,--"), 1299.0)
-    check("parse 1.299,00 mit Sternchen", main.parse_preis_str("1.299,00 €*"), 1299.0)
-    check("parse (799,00 €) in Klammern", main.parse_preis_str("(799,00 €)"), 799.0)
-    check("parse ohne Zahl", main.parse_preis_str("n/a"), None)
-    check("format 1299.5", main.format_preis(1299.5), "1.299,50 €")
-    check("format 799", main.format_preis(799.0), "799,00 €")
+    check("parse 1.299,00", core.parse_preis_str("1.299,00 €"), 1299.0)
+    check("parse 799,99", core.parse_preis_str("799,99"), 799.99)
+    check("parse EUR 1.199,00", core.parse_preis_str("EUR 1.199,00"), 1199.0)
+    check("parse 1.299,5", core.parse_preis_str("1.299,5"), 1299.5)
+    check("parse 1099,00 vierstellig", core.parse_preis_str("1099,00 €"), 1099.0)
+    check("parse 1.099 Tausenderpunkt", core.parse_preis_str("1.099 €"), 1099.0)
+    check("parse 2.099,90", core.parse_preis_str("2.099,90"), 2099.9)
+    check("parse 1.5 bleibt dezimal", core.parse_preis_str("1.5"), 1.5)
+    check("parse 799,- ohne Cent", core.parse_preis_str("799,-"), 799.0)
+    check("parse 799,– Halbgeviertstrich", core.parse_preis_str("799,–"), 799.0)
+    check("parse 1.299,-- ohne Cent", core.parse_preis_str("1.299,--"), 1299.0)
+    check("parse 1.299,00 mit Sternchen", core.parse_preis_str("1.299,00 €*"), 1299.0)
+    check("parse (799,00 €) in Klammern", core.parse_preis_str("(799,00 €)"), 799.0)
+    check("parse ohne Zahl", core.parse_preis_str("n/a"), None)
+    check("format 1299.5", core.format_preis(1299.5), "1.299,50 €")
+    check("format 799", core.format_preis(799.0), "799,00 €")
 
     # Klassifizierung
-    check("classify unavail", main.classify(False, 799, 900), "unavail")
-    check("classify unknown", main.classify(True, None, 900), "unknown")
-    check("classify hit", main.classify(True, 899, 900), "hit")
-    check("classify expensive", main.classify(True, 901, 900), "expensive")
-    check("classify max offen", main.classify(True, 5000, None), "hit")
+    check("classify unavail", core.classify(False, 799, 900), "unavail")
+    check("classify unknown", core.classify(True, None, 900), "unknown")
+    check("classify hit", core.classify(True, 899, 900), "hit")
+    check("classify expensive", core.classify(True, 901, 900), "expensive")
+    check("classify max offen", core.classify(True, 5000, None), "hit")
 
     # JSON-LD
-    st = main.extract_structured(HTML_OK)
+    st = core.extract_structured(HTML_OK)
     check("jsonld ist_konsole", st["ist_konsole"], True)
     check("jsonld preis", st["preis"], 799.99)
     check("jsonld verfuegbar", st["verfuegbar"], True)
-    check("pruefe_nur_konsole", main.pruefe_nur_konsole(HTML_OK, st), True)
-    check("pruefe_verfuegbar", main.pruefe_verfuegbar(HTML_OK, st), True)
-    check("jsonld outofstock", main.extract_structured(
+    check("pruefe_nur_konsole", core.pruefe_nur_konsole(HTML_OK, st), True)
+    check("pruefe_verfuegbar", core.pruefe_verfuegbar(HTML_OK, st), True)
+    check("jsonld outofstock", core.extract_structured(
         HTML_OK.replace("InStock", "OutOfStock"))["verfuegbar"], False)
-    check("jsonld ausschluss zubehoer", main.extract_structured(
+    check("jsonld ausschluss zubehoer", core.extract_structured(
         HTML_OK.replace("(E-Chassis)", "DualSense Edge Controller"))["ist_konsole"], False)
     # Platzhalterpreise aus Shop-Vorlagen duerfen keinen Alarm ausloesen.
-    check("jsonld platzhalter 0,00", main.extract_structured(
+    check("jsonld platzhalter 0,00", core.extract_structured(
         HTML_OK.replace('"799,99"', '"0,00"'))["preis"], None)
-    check("jsonld preis unter minimum", main.extract_structured(
+    check("jsonld preis unter minimum", core.extract_structured(
         HTML_OK.replace('"799,99"', '"1,00"'))["preis"], None)
     _zwei = ('<script type="application/ld+json">['
              '{"@type":"Product","name":"Sony PlayStation 5 Pro 2 TB"},'
@@ -190,38 +191,38 @@ def main_tests():
              '"offers":{"@type":"Offer","price":"799,00",'
              '"availability":"InStock"}}]</script>')
     check("jsonld zweiter eintrag preis",
-          main.extract_structured(_zwei)["preis"], 799.0)
+          core.extract_structured(_zwei)["preis"], 799.0)
 
     # urllib-Fallback: HTTPError muss als "HTTP 404" ankommen, sonst greift
     # die Schnellabschaltung fuer umgezogene Haendler nicht.
     import urllib.error as _ue
-    _alt_rq, _alt_tried = main._RQ, main._RQ_TRIED
-    main._RQ, main._RQ_TRIED = None, True
+    _alt_rq, _alt_tried = core._RQ, core._RQ_TRIED
+    core._RQ, core._RQ_TRIED = None, True
     def _boom(*_a, **_k):
         raise _ue.HTTPError("http://x", 404, "Not Found", None, None)
-    _alt_urlopen = main.urlopen; main.urlopen = _boom
+    _alt_urlopen = core.urlopen; core.urlopen = _boom
     try:
-        check("urllib 404 normalisiert", main._try_url("http://x", 0)[1], "HTTP 404")
+        check("urllib 404 normalisiert", core._try_url("http://x", 0)[1], "HTTP 404")
     finally:
-        main.urlopen = _alt_urlopen; main._RQ, main._RQ_TRIED = _alt_rq, _alt_tried
-    check("nur_konsole ohne product", main.pruefe_nur_konsole(
+        core.urlopen = _alt_urlopen; core._RQ, core._RQ_TRIED = _alt_rq, _alt_tried
+    check("nur_konsole ohne product", core.pruefe_nur_konsole(
         "<html><body>PlayStation 5 Pro 2 TB Uebersicht</body></html>", {}), True)
-    check("nur_konsole fremdprodukt", main.pruefe_nur_konsole("<html>xbox</html>", {}), False)
+    check("nur_konsole fremdprodukt", core.pruefe_nur_konsole("<html>xbox</html>", {}), False)
 
     # Meta-Preis-Fallback
-    check("meta preis", main.extract_meta_preis(
+    check("meta preis", core.extract_meta_preis(
         '<meta property="product:price:amount" content="899,00">'), 899.0)
-    check("meta preis im text", main.extract_meta_preis("<p>Preis: 1.049,00 €</p>"), 1049.0)
-    check("meta preis unter minimum", main.extract_meta_preis("<p>Preis: 99,00 €</p>"), None)
-    check("meta preis vierstellig", main.extract_meta_preis(
+    check("meta preis im text", core.extract_meta_preis("<p>Preis: 1.049,00 €</p>"), 1049.0)
+    check("meta preis unter minimum", core.extract_meta_preis("<p>Preis: 99,00 €</p>"), None)
+    check("meta preis vierstellig", core.extract_meta_preis(
         "<p>Preis: 1099,00 €</p>"), 1099.0)
 
     # Bot-Schutz und Verfuegbarkeit
-    check("challenge erkannt", main.detect_challenge("just a moment..."), True)
-    check("kein challenge", main.detect_challenge("<html>shop</html>"), False)
-    check("verfuegbar negativ", main.pruefe_verfuegbar(
+    check("challenge erkannt", core.detect_challenge("just a moment..."), True)
+    check("kein challenge", core.detect_challenge("<html>shop</html>"), False)
+    check("verfuegbar negativ", core.pruefe_verfuegbar(
         "nicht verfügbar ausverkauft", {"verfuegbar": None}), False)
-    check("verfuegbar positiv", main.pruefe_verfuegbar(
+    check("verfuegbar positiv", core.pruefe_verfuegbar(
         "in den warenkorb jetzt kaufen", {"verfuegbar": None}), True)
 
     # Kuerzel
@@ -231,20 +232,20 @@ def main_tests():
     check("initials Notebooksbilliger", main.initials_for("Notebooksbilliger"), "NB")
 
     # Haendlerdaten
-    names = [h["name"] for h in main.HAENDLER]
+    names = [h["name"] for h in core.HAENDLER]
     check("haendler eindeutig", len(names), len(set(names)))
     check("haendler https", all(u.startswith("https://")
-                                for h in main.HAENDLER for u in h["urls"]), True)
+                                for h in core.HAENDLER for u in h["urls"]), True)
     check("haendler feld vollstaendig", all(
         h.get("name") and h.get("land") in ("DE", "AT") and h.get("urls")
-        for h in main.HAENDLER), True)
+        for h in core.HAENDLER), True)
     # Land und Domain muessen zusammenpassen. "Aetka AT" auf aetka.de war genau
     # so ein Datenfehler: der AT-Filter zeigte damit einen deutschen Shop.
     # Ausnahmen mit Grund: PS Direct fuehrt DE und AT unter derselben .com-Domain,
     # Computeruniverse ist ein deutscher Shop auf .net.
     ausnahmen = ("direct.playstation.com", "www.computeruniverse.net")
     falsch = []
-    for h in main.HAENDLER:
+    for h in core.HAENDLER:
         host = h["urls"][0].split("/")[2].lower()
         if host.startswith(ausnahmen):
             continue
@@ -262,15 +263,15 @@ def retry_tests():
     0,4 s + 2 s + 5 s Pause werfen pro umgezogenem Haendler rund 7 s Scan-Zeit
     weg. 5xx/Timeout muessen dagegen weiter probiert werden.
     """
-    echt = main._try_url
-    echt_zeit = main.time
+    echt = core._try_url
+    echt_zeit = core.time
     # Nur sleep ersetzen, damit der Test nicht wirklich wartet.
-    main.time = types.SimpleNamespace(sleep=lambda s: None)
+    core.time = types.SimpleNamespace(sleep=lambda s: None)
     try:
         calls = []
-        main._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 404"))[1]
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 404"))[1]
         try:
-            main.fetch_html_multi(["https://example.invalid"])
+            core.fetch_html_multi(["https://example.invalid"])
             fehler = None
         except RuntimeError as e:
             fehler = str(e)
@@ -278,23 +279,23 @@ def retry_tests():
         check("404 nur ein Versuch", len(calls), 1)
 
         calls.clear()
-        main._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 500"))[1]
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 500"))[1]
         try:
-            main.fetch_html_multi(["https://example.invalid"])
+            core.fetch_html_multi(["https://example.invalid"])
         except RuntimeError:
             pass
         check("500 dreimal probiert", len(calls), 3)
 
         calls.clear()
-        main._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 403"))[1]
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 403"))[1]
         try:
-            main.fetch_html_multi(["https://example.invalid"])
+            core.fetch_html_multi(["https://example.invalid"])
         except RuntimeError:
             pass
         check("403 dreimal probiert", len(calls), 3)
     finally:
-        main._try_url = echt
-        main.time = echt_zeit
+        core._try_url = echt
+        core.time = echt_zeit
 
 
 def radar_tests():
@@ -338,6 +339,42 @@ def radar_tests():
     check("radar Pause behaelt Zwischenzeit", (z, acc, step), (False, 0.05, 0.0))
 
 
+def service_tests():
+    """Hintergrund-Service: Intervall-Untergrenze und Treffer-Deduplizierung."""
+    check("bg intervall 5m wird 15m", core.bg_intervall(300), 900)
+    check("bg intervall 30m bleibt", core.bg_intervall(1800), 1800)
+    check("bg intervall ungueltig", core.bg_intervall("x"), 900)
+    check("bg intervall leer", core.bg_intervall(None), 900)
+
+    check("neuer treffer ohne vorgabe", core.ist_neuer_treffer(799.0, None), True)
+    check("gleicher preis ist nicht neu", core.ist_neuer_treffer(799.0, 799.0), False)
+    check("guenstiger ist neu", core.ist_neuer_treffer(750.0, 799.0), True)
+    check("teurer ist nicht neu", core.ist_neuer_treffer(850.0, 799.0), False)
+    check("cent-toleranz", core.ist_neuer_treffer(798.995, 799.0), False)
+
+    roh = [{"klass": "expensive", "preis": 950.0},
+           {"klass": "hit", "preis": 800.0},
+           {"klass": "hit", "preis": None},
+           {"klass": "error"}]
+    check("treffer_aus filtert", [r["preis"] for r in core.treffer_aus(roh)], [800.0])
+
+    # scan_alle nutzt dieselbe Klassifizierung wie die App.
+    alt = core._safe_scan
+    def fake(h):
+        return {"haendler": h["name"], "preis": 800.0 if h["name"] == "A" else 950.0,
+                "klass": "hit", "url": h["urls"][0], "land": h["land"],
+                "dauer": 0.1, "zeit": "10:00", "fehler": None}
+    core._safe_scan = fake
+    try:
+        rs = core.scan_alle([{"name": "A", "land": "DE", "urls": ["https://a.de"]},
+                             {"name": "B", "land": "DE", "urls": ["https://b.de"]}], 900.0)
+    finally:
+        core._safe_scan = alt
+    check("scan_alle klassifiziert", sorted(r["klass"] for r in rs),
+          ["expensive", "hit"])
+    check("scan_alle liefert alle", len(rs), 2)
+
+
 def spec_tests():
     """Der Build-Pin entscheidet ueber Erfolg oder Abbruch - deshalb geprueft.
 
@@ -362,6 +399,15 @@ def spec_tests():
     # "const GLchar**" gegen "const GLchar* const *" der GLES-Header.
     check("spec kivy nicht 2.3.0", "kivy==2.3.0" in req, False)
     check("spec api 34", c.get("app", "android.api"), "34")
+    # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
+    # Dienst nicht, ohne die Rechte schon gar nicht.
+    check("spec hintergrund-service", c.get("app", "services"),
+          "ps5proscan:service.py:foreground:sticky:foregroundServiceType=dataSync")
+    perms = c.get("app", "android.permissions")
+    check("spec foreground-recht", "FOREGROUND_SERVICE" in perms, True)
+    check("spec dataSync-recht", "FOREGROUND_SERVICE_DATA_SYNC" in perms, True)
+    check("spec notify-icon",
+          "drawable/notify_icon.png" in c.get("app", "android.add_resources"), True)
 
 
 if __name__ == "__main__":
@@ -369,6 +415,7 @@ if __name__ == "__main__":
         main_tests()
         retry_tests()
         radar_tests()
+        service_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.
