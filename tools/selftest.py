@@ -8,7 +8,9 @@ Verfuegbarkeit, Bot-Schutz, Klassifizierung, Haendlerdaten.
 Exit-Code 0 = alles gruen. Wird in .github/workflows/build-apk.yml als Gate
 vor dem APK-Build ausgefuehrt, damit ein kaputtes Parsing nie in die APK geht.
 """
+import configparser
 import os
+import re
 import sys
 import types
 
@@ -146,6 +148,10 @@ def main_tests():
     check("parse 799,99", main.parse_preis_str("799,99"), 799.99)
     check("parse EUR 1.199,00", main.parse_preis_str("EUR 1.199,00"), 1199.0)
     check("parse 1.299,5", main.parse_preis_str("1.299,5"), 1299.5)
+    check("parse 1099,00 vierstellig", main.parse_preis_str("1099,00 €"), 1099.0)
+    check("parse 1.099 Tausenderpunkt", main.parse_preis_str("1.099 €"), 1099.0)
+    check("parse 2.099,90", main.parse_preis_str("2.099,90"), 2099.9)
+    check("parse 1.5 bleibt dezimal", main.parse_preis_str("1.5"), 1.5)
     check("parse ohne Zahl", main.parse_preis_str("n/a"), None)
     check("format 1299.5", main.format_preis(1299.5), "1.299,50 €")
     check("format 799", main.format_preis(799.0), "799,00 €")
@@ -177,6 +183,8 @@ def main_tests():
         '<meta property="product:price:amount" content="899,00">'), 899.0)
     check("meta preis im text", main.extract_meta_preis("<p>Preis: 1.049,00 €</p>"), 1049.0)
     check("meta preis unter minimum", main.extract_meta_preis("<p>Preis: 99,00 €</p>"), None)
+    check("meta preis vierstellig", main.extract_meta_preis(
+        "<p>Preis: 1099,00 €</p>"), 1099.0)
 
     # Bot-Schutz und Verfuegbarkeit
     check("challenge erkannt", main.detect_challenge("just a moment..."), True)
@@ -202,9 +210,33 @@ def main_tests():
         for h in main.HAENDLER), True)
 
 
+def spec_tests():
+    """Der Build-Pin entscheidet ueber Erfolg oder Abbruch - deshalb geprueft.
+
+    p4a baut ohne Pin CPython 3.14; Cython 0.29.36 (fest im p4a-Recipe) und
+    Kivy 2.3.0 koennen nur bis 3.12. Ausserdem verlangt p4a, dass python3 und
+    hostpython3 exakt dieselbe Version haben.
+    """
+    c = configparser.ConfigParser()
+    c.read(os.path.join(ROOT, "buildozer.spec"), encoding="utf-8")
+    req = c.get("app", "requirements")
+    # Negative Lookbehind: sonst trifft "python3==" auch in "hostpython3==".
+    m = re.search(r"(?<![a-z0-9])python3==([0-9][0-9.]*)", req)
+    h = re.search(r"hostpython3==([0-9][0-9.]*)", req)
+    check("spec python3 gepinnt", bool(m), True)
+    check("spec hostpython3 gepinnt", bool(h), True)
+    check("spec pins identisch",
+          m.group(1) if m else None, h.group(1) if h else None)
+    ver = m.group(1) if m else ""
+    check("spec python <= 3.12", ver[:5] in ("3.10.", "3.11.", "3.12."), True)
+    check("spec kivy 2.3.0", "kivy==2.3.0" in req, True)
+    check("spec api 34", c.get("app", "android.api"), "34")
+
+
 if __name__ == "__main__":
     try:
         main_tests()
+        spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.
         try:

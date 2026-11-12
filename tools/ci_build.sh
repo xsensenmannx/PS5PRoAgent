@@ -34,6 +34,29 @@ if [ "$missing" -ne 0 ]; then
 fi
 echo "alle vorhanden"
 
+# Vorab-Pruefung in Sekunden statt nach 40 Minuten Build: p4a baut ohne Pin
+# CPython 3.14.2, das mit Cython 0.29.36 (fest im p4a-Recipe) und Kivy 2.3.0
+# nicht kompiliert. Und p4a verlangt python3 == hostpython3.
+say "Python-Pin pruefen"
+# Wichtig: [[:space:],] vor python3, sonst trifft das Muster auch das
+# "python3==" innerhalb von "hostpython3==" und liest die falsche Version.
+PYPIN=$(sed -n 's/.*[[:space:],]python3==\([0-9][0-9.]*\).*/\1/p' buildozer.spec | head -n 1)
+HOSTPIN=$(sed -n 's/.*hostpython3==\([0-9][0-9.]*\).*/\1/p' buildozer.spec | head -n 1)
+if [ -z "$PYPIN" ] || [ -z "$HOSTPIN" ]; then
+    echo "::error::buildozer.spec pinnt python3/hostpython3 nicht (requirements)."
+    echo "Ohne Pin baut p4a CPython 3.14, das hier nicht kompiliert."
+    exit 1
+fi
+if [ "$PYPIN" != "$HOSTPIN" ]; then
+    echo "::error::python3==$PYPIN vs hostpython3==$HOSTPIN - p4a verlangt identische Versionen."
+    exit 1
+fi
+case "$PYPIN" in
+    3.10.*|3.11.*|3.12.*) echo "Python $PYPIN (Cython-0.29-kompatibel)" ;;
+    *) echo "::error::Python $PYPIN ist zu neu fuer Cython 0.29.36 und Kivy 2.3.0 (nur 3.10-3.12)."
+       exit 1 ;;
+esac
+
 if [ "${SKIP_APT:-0}" != "1" ]; then
     say "Systempakete"
     sudo apt-get update -qq
@@ -107,3 +130,8 @@ fi
 
 say "Ergebnis"
 ls -lh bin/*.apk
+
+# "Build erfolgreich" heisst noch nicht, dass die richtige Python-Version
+# in der APK steckt. Genau das hat hier 40 Minuten gekostet.
+APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
+bash tools/ci_check_apk.sh "$APK" "$PYPIN"
