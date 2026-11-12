@@ -67,16 +67,17 @@ und **nicht** im Release – es ist ausdruecklich nicht fuer Play geeignet.
 
 ## 4. Was der Tag-Lauf baut
 
-Bei `git tag v1.5 && git push origin refs/tags/v1.5` laufen zwei Jobs (die
-Release `v1.0` bleibt unveraendert bestehen):
+Bei `git tag v1.6 && git push origin refs/tags/v1.6` laufen zwei Jobs (die
+vorherigen Releases bleiben unveraendert bestehen):
 
 1. **release** – Debug-APK wie bisher (Sideloading) → Release-Asset `*.apk`.
 2. **aab** – `buildozer android release` → `bin/*.aab`, signiert mit dem
    hinterlegten Keystore → Release-Asset `*.aab` (nur mit echten Secrets).
 
-Beide Jobs pruefen das Ergebnis: die APK auf Python-Version, das AAB auf
-`base/manifest/AndroidManifest.xml`, `BundleConfig.pb`, eine
-`META-INF/*.RSA`-Signatur und `libpython3.11.so`.
+Beide Jobs pruefen das Ergebnis: die APK mit `aapt2` auf `versionCode`,
+`versionName`, `targetSdkVersion` und `foregroundServiceType` sowie auf die
+Python-Version; das AAB auf `base/manifest/AndroidManifest.xml`,
+`BundleConfig.pb`, eine `META-INF/*.RSA`-Signatur und `libpython3.11.so`.
 
 Lokal (Linux/WSL) derselbe Weg:
 ```bash
@@ -89,10 +90,10 @@ ARTIFACT=aab bash tools/ci_build.sh
 
 ## 5. versionCode
 
-`buildozer.spec` setzt fuer v1.5 `android.numeric_version = 6`. Google Play verlangt
+`buildozer.spec` setzt fuer v1.6 `android.numeric_version = 7`. Google Play verlangt
 fuer **jeden** Upload einen **hoeheren** versionCode – vor dem naechsten Upload
-erhoehen (7, 8, …). Die sichtbare Version (`version = 1.5`) ist davon unabhaengig;
-bei einem echten Release beide anheben (z. B. `1.6` / `7`).
+erhoehen (8, 9, …). Die sichtbare Version (`version = 1.6`) ist davon unabhaengig;
+bei einem echten Release beide anheben.
 
 ## 6. Play Console – einmalige Einrichtung
 
@@ -150,10 +151,10 @@ dafuer die Debug-APK aus demselben Release verwenden.
 
 ```bash
 # Signatur des AAB
-keytool -printcert -jarfile bin/ps5prosearchagent-1.5-arm64-v8a-release.aab | head
+keytool -printcert -jarfile bin/ps5prosearchagent-1.6-arm64-v8a-release.aab | head
 
 # targetSdk im gebauten Bundle (aapt2 aus den Android build-tools)
-aapt2 dump badging bin/ps5prosearchagent-1.5-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
+aapt2 dump badging bin/ps5prosearchagent-1.6-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
 ```
 
 Erwartet: `targetSdkVersion:'36'`, Paket `de.ps5pro.ps5prosearchagent`,

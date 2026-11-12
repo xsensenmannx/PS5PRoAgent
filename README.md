@@ -47,7 +47,9 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Ressourcen-schonend:** das Radar zeichnet im Leerlauf 12 statt 30 Bilder/s und
   pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert. Der
   Scan nutzt ETag/Last-Modified (304 spart den Download) und bricht Antworten über
-  5 MB ab; die Bot-Schutz-Prüfung liest nur die ersten 3 KB.
+  5 MB ab; die Bot-Schutz-Prüfung liest nur die ersten 3 KB. Neue Cache-Einträge
+  werden pro Scan einmal statt pro Shop geschrieben, und nach dem letzten
+  Fehlversuch wartet der Retry nicht mehr unnötig.
 * Filter (Treffer/alle), Sortierung (Preis/Händler/Zeit), Händler-Auswahl, kurzer
   Tap auf eine Karte öffnet den Shop im Browser.
 
@@ -79,9 +81,12 @@ assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
 assets/notify_icon.png        Statusleisten-Icon des Hintergrund-Service
 tools/selftest.py             Logiktests ohne Kivy (CI-Gate)
-tools/fixtures/               minimale Shop-Ausschnitte fuer Parser-Tests
+tools/kivy_smoke.py           echte Kivy-Popup-Smoke-Tests (CI-Gate)
+tools/fixtures/               47 minimale Parser-Fixtures (42 Shops + Randfaelle)
+tools/capture_fixture.py      Fixture aus einer echten Shop-Seite aufnehmen
 tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal, APK oder AAB)
 tools/ci_check_apk.sh         prüft die fertige APK (Größe, Python-Version)
+tools/ci_check_apk_aapt2.sh   prüft versionCode, versionName, targetSdk und foregroundServiceType
 tools/ci_check_aab.sh         prüft das AAB (Struktur, Signatur, Python-Version)
 PLAY_STORE.md                 Play-Release: Keystore, Secrets, AAB, Play Console
 tools/ci_licenses.sh          akzeptiert die Android-SDK-Lizenzen
@@ -100,15 +105,56 @@ ps5pro.zip                    Upload-Paket für Colab
 
 ```
 python3 tools/selftest.py
+python3 tools/kivy_smoke.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
 HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
-Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 204 Zusicherungen,
-ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus.
+Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 531 Zusicherungen,
+ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test ist ebenfalls
+ein eigenes CI-Gate und braucht kein Android-Gerät.
+
+`tools/kivy_smoke.py` öffnet die Popups **Alarm-Regeln**, **Shop-Health** und
+**Detailansicht** mit echtem Kivy, prüft Inhalt und Größe und klickt die
+wichtigsten Schaltflächen durch. Er nutzt ein temporäres Datenverzeichnis und
+ersetzt alle Netzwerk-, Benachrichtigungs- und Browser-Aufrufe. Auf Linux ohne
+Display läuft er über Xvfb:
+
+```bash
+xvfb-run -a python3 tools/kivy_smoke.py
+```
+
+## Fixtures vor dem Release
+
+Für jeden der 42 Shops liegt eine kleine Fixture in `tools/fixtures/`; die
+Suite prüft damit Preis, Produkt, Zustand, Verfügbarkeit und Lieferstatus,
+ohne eine Shop-Seite zu laden. Zusätzlich decken die Fixtures JSON-LD, Meta-Tags,
+Text-Fallback, Vorbestellung, Gebrauchtware und Ausverkauf ab. Fehlt ein Shop
+oder ändert sich ein Parser unerwartet, schlägt `tools/selftest.py` vor dem
+Build fehl.
+
+Die eingecheckten Fixtures sind bewusst kleine, lizenzfreie Vertragsausschnitte.
+Eine echte Seite lässt sich jederzeit manuell aufnehmen:
+
+```bash
+python3 tools/capture_fixture.py --shop "Amazon DE"
+python3 tools/capture_fixture.py --shop "Amazon DE" --input page.html
+python3 tools/capture_fixture.py --all --force
+python3 tools/capture_fixture.py --check
+```
+
+Der Helfer nutzt denselben `scan_core`-Pfad, speichert keine dauerhafte
+HTTP-Cache-Datei des Nutzers und reduziert die Seite auf Titel, relevante
+Meta-Tags, JSON-LD sowie Text-/Attribut-Ausschnitte. Er lehnt fremde Hosts und
+Bot-Challenges ab. `--input` arbeitet offline; `--full` ist der Notausgang, wenn
+eine echte Seite durch die Minimierung anders geparst würde. Die CI führt den
+Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v1.6** – Effizienterer Scan: HTTP-Cache wird einmal pro Lauf statt pro
+  Shop geschrieben, und der letzte fehlgeschlagene Versuch wartet nicht mehr
+  unnötig (versionCode 7).
 * **v1.5** – Sicher validierte Remote-Konfiguration für Shop-URLs und
   deklarative Parser-Regeln (versionCode 6).
 * **v1.4** – Boot-Receiver für den Hintergrund-Service und adaptives

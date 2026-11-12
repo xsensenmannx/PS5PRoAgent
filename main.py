@@ -38,7 +38,7 @@ from scan_core import (
     HAENDLER, MAX_PREIS, BG_STATUS_FILE, format_preis, classify,
     _safe_scan, _res, WORKER, History, Settings, data_dir, Health, health, reset_health,
     alarm_erlaubt, ist_gebraucht, install_crash_hook, read_crash_log,
-    lade_shop_config, aktualisiere_shop_config,
+    lade_shop_config, aktualisiere_shop_config, flush_http_cache,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -1766,6 +1766,9 @@ class MainUI(FloatLayout):
             except Exception: pass
 
     def _open_detail(self,r,serie):
+        # Die Karte uebergibt normalerweise eine Liste; ein leerer oder
+        # fehlender Verlauf darf die Detailansicht nicht mit len(None) beenden.
+        serie=list(serie) if isinstance(serie,(list,tuple)) else []
         name=r.get("haendler","?")
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(10))
         titel=name + (" · " + format_preis(r["preis"]) if r.get("preis") is not None else "")
@@ -2087,7 +2090,11 @@ class MainUI(FloatLayout):
                 except Exception as e: r=_res(futs[f],None,"error",0,str(e)[:60])
                 self.queue.put((tok,r))
         finally:
-            ex.shutdown(wait=False,cancel_futures=True)
+            # Der Cache puffert 304-Ergebnisse waehrend des Scans; hier wird
+            # die Datei genau einmal statt pro Shop geschrieben.
+            try: flush_http_cache()
+            except Exception: pass
+            ex.shutdown(wait=False, cancel_futures=True)
     def _drain_queue(self,dt):
         while True:
             try: tok,r=self.queue.get_nowait()

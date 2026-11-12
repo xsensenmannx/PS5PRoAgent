@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-saturn-de",
+  "shop": "Saturn DE",
+  "url": "https://www.saturn.de/de/product/_sony-playstationr5-pro-2-tb-konsole-3018022.html",
+  "captured": "2026-11-12",
+  "format": "jsonld_preorder",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — Saturn DE\",\"offers\":{\"@type\":\"Offer\",\"price\":\"799.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/PreOrder\",\"itemCondition\":\"https://schema.org/NewCondition\",\"seller\":{\"name\":\"Saturn DE\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 799.0,
+    "verfuegbar": true,
+    "condition": "new",
+    "seller": "Saturn DE",
+    "sofort": false
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-computerexpert-at",
+  "shop": "Computerexpert AT",
+  "url": "https://shop.computerexpert.at/suche?q=playstation+5+pro+2tb",
+  "captured": "2026-11-12",
+  "format": "jsonld_used",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — Computerexpert AT\",\"offers\":{\"@type\":\"Offer\",\"price\":\"649.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/UsedCondition\",\"seller\":{\"name\":\"Computerexpert AT\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 649.0,
+    "verfuegbar": true,
+    "condition": "used",
+    "seller": "Computerexpert AT",
+    "sofort": true
+  }
+}

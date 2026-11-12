@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-conrad-at",
+  "shop": "Conrad AT",
+  "url": "https://www.conrad.at/de/search.html?search=playstation+5+pro+2tb",
+  "captured": "2026-11-12",
+  "format": "jsonld_new",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — Conrad AT\",\"offers\":{\"@type\":\"Offer\",\"price\":\"799.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/NewCondition\",\"seller\":{\"name\":\"Conrad AT\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 799.0,
+    "verfuegbar": true,
+    "condition": "new",
+    "seller": "Conrad AT",
+    "sofort": true
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-ps-direct-de",
+  "shop": "PS Direct DE",
+  "url": "https://direct.playstation.com/de-de/buy-consoles/playstation5-pro-console-2-tb",
+  "captured": "2026-11-12",
+  "format": "jsonld_new",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — PS Direct DE\",\"offers\":{\"@type\":\"Offer\",\"price\":\"799.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/NewCondition\",\"seller\":{\"name\":\"PS Direct DE\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 799.0,
+    "verfuegbar": true,
+    "condition": "new",
+    "seller": "PS Direct DE",
+    "sofort": true
+  }
+}

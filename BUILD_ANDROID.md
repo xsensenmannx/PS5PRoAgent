@@ -23,11 +23,13 @@ eigenes.
 | `PLAY_STORE.md` | Keystore, GitHub-Secrets, AAB und Play-Console-Schritte |
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
-| `tools/selftest.py` | Logiktests ohne Kivy (über 90 Zusicherungen) |
+| `tools/selftest.py` | Logiktests ohne Kivy (531 Zusicherungen) |
+| `tools/kivy_smoke.py` | echte Kivy-Smoke-Tests für Alarm-Regeln, Shop-Health und Detailansicht |
 | `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb geladene SDK/NDK-Bäume (sonst überspringt buildozer die Installation) |
 | `tools/ci_check_apk.sh` | prüft die fertige APK (Größe, enthält `libpython3.11.so`) |
+| `tools/ci_check_apk_aapt2.sh` | prüft mit aapt2 `versionCode`, `versionName`, `targetSdkVersion` und `foregroundServiceType` |
 | `tools/ci_check_aab.sh` | prüft das AAB (Struktur, Signatur, `libpython3.11.so`) |
 | `tools/ci_log_failure.sh` | holt die erste echte Fehlerstelle aus `buildozer.log` (für die Job-Zusammenfassung) |
 | `PS5Pro_APK_Colab.ipynb` | Build-Notebook für Colab |
@@ -56,7 +58,7 @@ eigenes.
    **Beim ersten Lauf nach einem Toolchain-Wechsel auf `False` lassen.**
 6. Zelle 5: baut die APK. 10–40 Minuten, je nach Cache. Zeilen mit
    `[INFO]: Building ...` sind normal; am Ende steht `Exit-Code: 0` und ein Pfad
-   `bin/ps5prosearchagent-1.5-arm64-v8a-debug.apk`.
+   `bin/ps5prosearchagent-1.6-arm64-v8a-debug.apk`.
 7. Zelle 6: lädt die APK herunter.
 
 **Wenn Colab die Sitzung trennt** (Inaktivität, Verbindungsabbruch, 12-Stunden-Limit):
@@ -92,8 +94,9 @@ Nach 15–40 Minuten (erster Lauf; danach deutlich kürzer dank Cache) liegt die
 **Actions → der Lauf → Artifacts → `ps5pro-apk`**. Das ZIP enthält die `.apk`.
 Scheitert der Build, lädt derselbe Lauf `buildozer-log` hoch — dort steht die Ursache.
 
-Vor dem Build laufen die **Logiktests** (`tools/selftest.py`) als Gate: schlägt einer
-fehl, wird gar nicht erst gebaut.
+Vor dem Build laufen die **Logiktests** (`tools/selftest.py`) und der
+**Kivy-Smoke-Test** (`tools/kivy_smoke.py`, in der CI über Xvfb) als Gate:
+schlägt einer fehl, wird gar nicht erst gebaut.
 
 ---
 
@@ -251,7 +254,8 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
   Shops bleiben gelb. Das ist bewusst so, statt an Captchas vorbeizuarbeiten.
 * **Nach Änderungen an `main.py`:** Keystore/API unverändert lassen, dann
   `buildozer android debug` — es wird nur der Python-Teil neu gepackt (schnell).
-* **Tests vor jedem Build:** `python3 tools/selftest.py` (im CI automatisch).
+* **Tests vor jedem Build:** `python3 tools/selftest.py` und
+  `python3 tools/kivy_smoke.py` (im CI automatisch; Linux ohne Display: `xvfb-run -a`).
 
 ---
 
@@ -260,7 +264,7 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 **Geprüft in dieser Umgebung** (Windows ohne Java/SDK, daher ohne echten Build):
 
 * `main.py` kompiliert fehlerfrei (CPython 3.12.10).
-* `tools/selftest.py`: 67 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
+* `tools/selftest.py`: 531 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
   (`1.299,00 €`, `799,99`, `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`,
   Zubehör-Ausschluss („DualSense Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung,
   Verfügbarkeits-Heuristik, Klassifizierung, Kürzel, 42 eindeutige Händler-URLs und der
@@ -270,6 +274,9 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
   3,27 ms → 0,006 ms (nur noch 3 KB statt der ganzen Seite kleingeschrieben),
   Produkt-/Verfügbarkeitsprüfung 136 ms → 120 ms. Ein kombinierter Produkt-Regex war in
   der Messung 3,5× langsamer (154 ms) und wurde deshalb verworfen.
+* HTTP-Cache für 42 Shops: 42 Einzel-Schreibvorgänge (ca. 0,12 s) → ein Flush
+  (ca. 0,004 s) bei identischem Dateiinhalt. Nach dem letzten fehlgeschlagenen
+  Retry entfällt die abschließende Wartezeit (bis zu ~6 s pro Shop).
 * Radar-Bildrate als reine Funktion `radar_frame_step()` abgesichert: 12 Bilder/s im
   Leerlauf, 30 beim Scan, Pause zeichnet nie, und die gezeichnete Bewegungszeit bleibt
   pro Sekunde exakt 1,0 s (der Sweep läuft dadurch bei beiden Bildraten gleich schnell).

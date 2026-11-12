@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "name": "shop-alza-at",
+  "shop": "Alza AT",
+  "url": "https://www.alza.at/search.htm?exps=playstation+5+pro+2tb",
+  "captured": "2026-11-12",
+  "format": "meta",
+  "html": "<html><head><title>PlayStation 5 Pro 2 TB — Alza AT</title><meta property=\"product:price:amount\" content=\"849,00\"></head><body>PlayStation 5 Pro 2 TB · Auf Lager · in den Warenkorb</body></html>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 849.0,
+    "verfuegbar": true,
+    "sofort": true
+  }
+}

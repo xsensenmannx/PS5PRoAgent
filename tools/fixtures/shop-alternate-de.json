@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-alternate-de",
+  "shop": "Alternate DE",
+  "url": "https://www.alternate.de/Sony-Interactive-Entertainment/PlayStation-5-Pro-2-TB-E-Chassis-Spielkonsole/html/product/100160951",
+  "captured": "2026-11-12",
+  "format": "jsonld_used",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — Alternate DE\",\"offers\":{\"@type\":\"Offer\",\"price\":\"649.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/UsedCondition\",\"seller\":{\"name\":\"Alternate DE\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 649.0,
+    "verfuegbar": true,
+    "condition": "used",
+    "seller": "Alternate DE",
+    "sofort": true
+  }
+}

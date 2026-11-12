@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-mueller",
+  "shop": "Mueller",
+  "url": "https://www.mueller.de/suche/?q=playstation+5+pro+konsole",
+  "captured": "2026-11-12",
+  "format": "jsonld_preorder",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — Mueller\",\"offers\":{\"@type\":\"Offer\",\"price\":\"799.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/PreOrder\",\"itemCondition\":\"https://schema.org/NewCondition\",\"seller\":{\"name\":\"Mueller\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 799.0,
+    "verfuegbar": true,
+    "condition": "new",
+    "seller": "Mueller",
+    "sofort": false
+  }
+}

@@ -272,7 +272,8 @@ def retry_tests():
     echt = core._try_url
     echt_zeit = core.time
     # Nur sleep ersetzen, damit der Test nicht wirklich wartet.
-    core.time = types.SimpleNamespace(sleep=lambda s: None)
+    sleeps = []
+    core.time = types.SimpleNamespace(sleep=lambda s: sleeps.append(s))
     try:
         calls = []
         core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 404", {}))[1]
@@ -299,6 +300,17 @@ def retry_tests():
         except RuntimeError:
             pass
         check("403 dreimal probiert", len(calls), 3)
+
+        # Nach dem letzten Versuch gibt es keinen Retry mehr. Ein Sleep dort
+        # kostete pro endgueltig fehlgeschlagenem Shop noch bis zu ~6 Sekunden.
+        calls.clear(); sleeps.clear()
+        core._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 503", {}))[1]
+        try:
+            core.fetch_html_multi(["https://example.invalid"])
+        except RuntimeError:
+            pass
+        check("503 drei Versuche", len(calls), 3)
+        check("503 kein Sleep nach letztem Versuch", len(sleeps), 2)
     finally:
         core._try_url = echt
         core.time = echt_zeit
@@ -407,8 +419,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "1.5")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "6")
+    check("spec version", c.get("app", "version"), "1.6")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "7")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -454,6 +466,18 @@ def feature_tests():
         check("Cache speichert ETag", c2.get("https://shop/x")["etag"], "etag-1")
         c2.drop("https://shop/x")
         check("Cache loescht Eintrag", core.HttpCache(pfad).get("https://shop/x"), None)
+
+        # Waehrend eines Scans wird nur im Speicher gepuffert; ein Flush am
+        # Ende schreibt alle 42 Eintraege in einem Rutsch.
+        batch_pfad = os.path.join(tmp, "batch-cache.json")
+        batch = core.HttpCache(batch_pfad)
+        batch.put("https://shop/batch", {"preis": 777.0}, persist=False)
+        check("Cache puffert ohne Schreiben", core.HttpCache(batch_pfad).get(
+            "https://shop/batch"), None)
+        check("Cache Flush schreibt", batch.flush(), True)
+        check("Cache Flush sichtbar", core.HttpCache(batch_pfad).get(
+            "https://shop/batch")["result"]["preis"], 777.0)
+        check("Cache Flush nur bei Aenderung", batch.flush(), False)
 
         # 304 ohne erneutes Parsen: fetch_mit_cache liefert das gespeicherte Ergebnis.
         core.http_cache().put("https://shop/304", {"preis": 749.0, "verfuegbar": True}, "e", None)
@@ -653,11 +677,23 @@ def fixture_tests():
     """Kleine, lizenzfreie HTML-Ausschnitte statt kompletter Shop-Seiten."""
     ordner = os.path.join(ROOT, "tools", "fixtures")
     namen = sorted(n for n in os.listdir(ordner) if n.endswith(".json"))
-    check("Fixtures vorhanden", len(namen) >= 5, True)
+    shop_namen = {h["name"] for h in core.HAENDLER}
+    gesehen = []
+    check("Fixtures vorhanden", len(namen) >= 5 + len(shop_namen), True)
     for name in namen:
         with open(os.path.join(ordner, name), encoding="utf-8") as f:
             fx = json.load(f)
+        if not isinstance(fx, dict) or not isinstance(fx.get("html"), str) \
+                or not isinstance(fx.get("expect"), dict):
+            check("fixture %s schema" % name, False, True)
+            continue
         html, exp = fx["html"], fx["expect"]
+        if fx.get("shop") is not None:
+            check("fixture %s shop bekannt" % name,
+                  fx.get("shop") in shop_namen, True)
+            check("fixture %s name passt" % name, fx.get("name"),
+                  os.path.splitext(name)[0])
+            gesehen.append(fx.get("shop"))
         if exp.get("challenge"):
             check("fixture %s challenge" % name, core.detect_challenge(html.lower()), True)
             continue
@@ -674,6 +710,36 @@ def fixture_tests():
             else:
                 wert = st.get(feld)
             check("fixture %s %s" % (name, feld), wert, exp[feld])
+    check("Fixtures alle Shops", set(gesehen), shop_namen)
+    check("Fixtures Shop-Duplikate", len(gesehen), len(set(gesehen)))
+
+
+def capture_helper_tests():
+    """Der Capture-Helfer bleibt offline testbar und schreibt keine Netzdateien."""
+    import importlib.util
+    pfad = os.path.join(ROOT, "tools", "capture_fixture.py")
+    spec = importlib.util.spec_from_file_location("capture_fixture_test", pfad)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+
+    check("Capture Slug", helper.slug("shöpping.at"), "shopping-at")
+    slugs = [helper.slug(h["name"]) for h in core.HAENDLER]
+    check("Capture Slugs eindeutig", len(slugs), len(set(slugs)))
+    shop = next(h for h in core.HAENDLER if h["name"] == "Amazon DE")
+    check("Capture Dateiname", helper.fixture_dateiname(shop),
+          "shop-amazon-de.json")
+    check("Capture URL bekannt", helper.url_erlaubt(shop["urls"][0]), True)
+    check("Capture URL fremd", helper.url_erlaubt("https://evil.example/x"), False)
+
+    mini = helper.minimiere_html(HTML_OK)
+    check("Capture minimiert JSON-LD", "application/ld+json" in mini, True)
+    check("Capture minimiert Preis", helper.erwartung(mini).get("preis"), 799.99)
+    fixture = helper.baue_fixture(shop, HTML_OK, shop["urls"][0],
+                                  captured="2026-01-01")
+    check("Capture Fixture Shop", fixture.get("shop"), "Amazon DE")
+    check("Capture Fixture Preis", fixture.get("expect", {}).get("preis"), 799.99)
+    check("Capture Fixture Datum", fixture.get("captured"), "2026-01-01")
+    check("Capture Fixtures vollstaendig", helper.pruefe_fixtures(), 0)
 
 
 def adaptive_boot_tests():
@@ -743,6 +809,7 @@ if __name__ == "__main__":
         feature_tests()
         adaptive_boot_tests()
         fixture_tests()
+        capture_helper_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.

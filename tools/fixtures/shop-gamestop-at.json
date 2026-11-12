@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-gamestop-at",
+  "shop": "GameStop AT",
+  "url": "https://www.gamestop.at/search?q=playstation+5+pro+konsole",
+  "captured": "2026-11-12",
+  "format": "jsonld_used",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — GameStop AT\",\"offers\":{\"@type\":\"Offer\",\"price\":\"649.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/UsedCondition\",\"seller\":{\"name\":\"GameStop AT\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 649.0,
+    "verfuegbar": true,
+    "condition": "used",
+    "seller": "GameStop AT",
+    "sofort": true
+  }
+}

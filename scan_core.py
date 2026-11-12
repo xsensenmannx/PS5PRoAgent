@@ -562,6 +562,7 @@ class HttpCache:
     def __init__(self,pfad=None):
         self.path=pfad or os.path.join(_data_dir(),HTTP_CACHE_FILE)
         self._lock=threading.Lock()
+        self._dirty=False
         try:
             with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
             self.data=data if isinstance(data,dict) else {}
@@ -570,20 +571,36 @@ class HttpCache:
         with self._lock:
             e=self.data.get(u)
             return dict(e) if isinstance(e,dict) else None
-    def put(self,u,result,etag=None,last_modified=None):
+    def put(self,u,result,etag=None,last_modified=None,persist=True):
+        """Ergebnis merken. Waehrend eines Scans reicht persist=False.
+
+        Dann bleibt die Aenderung im Speicher und wird mit ``flush()`` einmal
+        am Scan-Ende geschrieben, statt fuer jeden der 42 Shops die komplette
+        Cache-Datei neu zu serialisieren.
+        """
         with self._lock:
             self.data[u]={"etag":etag,"last_modified":last_modified,"result":result}
-            self._save_locked()
+            self._dirty=True
+            if persist: self._save_locked()
     def drop(self,u):
         with self._lock:
-            if self.data.pop(u,None) is not None: self._save_locked()
+            if self.data.pop(u,None) is not None:
+                self._dirty=True
+                self._save_locked()
+    def flush(self):
+        """Offene Cache-Aenderungen einmalig auf Platte schreiben."""
+        with self._lock:
+            if not self._dirty: return False
+            return self._save_locked()
     def _save_locked(self):
         try:
             tmp=self.path+".tmp"
             with open(tmp,"w",encoding="utf-8") as f:
                 json.dump(self.data,f,ensure_ascii=False,indent=1)
             os.replace(tmp,self.path)
-        except Exception: pass
+            self._dirty=False
+            return True
+        except Exception: return False
 
 _HTTP_CACHE=None
 _HTTP_CACHE_LOCK=threading.Lock()
@@ -598,6 +615,11 @@ def reset_http_cache():
     """Nur fuer Tests: naechster Zugriff liest die Datei neu ein."""
     global _HTTP_CACHE
     with _HTTP_CACHE_LOCK: _HTTP_CACHE=None
+
+def flush_http_cache():
+    """Gepufferte Cache-Aenderungen einmal pro Scan sichern."""
+    try: return http_cache().flush()
+    except Exception: return False
 
 
 def _try_url(u, att, proxy=None):
@@ -689,7 +711,11 @@ def fetch_mit_cache(urls):
                 if len(urls)==1:
                     dauerhaft=True; break
                 continue
-            time.sleep((0.4,2.0,5.0)[att]+random.uniform(0,1.0))
+            # Nach dem letzten Versuch gibt es keinen naechsten Versuch mehr,
+            # auf den man warten koennte. Der alte Sleep kostete bei jedem
+            # endgueltig fehlgeschlagenen Shop noch einmal bis zu ~6 s.
+            if att<2:
+                time.sleep((0.4,2.0,5.0)[att]+random.uniform(0,1.0))
         if dauerhaft: break
     raise RuntimeError(last or "alle URLs fehlgeschlagen")
 
@@ -746,7 +772,7 @@ def scan_einen(h):
                              {"preis":p,"verfuegbar":bool(v),"signal":signal,
                               "condition":s.get("condition"),"seller":s.get("seller"),
                               "verfuegbarkeit":s.get("verfuegbarkeit"),"sofort":sofort},
-                             meta.get("etag"),meta.get("last_modified"))
+                             meta.get("etag"),meta.get("last_modified"),persist=False)
         except Exception: pass
         return res
     except Exception as e:
@@ -795,6 +821,11 @@ def scan_alle(haendler, max_preis=None, fortschritt=None):
                 except Exception: pass
     finally:
         try: health().save()
+        except Exception: pass
+        # Alle Shop-Ergebnisse in einem Rutsch sichern. scan_einen() puffert
+        # die Eintraege bewusst, damit nicht jeder Thread die Cache-Datei
+        # gleichzeitig neu schreibt.
+        try: flush_http_cache()
         except Exception: pass
         ex.shutdown(wait=False, cancel_futures=True)
     return ergebnisse

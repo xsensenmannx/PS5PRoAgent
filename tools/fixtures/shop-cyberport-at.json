@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "name": "shop-cyberport-at",
+  "shop": "Cyberport AT",
+  "url": "https://www.cyberport.at/?query=playstation+5+pro+2tb",
+  "captured": "2026-11-12",
+  "format": "text",
+  "html": "<html><head><title>PlayStation 5 Pro 2 TB — Cyberport AT</title></head><body><h1>PlayStation 5 Pro 2 TB</h1><p>Preis: 899,00 €</p><p>Auf Lager · in den Warenkorb</p></body></html>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 899.0,
+    "verfuegbar": true,
+    "sofort": true
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "shop-electronic4you",
+  "shop": "Electronic4you",
+  "url": "https://www.electronic4you.at/suche?q=playstation+5+pro+konsole",
+  "captured": "2026-11-12",
+  "format": "jsonld_used",
+  "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — Electronic4you\",\"offers\":{\"@type\":\"Offer\",\"price\":\"649.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/UsedCondition\",\"seller\":{\"name\":\"Electronic4you\"}}}</script>",
+  "expect": {
+    "ist_konsole": true,
+    "preis": 649.0,
+    "verfuegbar": true,
+    "condition": "used",
+    "seller": "Electronic4you",
+    "sofort": true
+  }
+}

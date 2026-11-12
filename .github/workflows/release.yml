@@ -1,4 +1,4 @@
-# Baut bei einem Tag (z. B. v1.5) die APK und haengt sie an das Release.
+# Baut bei einem Tag (z. B. v1.6) die APK und haengt sie an das Release.
 # Der Download-Link ist danach ohne GitHub-Login auf dem Handy zu oeffnen.
 # Die eigentliche Arbeit steckt wie im Build-Workflow in tools/ci_build.sh.
 name: Release
@@ -50,6 +50,12 @@ jobs:
       - name: APK bauen
         timeout-minutes: 120
         run: bash tools/ci_build.sh
+
+      - name: APK-Manifest mit aapt2 pruefen
+        run: |
+          set -euo pipefail
+          APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
+          bash tools/ci_check_apk_aapt2.sh "$APK"
 
       - name: APK ans Release haengen
         uses: softprops/action-gh-release@v3
