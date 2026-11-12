@@ -9,7 +9,7 @@ on:
       - buildozer.spec
       - icon.png
       - "assets/**"
-      - tools/selftest.py
+      - "tools/**"
       - .github/workflows/build-apk.yml
 
 # Bei mehreren Commits kurz hintereinander (z. B. Web-Upload) nur den neuesten bauen.
@@ -19,102 +19,32 @@ concurrency:
 
 jobs:
   apk:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
 
-      # Fehlt eine Datei im Repo (z. B. weil ein Ordner beim Web-Upload nicht
-      # mitkam), soll das in Sekunden sichtbar werden statt nach 20 Minuten im
-      # p4a-Build. ::error erzeugt eine Annotation mit dem Dateinamen in der UI.
-      - name: Projektdateien prüfen
-        run: |
-          set -euo pipefail
-          missing=0
-          for f in main.py buildozer.spec icon.png \
-                   assets/icon_fg.png assets/icon_bg.png tools/selftest.py; do
-            if [ ! -f "$f" ]; then
-              echo "::error file=$f::Pflichtdatei fehlt im Repository: $f"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            echo ""
-            echo "Bitte die genannten Dateien ins Repo legen (GITHUB_ANLEITUNG.md, Schritt 2),"
-            echo "am einfachsten per git push oder indem der Ordner beim Upload mitgezogen wird."
-            exit 1
-          fi
-          echo "Alle Pflichtdateien vorhanden."
-
       - name: Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Systempakete
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            autoconf automake libtool pkg-config zlib1g-dev libncurses-dev \
-            libffi-dev libssl-dev cmake unzip zip ccache git libltdl-dev
-          sudo apt-get install -y --no-install-recommends aidl || true
-
-      - name: uv einrichten
-        uses: astral-sh/setup-uv@v5
-
-      - name: Python 3.12 und Buildozer
-        run: |
-          set -euo pipefail
-          uv venv --python 3.12 .venv
-          uv pip install --python .venv/bin/python --upgrade pip setuptools wheel
-          uv pip install --python .venv/bin/python \
-            buildozer "cython==0.29.36" legacy-cgi
-          .venv/bin/buildozer --version
-
-      # Gate: ein kaputtes Preis-/JSON-LD-Parsing soll nie in die APK wandern.
       - name: Logiktests
         run: python3 tools/selftest.py
 
-      # SDK/NDK (~2 GB) und Zwischenstände. Neuer Key (v2), damit ein eventuell
-      # defekter Cache-Stand nicht wiederhergestellt wird.
       - name: Build-Cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-v2-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-v2-${{ runner.os }}-
-
-      # Lizenzen nur schreiben, wenn das Android SDK bereits vollstaendig aus dem
-      # Cache geladen wurde. Wird der Ordner vorab leer angelegt, ueberspringt
-      # Buildozer den Download der Command-Line-Tools (sdkmanager fehlt).
-      - name: Android-Lizenzen bei vorhandenem SDK setzen
-        run: |
-          set -euo pipefail
-          SDK="$HOME/.buildozer/android/platform/android-sdk"
-          if [ -d "$SDK/tools" ] || [ -d "$SDK/cmdline-tools" ]; then
-            LIC="$SDK/licenses"
-            mkdir -p "$LIC"
-            printf '%s\n%s\n%s\n' 8933bad161af4178b1185d1a37fbf41ea5269c55 d56f5187479451eabf01fb78af6dfcb131a6481e 24333f8a63b6825ea9c5514f83c2829b004d1fee > "$LIC/android-sdk-license"
-            printf '%s\n' 84831b9409646a918e30573bab4c9c91346d8abd > "$LIC/android-sdk-preview-license"
-            printf '%s\n' 601085b94cd77f0b54ff86406957099ebe79c4d6 > "$LIC/android-googletv-license"
-            ls -l "$LIC"
-          else
-            echo "Android SDK noch nicht im Cache – Buildozer laedt es sauber herunter."
-          fi
+          key: buildozer-v3-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-v3-${{ runner.os }}-
 
       - name: APK bauen
-        timeout-minutes: 60
-        run: |
-          set -euo pipefail
-          export PATH="$PWD/.venv/bin:$HOME/.local/bin:$PATH"
-          # Ohne VIRTUAL_ENV nutzt buildozer `pip install --user`, was pip in einem venv
-          # mit "Can not perform a '--user' install" abbricht.
-          export VIRTUAL_ENV="$PWD/.venv"
-          buildozer -v android debug 2>&1 | tee buildozer.log
+        timeout-minutes: 120
+        run: bash tools/ci_build.sh
 
       - name: APK als Artifact
         if: success()
@@ -123,6 +53,22 @@ jobs:
           name: ps5pro-apk
           path: bin/*.apk
           if-no-files-found: error
+
+      - name: Fehlerbericht in die Zusammenfassung
+        if: failure()
+        run: |
+          {
+            echo "## Build fehlgeschlagen"
+            echo ""
+            echo "### Letzte Zeilen"
+            echo "\`\`\`"
+            if [ -f buildozer.log ]; then
+              tail -n 60 buildozer.log
+            else
+              echo "kein buildozer.log vorhanden - der Fehler lag vor dem Build (z. B. Logiktests)"
+            fi
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log bei Fehler
         if: failure()
