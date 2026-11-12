@@ -30,7 +30,7 @@ eigenes.
 | `.github/workflows/build-apk.yml` | CI-Build mit Artifact |
 | `.github/workflows/release.yml` | bei Tag `v*`: Build + APK als Release-Asset |
 | `.github/workflows/diagnose.yml` | manueller Diagnose-Lauf (SDK/NDK, venv, letzter Fehler) |
-| `ps5pro.zip` | Upload-Paket für Colab (main.py, spec, icons, `assets/`) |
+| `ps5pro.zip` | Upload-Paket für Colab (main.py, scan_core.py, service.py, spec, icons, `assets/`) |
 | `GITHUB_ANLEITUNG.md` | Build über GitHub Actions, Schritt für Schritt |
 | `.gitignore` | hält `.buildozer/`, `bin/` und Caches aus dem Repo |
 
