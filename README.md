@@ -66,7 +66,7 @@ python3 tools/selftest.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung und
-die Händlerdaten — 50 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie
+die Händlerdaten — 61 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie
 vor jedem Build aus.
 
 ## Grenzen

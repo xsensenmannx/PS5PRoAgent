@@ -253,6 +253,47 @@ def retry_tests():
         main.time = echt_zeit
 
 
+def radar_tests():
+    """Bildraten-Logik des Radars - die einzige Optimierung ohne Netz und ohne UI.
+
+    Geprueft wird die reine Funktion: 12 Bilder/s im Leerlauf, 30 beim Scan,
+    Pause zeichnet nie, und die Bewegungszeit bleibt unabhaengig von der Bildrate
+    (sonst liefe der Sweep bei 12 Bildern/s sichtbar langsamer).
+    """
+    def lauf(sekunden, dt, scanning, paused=False):
+        acc, bilder, zeit = 0.0, 0, 0.0
+        for _ in range(int(round(sekunden / dt))):
+            zeichnen, acc, step = main.radar_frame_step(acc, dt, scanning, paused)
+            if zeichnen:
+                bilder += 1
+                zeit += step
+        return bilder, zeit, acc
+
+    # 60 Ticks zu 1/60 s = genau 1 Sekunde
+    bilder, zeit, rest = lauf(1.0, 1/60.0, scanning=False)
+    check("radar 12 fps im Leerlauf", bilder, 12)
+    check("radar Leerlauf volle Sekunde gezeichnet", round(zeit, 6), 1.0)
+
+    bilder, zeit, rest = lauf(1.0, 1/60.0, scanning=True)
+    check("radar 30 fps beim Scan", bilder, 30)
+    check("radar Scan volle Sekunde gezeichnet", round(zeit, 6), 1.0)
+
+    # Pause: nie zeichnen und keine Zeit ansammeln
+    bilder, zeit, rest = lauf(1.0, 1/60.0, scanning=True, paused=True)
+    check("radar Pause zeichnet nicht", bilder, 0)
+    check("radar Pause sammelt keine Zeit", rest, 0.0)
+
+    # Pause mitten im Intervall darf den Rest nicht verlieren
+    z, acc, step = main.radar_frame_step(0.0, 0.05, False, False)   # 0,05 < 1/12
+    check("radar unter Schwelle zeichnet nicht", (z, step), (False, 0.0))
+    check("radar sammelt Zwischenzeit", round(acc, 6), 0.05)
+    z, acc2, step = main.radar_frame_step(acc, 0.05, False, False)  # 0,10 >= 1/12
+    check("radar zeichnet nach Schwelle", (z, round(step, 6)), (True, 0.1))
+    check("radar acc nach Bild zurueckgesetzt", acc2, 0.0)
+    z, acc, step = main.radar_frame_step(0.05, 0.05, False, True)
+    check("radar Pause behaelt Zwischenzeit", (z, acc, step), (False, 0.05, 0.0))
+
+
 def spec_tests():
     """Der Build-Pin entscheidet ueber Erfolg oder Abbruch - deshalb geprueft.
 
@@ -280,6 +321,7 @@ if __name__ == "__main__":
     try:
         main_tests()
         retry_tests()
+        radar_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.

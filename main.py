@@ -655,6 +655,23 @@ class Toast(Label):
     def _hide(self,*_): Animation(opacity=0,d=0.3).start(self)
 
 # ══════════ RADAR (PS1 BIOS look) ══════════
+RADAR_FPS_IDLE = 12.0   # Leerlauf: der Sweep dreht nur 30 Grad/s
+RADAR_FPS_SCAN = 30.0   # waehrend eines Scans
+
+def radar_frame_step(acc, dt, scanning, paused):
+    """Reine Entscheidung, ob dieser Tick gezeichnet wird (testbar ohne Kivy).
+
+    Rueckgabe ``(zeichnen, neuer_acc, step)``. ``step`` ist die seit dem letzten
+    Bild verstrichene Zeit - Winkel und Symbolbewegung haengen daran, nicht an der
+    Bildrate, damit die Optik bei 12 und 30 Bildern/s gleich schnell wirkt.
+    Pausiert wird weder gezeichnet noch Zeit angesammelt.
+    """
+    if paused: return False, acc, 0.0
+    acc += dt
+    limit = 1.0/(RADAR_FPS_SCAN if scanning else RADAR_FPS_IDLE)
+    if acc < limit: return False, acc, 0.0
+    return True, 0.0, acc
+
 class RadarWidget(Widget):
     angle=NumericProperty(0.0); blips=ListProperty([])
     scanning=BooleanProperty(False)
@@ -690,14 +707,8 @@ class RadarWidget(Widget):
         self._paused=False; self._acc=0.0; self._redraw()
 
     def _tick(self,dt):
-        if self._paused: return True
-        # Der Sweep dreht im Leerlauf nur 30 Grad/s - dafuer reichen 12 Bilder/s.
-        # Waehrend eines Scans wird mit 30 Bildern/s gezeichnet. Die Winkel- und
-        # Symbolgeschwindigkeit haengt an der echten Zeit (step), nicht an der
-        # Bildrate, damit die Optik identisch bleibt und nur weniger gezeichnet wird.
-        self._acc+=dt
-        if self._acc < (1/30.0 if self.scanning else 1/12.0): return True
-        step=self._acc; self._acc=0.0
+        zeichnen,self._acc,step=radar_frame_step(self._acc,dt,self.scanning,self._paused)
+        if not zeichnen: return True
         s=180.0 if self.scanning else 30.0
         self.angle=(self.angle+s*step)%360
         k=step*30.0
