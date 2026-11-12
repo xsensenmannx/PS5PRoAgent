@@ -1748,10 +1748,10 @@ class MainUI(FloatLayout):
         cb.bind(on_release=lambda *_:p.dismiss())
         btns.add_widget(rb); btns.add_widget(lb); btns.add_widget(cb)
         box.add_widget(btns)
-        cfg=PS1Button(text="SHOP-LISTE AKTUALISIEREN",accent=PS1_PINK,
+        cfg=PS1Button(text="REMOTE-CONFIG AKTUALISIEREN",accent=PS1_PINK,
                       font_size=sp(9),size_hint_y=None,height=dp(32))
         def load_cfg(*_):
-            self._toast("SHOP-LISTE WIRD GELADEN...",color=PS1_BLUE)
+            self._toast("REMOTE-CONFIG WIRD GELADEN...",color=PS1_BLUE)
             threading.Thread(target=self._shop_config_bg,args=(True,),daemon=True).start()
         cfg.bind(on_release=load_cfg); box.add_widget(cfg)
         p.open()
@@ -1762,7 +1762,7 @@ class MainUI(FloatLayout):
         if n:
             try:
                 Clock.schedule_once(
-                    lambda dt:self._toast(f"SHOP-LISTE: {n} URLS AKTIV",color=PS1_GREEN),0)
+                    lambda dt:self._toast(f"REMOTE-CONFIG: {n} SHOPS AKTIV",color=PS1_GREEN),0)
             except Exception: pass
 
     def _open_detail(self,r,serie):

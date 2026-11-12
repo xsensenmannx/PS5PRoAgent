@@ -196,6 +196,12 @@ def main():
         if not settings.get("auto_scan", False):
             print("[BG] AUTO ist aus - Service beendet")
             return
+        # Auch im Dauerbetrieb einmal taeglich Remote-URLs/Regeln nachziehen;
+        # der Cache verhindert dabei einen Abruf bei jedem Intervall.
+        try:
+            core.aktualisiere_shop_config()
+        except Exception:
+            pass
         intervall = core.bg_intervall(settings.get("auto_interval"), MIN_INTERVALL)
         namen = set(settings.get("active_haendler") or [])
         haendler = [h for h in core.HAENDLER if not namen or h["name"] in namen]

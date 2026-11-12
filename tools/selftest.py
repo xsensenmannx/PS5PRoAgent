@@ -407,8 +407,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "1.4")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "5")
+    check("spec version", c.get("app", "version"), "1.5")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "6")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -494,6 +494,7 @@ def feature_tests():
 
         # Remote-Shop-Liste: nur HTTPS auf bekannten Hosts, Cache wird angewendet.
         alt_urls = {h["name"]: list(h["urls"]) for h in core.HAENDLER}
+        alt_parser = {h["name"]: h.get("parser") for h in core.HAENDLER}
         try:
             cfg = {"schema": 1, "shops": {"Amazon DE": {
                 "urls": ["https://www.amazon.de/dp/REMOTE-TEST"]}}}
@@ -507,11 +508,115 @@ def feature_tests():
                 {"schema": 1, "shops": {"Amazon DE": {"urls": ["http://www.amazon.de/x"]}}}), None)
             check("Remote-Config fremder Host abgelehnt", core.validiere_shop_config(
                 {"schema": 1, "shops": {"Amazon DE": {"urls": ["https://evil.example/x"]}}}), None)
+
+            # Parser-Regeln: nur literale Marker, kein Regex/Code. Eine Regel
+            # darf einen kaputten Preis/Status korrigieren, ohne neues APK.
+            regel_cfg = {"schema": 1, "updated": "2026-11-12", "shops": {
+                "Amazon DE": {
+                    "urls": ["https://www.amazon.de/dp/REMOTE-RULES"],
+                    "parser": {
+                        "price_before": "data-ps5-price=\"",
+                        "price_after": "\"",
+                        "in_stock": ["Auf Lager"],
+                        "out_of_stock": ["Ausverkauft"],
+                        "preorder": ["Vorbestellung"],
+                        "immediate": ["Sofort lieferbar"]}}}}
+            regel = core.validiere_shop_config(regel_cfg)
+            check("Remote-Parser gueltig", regel is not None, True)
+            core.wende_shop_config(regel)
+            amazon = next(h for h in core.HAENDLER if h["name"] == "Amazon DE")
+            rules = amazon.get("parser") or {}
+            check("Remote-Parser angewendet", rules.get("price_before"), "data-ps5-price=\"")
+            check("Remote-Parser Stock", rules.get("in_stock"), ["Auf Lager"])
+            html_rules = ("<h1>PlayStation 5 Pro 2 TB</h1>"
+                          "<span data-ps5-price=\"799,00 €\"></span>"
+                          "<span>Auf Lager</span>")
+            rr = core.remote_parser_ergebnis(html_rules, rules)
+            check("Remote-Parser Preis", rr.get("preis"), 799.0)
+            check("Remote-Parser verfuegbar", rr.get("verfuegbar"), True)
+            check("Remote-Parser Vorbestellung", core.remote_parser_ergebnis(
+                html_rules + " Vorbestellung", rules).get("sofort"), False)
+            check("Remote-Parser ausverkauft gewinnt", core.remote_parser_ergebnis(
+                html_rules + " Ausverkauft", rules).get("verfuegbar"), False)
+            check("Remote-Parser sofort", core.remote_parser_ergebnis(
+                html_rules + " Sofort lieferbar", rules).get("sofort"), True)
+            check("Remote-Parser ohne Treffer", core.remote_parser_ergebnis(
+                "<html>nichts</html>", rules), {})
+
+            # Parser-only darf die eingebaute URL nicht veraendern.
+            parser_only = core.validiere_shop_config({"schema": 1, "shops": {
+                "Amazon DE": {"parser": {"in_stock": ["Lieferbar"]}}}})
+            check("Remote-Parser-only gueltig", parser_only is not None, True)
+            core.wende_shop_config(parser_only)
+            check("Remote-Parser-only URL bleibt", amazon["urls"],
+                  core.HAENDLER_BASIS["Amazon DE"])
+            core.wende_shop_config({})
+            check("Remote-Parser entfernt", amazon.get("parser"), None)
+
+            # Ein geaendertes Regelwerk muss den alten 304-Treffer verwerfen.
+            core.reset_http_cache()
+            cache = core.http_cache()
+            cache.put("https://www.amazon.de/dp/REMOTE-RULES", {"preis": 999.0})
+            core.wende_shop_config(regel)
+            check("Remote-Parser Cache verworfen",
+                  core.http_cache().get("https://www.amazon.de/dp/REMOTE-RULES"), None)
+
+            # End-to-End: scan_einen nutzt die Remote-Regel vor dem Fallback.
+            alt_fetch = core.fetch_mit_cache
+            try:
+                core.fetch_mit_cache = lambda urls: (html_rules, urls[0], None, {})
+                core.reset_http_cache()
+                hrr = {"name": "Amazon DE", "land": "DE",
+                       "urls": ["https://www.amazon.de/dp/REMOTE-RULES"],
+                       "parser": rules}
+                srr = core.scan_einen(hrr)
+            finally:
+                core.fetch_mit_cache = alt_fetch
+            check("Remote-Parser Scan-Preis", srr.get("preis"), 799.0)
+            check("Remote-Parser Scan-Signal", srr.get("signal"), "remote")
+            check("Remote-Parser Scan-Treffer", srr.get("klass"), "hit")
+
+            # Grenzen und Struktur: ein Fehler verwirft die ganze Datei.
+            ungueltig = [
+                ("Parser-Regex abgelehnt", {"schema": 1, "shops": {
+                    "Amazon DE": {"parser": {"price_regex": "(.*)"}}}}),
+                ("Parser halbes Preisfeld", {"schema": 1, "shops": {
+                    "Amazon DE": {"parser": {"price_before": "x"}}}}),
+                ("Parser leer", {"schema": 1, "shops": {
+                    "Amazon DE": {"parser": {}}}}),
+                ("Parser Steuerzeichen", {"schema": 1, "shops": {
+                    "Amazon DE": {"parser": {"in_stock": ["x\n"]}}}}),
+                ("Parser Marke zu lang", {"schema": 1, "shops": {
+                    "Amazon DE": {"parser": {"in_stock": ["x" * 121]}}}}),
+                ("Shop unbekanntes Feld", {"schema": 1, "shops": {
+                    "Amazon DE": {"urls": ["https://www.amazon.de/x"],
+                                  "code": "eval"}}}),
+                ("URL mit Port", {"schema": 1, "shops": {
+                    "Amazon DE": {"urls": ["https://www.amazon.de:444/x"]}}}),
+                ("URL mit Login", {"schema": 1, "shops": {
+                    "Amazon DE": {"urls": ["https://u:p@www.amazon.de/x"]}}}),
+                ("URL mit Fragment", {"schema": 1, "shops": {
+                    "Amazon DE": {"urls": ["https://www.amazon.de/x#frag"]}}}),
+                ("URL doppelt", {"schema": 1, "shops": {
+                    "Amazon DE": {"urls": ["https://www.amazon.de/x",
+                                             "https://www.amazon.de/x"]}}}),
+                ("Shop unbekannt", {"schema": 1, "shops": {
+                    "Unbekannt": {"urls": ["https://www.amazon.de/x"]}}}),
+                ("Schema Bool", {"schema": True, "shops": {}}),
+                ("Top-Level unbekannt", {"schema": 1, "shops": {}, "exec": "x"}),
+            ]
+            for label, bad in ungueltig:
+                check("Remote-Config %s" % label,
+                      core.validiere_shop_config(bad), None)
+
             with open(os.path.join(tmp, core.SHOP_CONFIG_FILE), "w", encoding="utf-8") as f:
                 json.dump({"ts": 1, "config": cfg}, f)
             check("Remote-Config Cache geladen", core.lade_shop_config(), 1)
         finally:
-            for h in core.HAENDLER: h["urls"] = alt_urls[h["name"]]
+            for h in core.HAENDLER:
+                h["urls"] = alt_urls[h["name"]]
+                if alt_parser[h["name"]] is None: h.pop("parser", None)
+                else: h["parser"] = alt_parser[h["name"]]
 
         # Alarm-Regeln: Vorbestellung, Gebrauchtware, Mute, Tiefstpreis, Ruhezeit.
         neu = {"haendler": "Shop A", "preis": 799.0, "condition": "new", "sofort": True}

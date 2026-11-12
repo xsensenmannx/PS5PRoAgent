@@ -23,9 +23,10 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Shop-Health**: zeigt pro Händler den letzten Zustand, Fehlerzähler und
   Alter des letzten erfolgreichen Scans; auffällige Shops lassen sich einzeln
   erneut prüfen.
-* **Remote-Shop-Liste**: URL-Korrekturen werden über `shop_config.json`
-  veröffentlicht und täglich geladen – ohne neues APK. Akzeptiert werden nur
-  HTTPS-URLs auf bereits bekannten Shop-Hosts.
+* **Remote-Konfiguration**: URL-Korrekturen und deklarative Parser-Regeln
+  (Preis-Marker, Lieferstatus) werden über `shop_config.json` veröffentlicht
+  und täglich geladen – ohne neues APK. Akzeptiert werden nur HTTPS-URLs auf
+  bekannten Shop-Hosts und literale, begrenzte Marker; kein Code, keine Regexe.
 * **Alarm-Regeln**: nur sofort verfügbar, nur echte Tiefstpreise, Ruhezeit
   23–07, eigene Preisgrenze und Händler-Stummschaltung.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
@@ -72,7 +73,7 @@ scan_core.py                  Scan-/Preis-/Speicherlogik ohne Kivy (auch im Serv
 service.py                    Hintergrund-Scan als Android-Foreground-Service
 buildozer.spec                Android-Build-Konfiguration
 android_src/.../BootReceiver.java  startet den Service nach Neustart/App-Update
-shop_config.json              Remote-Vorlage für URL-Korrekturen (täglich geladen)
+shop_config.json              Remote-Vorlage für URL-/Parser-Korrekturen (täglich geladen)
 icon.png                      App-Icon (512×512)
 assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
@@ -102,12 +103,14 @@ python3 tools/selftest.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
-HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config, responsive
-Layout-Geometrie und Boot-Manifest — 175 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie vor jedem
-Build aus.
+HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
+Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 204 Zusicherungen,
+ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus.
 
 ## Versionen
 
+* **v1.5** – Sicher validierte Remote-Konfiguration für Shop-URLs und
+  deklarative Parser-Regeln (versionCode 6).
 * **v1.4** – Boot-Receiver für den Hintergrund-Service und adaptives
   Querformat-Layout für Tablets/Foldables (versionCode 5).
 * **v1.3** – Remote-Shop-Liste, Onboarding und tägliche URL-Aktualisierung
@@ -128,28 +131,55 @@ Build aus.
   die Einstellungen). Nach einem vom Nutzer erzwungenen Stopp startet Android
   den Receiver erst wieder nach dem nächsten manuellen Öffnen der App.
 * Shops ändern URLs und verschärfen Bot-Schutz. Einzelne Händler können dauerhaft
-  „BOT-SCHUTZ" melden — dann hilft eine neue URL in `HAENDLER` oder in der
+  „BOT-SCHUTZ" melden — dann hilft eine neue URL oder eine Parser-Regel in der
   Remote-Datei `shop_config.json`.
 
-## Shop-URLs ohne APK aktualisieren
+## Shop-URLs und Parser-Regeln ohne APK aktualisieren
 
-`shop_config.json` wird aus dem `main`-Branch geladen und streng geprüft:
+`shop_config.json` wird aus dem `main`-Branch geladen und vor dem Anwenden
+vollständig validiert. Ein einziger Fehler verwirft die ganze Datei; dann bleibt
+die zuletzt gültige bzw. die eingebaute Konfiguration aktiv.
 
 ```json
 {
   "schema": 1,
+  "updated": "2026-11-12",
   "shops": {
     "MediaMarkt DE": {
-      "urls": ["https://www.mediamarkt.de/de/product/_sony-playstationr5-pro-2-tb-konsole-3018022.html"]
+      "urls": ["https://www.mediamarkt.de/de/product/_sony-playstationr5-pro-2-tb-konsole-3018022.html"],
+      "parser": {
+        "price_before": "data-ps5-price=\"",
+        "price_after": "\"",
+        "in_stock": ["Auf Lager"],
+        "out_of_stock": ["Ausverkauft"],
+        "preorder": ["Vorbestellung"],
+        "immediate": ["Sofort lieferbar"]
+      }
     }
   }
 }
 ```
 
-Erlaubt sind nur HTTPS-URLs auf Hosts, die bereits in der eingebauten Händlerliste
-stehen. Die App lädt höchstens einmal pro Tag, nutzt ETag/304 und fällt bei Fehlern
-auf die eingebaute Liste zurück. Der Button **SHOPS → SHOP-LISTE AKTUALISIEREN**
-erzwingt einen Abruf.
+**URLs:** nur absolute HTTPS-URLs auf Hosts der eingebauten Händlerliste,
+höchstens 3 pro Shop, ohne Zugangsdaten, ohne Port außer 443 und ohne Fragment.
+Doppelte URLs und unbekannte Shops werden abgelehnt.
+
+**Parser-Regeln:** `price_before` und `price_after` bilden ein Paar aus exakten,
+literalen Markern; dazwischen läuft der vorhandene Preisparser. `in_stock`,
+`out_of_stock`, `preorder` und `immediate` sind Listen literaler Textmarker
+(maximal 8 pro Feld, 120 Zeichen pro Marker); sie werden ohne Beachtung der
+Groß-/Kleinschreibung gesucht, `out_of_stock` gewinnt konservativ. Es gibt
+bewusst **keine freien Regexe und keinen ausführbaren Code** aus der Remote-Datei
+— damit sind ReDoS und Code-Injektion ausgeschlossen. Preis- und Lieferregeln
+haben Vorrang vor JSON-LD/Meta/Text, fallen bei fehlendem Treffer aber sauber
+zurück. Bei einer Regeländerung wird der alte HTTP-Cache des betroffenen Shops
+verworfen, damit ein 304 nicht den alten Preis konserviert.
+
+App und Hintergrund-Service laden höchstens einmal pro Tag und nutzen ETag/304.
+Der Button **SHOPS → REMOTE-CONFIG AKTUALISIEREN** erzwingt einen Abruf.
+APKs bis v1.4 ignorieren zusätzliche `parser`-Felder, solange `urls` vorhanden
+ist; damit ältere Clients die Datei weiterhin akzeptieren, sollte ein Eintrag
+mit Parser-Regel auch `urls` enthalten.
 * Debug-APK zum Sideloading; für den Play Store ist ein signierter AAB-Build nötig.
 
 ## Lizenz

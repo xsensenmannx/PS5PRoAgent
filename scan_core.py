@@ -63,6 +63,10 @@ SHOP_CONFIG_FILE = "ps5pro_shop_config.json"
 SHOP_CONFIG_URL = "https://raw.githubusercontent.com/xsensenmannx/PS5PRoAgent/main/shop_config.json"
 SHOP_CONFIG_MAX_BYTES = 128 * 1024
 SHOP_CONFIG_MAX_ALTER = 86400
+SHOP_CONFIG_MAX_URLS = 3
+SHOP_CONFIG_MAX_MARKER = 120
+SHOP_CONFIG_MAX_PRICE_MARKER = 160
+SHOP_CONFIG_MAX_MARKERS = 24
 
 # ── Händler ─────────────────────────────────────────────────────────
 def _h(n,l,u): return {"name":n,"land":l,"urls":[u]}
@@ -111,6 +115,10 @@ HAENDLER = [
     _h("Aetka DE","DE","https://aetka.de/suche?q=playstation+5+pro+2tb"),
 ]
 
+# Unveraenderliche Basis fuer Remote-Overrides. So kann eine spaetere
+# Konfiguration eine URL oder Regel wieder entfernen, statt nur zu ueberschreiben.
+HAENDLER_BASIS = {h["name"]: list(h["urls"]) for h in HAENDLER}
+
 def _host(u):
     try:
         p=urlparse(str(u))
@@ -118,38 +126,139 @@ def _host(u):
     except Exception: return ""
 
 def _erlaubte_hosts():
-    return {_host(u) for h in HAENDLER for u in h["urls"] if _host(u)}
+    # Bewusst aus der unveraenderlichen Basis: Eine bereits angewendete
+    # Remote-Datei darf den erlaubten Host-Kreis nicht erweitern.
+    return {_host(u) for urls in HAENDLER_BASIS.values() for u in urls if _host(u)}
+
+def _sauber_marker(v, max_len, erlaube_leer=False):
+    """Ein literaler Marker - keine Regexe, kein Code, keine Steuerzeichen."""
+    if not isinstance(v,str) or len(v)>max_len: return None
+    if not erlaube_leer and not v.strip(): return None
+    if any(ord(c)<32 or 127<=ord(c)<=159 for c in v): return None
+    return v
+
+def _validiere_url(u, erlaubt):
+    """Nur absolute HTTPS-URLs auf bereits eingebauten Shop-Hosts."""
+    if not isinstance(u,str) or not (1<=len(u)<=500): return False
+    if any(ord(c)<32 or 127<=ord(c)<=159 or c.isspace() or c=="\\" for c in u): return False
+    try:
+        p=urlparse(u)
+        port=p.port
+        hostname=(p.hostname or "").lower()
+    except (TypeError,ValueError,UnicodeError): return False
+    if p.scheme!="https" or not hostname: return False
+    if port not in (None,443): return False
+    if p.username or p.password or p.fragment: return False
+    if hostname not in erlaubt: return False
+    return True
+
+def _validiere_parser(parser):
+    """Validiert die deklarativen Parser-Regeln einer Shop-Konfiguration.
+
+    Bewusst keine freien Regexe: Ein ReDoS-Muster aus einer Remote-Datei
+    koennte den Scan-Thread und die UI blockieren. Die Regeln bestehen nur aus
+    begrenzten literalen Markern; die Preisfelder bilden ein Paar, zwischen dem
+    der vorhandene, getestete Preisparser laeuft.
+    """
+    if not isinstance(parser,dict) or not parser: return None
+    erlaubt={"price_before","price_after","in_stock","out_of_stock",
+             "preorder","immediate"}
+    if set(parser)-erlaubt: return None
+    out={}
+    before=parser.get("price_before"); after=parser.get("price_after")
+    if (before is None)!=(after is None): return None
+    if before is not None:
+        before=_sauber_marker(before,SHOP_CONFIG_MAX_PRICE_MARKER)
+        after=_sauber_marker(after,SHOP_CONFIG_MAX_PRICE_MARKER)
+        if before is None or after is None or before==after: return None
+        out["price_before"]=before; out["price_after"]=after
+    gesamt=0
+    for key in ("in_stock","out_of_stock","preorder","immediate"):
+        if key not in parser: continue
+        liste=parser[key]
+        if not isinstance(liste,list) or not (1<=len(liste)<=8): return None
+        sauber=[]; gesehen=set()
+        for marker in liste:
+            marker=_sauber_marker(marker,SHOP_CONFIG_MAX_MARKER)
+            if marker is None: return None
+            norm=marker.lower()
+            if norm in gesehen: return None
+            gesehen.add(norm); sauber.append(marker)
+        gesamt+=len(sauber)
+        if gesamt>SHOP_CONFIG_MAX_MARKERS: return None
+        out[key]=sauber
+    return out or None
 
 def validiere_shop_config(data):
-    """Nur URLs auf bereits bekannten Shop-Hosts, nur HTTPS, kein Code."""
-    if not isinstance(data,dict) or data.get("schema")!=1: return None
+    """Validiert Remote-URLs und Parser-Regeln streng und vollstaendig.
+
+    Schema 1 bleibt kompatibel: alte Clients lesen weiterhin nur `urls`, neue
+    Clients duerfen zusaetzlich ein optionales `parser`-Objekt auswerten. Bei
+    einem einzigen Fehler wird die gesamte Datei verworfen; die eingebaute
+    Haendlerliste bleibt dann aktiv.
+    """
+    if not isinstance(data,dict): return None
+    if set(data)-{"schema","updated","shops"}: return None
+    if type(data.get("schema")) is not int or data.get("schema")!=1: return None
+    if "updated" in data and _sauber_marker(data["updated"],40) is None: return None
     shops=data.get("shops")
-    if not isinstance(shops,dict): return None
+    if not isinstance(shops,dict) or len(shops)>len(HAENDLER): return None
     namen={h["name"] for h in HAENDLER}; erlaubt=_erlaubte_hosts()
     out={}
     for name,eintrag in shops.items():
-        if name not in namen: return None
-        urls=eintrag.get("urls") if isinstance(eintrag,dict) else eintrag
+        if not isinstance(name,str) or name not in namen: return None
+        parser=None
+        if isinstance(eintrag,dict):
+            if set(eintrag)-{"urls","parser"}: return None
+            urls=eintrag.get("urls")
+            if "parser" in eintrag:
+                parser=_validiere_parser(eintrag.get("parser"))
+                if parser is None: return None
+            if urls is None and parser is None: return None
+        else:
+            urls=eintrag
         if isinstance(urls,str): urls=[urls]
-        if not isinstance(urls,list) or not (1<=len(urls)<=3): return None
         sauber=[]
-        for u in urls:
-            if not isinstance(u,str) or len(u)>500: return None
-            p=urlparse(u)
-            if p.scheme!="https" or not p.hostname: return None
-            if p.hostname.lower() not in erlaubt: return None
-            if p.username or p.password: return None
-            sauber.append(u)
-        out[name]=sauber
+        if urls is not None:
+            if not isinstance(urls,list) or not (1<=len(urls)<=SHOP_CONFIG_MAX_URLS): return None
+            for u in urls:
+                if not _validiere_url(u,erlaubt): return None
+                if u in sauber: return None
+                sauber.append(u)
+        eintrag_neu={}
+        if sauber: eintrag_neu["urls"]=sauber
+        if parser is not None: eintrag_neu["parser"]=parser
+        out[name]=eintrag_neu
     return out
 
+def _cache_fuer_urls_loeschen(urls):
+    """Nach einer Regel-/URL-Aenderung darf ein alter 304-Treffer nicht gelten."""
+    try:
+        cache=http_cache()
+        for u in set(urls): cache.drop(u)
+    except Exception: pass
+
 def wende_shop_config(shops):
-    """Ersetzt nur die URLs bekannter Haendler; Namen und Anzahl bleiben stabil."""
+    """Wendet Overrides an und stellt entfernte Overrides auf die Basis zurueck.
+
+    Die Konfiguration ist autoritativ: fehlt ein Shop oder ein Feld, gilt wieder
+    die eingebaute URL bzw. der eingebaute Parser. Namen, Laender und Anzahl der
+    Haendler bleiben unveraendert.
+    """
     if not isinstance(shops,dict): return 0
     by={h["name"]:h for h in HAENDLER}; n=0
-    for name,urls in shops.items():
-        if name in by and urls:
-            by[name]["urls"]=list(urls); n+=1
+    for name,h in by.items():
+        alt_urls=list(h.get("urls") or [])
+        alt_parser=h.get("parser")
+        h["urls"]=list(HAENDLER_BASIS.get(name,alt_urls))
+        h.pop("parser",None)
+        eintrag=shops.get(name)
+        if isinstance(eintrag,dict):
+            if eintrag.get("urls"): h["urls"]=list(eintrag["urls"])
+            if isinstance(eintrag.get("parser"),dict): h["parser"]=dict(eintrag["parser"])
+            n+=1
+        if h["urls"]!=alt_urls or h.get("parser")!=alt_parser:
+            _cache_fuer_urls_loeschen(set(alt_urls)|set(h["urls"]))
     return n
 
 def lade_shop_config():
@@ -361,6 +470,58 @@ def pruefe_verfuegbar(html, st):
     pos=sum(1 for kw in POSITIV if kw in low)
     return False if neg>pos else True
 
+def _remote_preis(html, parser):
+    """Holt einen Preis zwischen zwei literalen Markern aus der Remote-Regel.
+
+    Kein Regex: nur `str.find` und der bereits getestete Preisparser. Dadurch
+    kann eine Remote-Datei weder Code ausfuehren noch den Regex-Engine mit einem
+    bösartigen Muster blockieren.
+    """
+    before=parser.get("price_before") if isinstance(parser,dict) else None
+    after=parser.get("price_after") if isinstance(parser,dict) else None
+    if not isinstance(html,str) or not before or not after: return None
+    pos=0
+    for _ in range(32):
+        start=html.find(before,pos)
+        if start<0: break
+        wert_start=start+len(before)
+        ende=html.find(after,wert_start)
+        if ende<0: break
+        if 0<ende-wert_start<=120:
+            p=parse_preis_str(html[wert_start:ende])
+            if p is not None and MIN_PREIS<=p<=5000: return p
+        pos=max(start+1,wert_start)
+    return None
+
+def _remote_verfuegbarkeit(html, parser):
+    """Deklarative Verfuegbarkeits-Marker; Ausverkauft gewinnt konservativ."""
+    if not isinstance(html,str) or not isinstance(parser,dict): return None,None
+    keys=("in_stock","out_of_stock","preorder","immediate")
+    if not any(parser.get(k) for k in keys): return None,None
+    low=html.lower()
+    def hat(key):
+        marker=parser.get(key)
+        return bool(marker) and any(str(m).lower() in low for m in marker)
+    aus=hat("out_of_stock"); vor=hat("preorder")
+    da=hat("in_stock"); sofort=hat("immediate")
+    if aus: return False,False
+    if vor: return True,False
+    if da:
+        return True, True if sofort else None
+    if sofort: return None,True
+    return None,None
+
+def remote_parser_ergebnis(html, parser):
+    """Wendet die optionalen Remote-Regeln auf eine bereits geladene Seite an."""
+    out={}
+    if not isinstance(parser,dict): return out
+    p=_remote_preis(html,parser)
+    if p is not None: out["preis"]=p
+    v,sofort=_remote_verfuegbarkeit(html,parser)
+    if v is not None: out["verfuegbar"]=v
+    if sofort is not None: out["sofort"]=sofort
+    return out
+
 def ist_sofort_verfuegbar(html):
     """Text-Fallback: Vorbestellung/Backorder ist keine sofortige Verfuegbarkeit."""
     low=html.lower()
@@ -563,11 +724,17 @@ def scan_einen(h):
         s=extract_structured(html)
         if not pruefe_nur_konsole(html,s):
             return _res(h,None,"unknown",d,"nicht PS5 Pro 2TB",fu)
-        v=pruefe_verfuegbar(html,s)
-        p=(s.get("preis") or extract_meta_preis(html))
-        signal=("jsonld" if s.get("preis") is not None else
+        remote=remote_parser_ergebnis(html,h.get("parser"))
+        v=remote.get("verfuegbar")
+        if v is None: v=pruefe_verfuegbar(html,s)
+        p=remote.get("preis")
+        if p is None: p=s.get("preis")
+        if p is None: p=extract_meta_preis(html)
+        signal=("remote" if remote else
+                "jsonld" if s.get("preis") is not None else
                 "meta" if p is not None else "text")
-        sofort=s.get("sofort")
+        sofort=remote.get("sofort")
+        if sofort is None: sofort=s.get("sofort")
         if sofort is None and v: sofort=ist_sofort_verfuegbar(html)
         res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,
                  signal=signal,condition=s.get("condition"),seller=s.get("seller"),
