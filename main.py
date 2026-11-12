@@ -201,6 +201,50 @@ def request_android_permissions():
         request_permissions(p)
     except Exception: pass
 
+# ── Edge-to-Edge (Android 15+ / targetSdk 35+) ─────────────────────
+def android_insets():
+    """(oben, unten) in dp: Statusleiste, Notch und Gestenbereich.
+
+    Ab targetSdk 35 zeichnet Android die App hinter Systemleisten. Kivy kennt
+    keine Insets, deshalb werden die Bedienelemente hier um den gemeldeten
+    Rand verschoben. Ohne Android oder ohne Activity bleibt alles bei 0.
+    """
+    if platform!="android": return (0.0,0.0)
+    try:
+        from jnius import autoclass
+        act=autoclass("org.kivy.android.PythonActivity").mActivity
+        ins=act.getWindow().getDecorView().getRootWindowInsets()
+        if ins is None: return (0.0,0.0)
+        d=act.getResources().getDisplayMetrics().density or 1.0
+        if autoclass("android.os.Build$VERSION").SDK_INT>=30:
+            T=autoclass("android.view.WindowInsets$Type")
+            top=max(ins.getInsets(T.statusBars()).top,
+                    ins.getInsets(T.displayCutout()).top)
+            # mandatorySystemGestures liegt auch bei ausgeblendeter Leiste an:
+            # sonst sitzen die unteren Buttons im Zurueck-Gestenbereich.
+            bot=max(ins.getInsets(T.navigationBars()).bottom,
+                    ins.getInsets(T.mandatorySystemGestures()).bottom,
+                    ins.getInsets(T.displayCutout()).bottom)
+        else:
+            top=ins.getSystemWindowInsetTop()
+            bot=ins.getSystemWindowInsetBottom()
+        return (max(0,int(top))/d, max(0,int(bot))/d)
+    except Exception: return (0.0,0.0)
+
+def android_prepare_window():
+    """Helle Systemleisten-Symbole auf dunklem Hintergrund (Android 15+)."""
+    if platform!="android": return
+    try:
+        from jnius import autoclass
+        act=autoclass("org.kivy.android.PythonActivity").mActivity
+        win=act.getWindow()
+        if autoclass("android.os.Build$VERSION").SDK_INT>=30:
+            WIC=autoclass("android.view.WindowInsetsController")
+            # Maske 0 = keine "light bars" -> weisse Symbole.
+            win.getInsetsController().setSystemBarsAppearance(
+                0, WIC.APPEARANCE_LIGHT_STATUS_BARS|WIC.APPEARANCE_LIGHT_NAVIGATION_BARS)
+    except Exception: pass
+
 # ── Hintergrund-Scan (eigener Prozess) ──────────────────────────────
 # Java-Klasse aus der Spec-Zeile services = ps5proscan:...:foreground
 BG_SERVICE = "de.ps5pro.ps5prosearchagent.ServicePs5proscan"
@@ -960,7 +1004,7 @@ class MainUI(FloatLayout):
         self.next_scan_at=0.0; self._auto_event=None
         self.notify_enabled=bool(self.settings.get("notify",True))
         self._known_hits=set(); self.queue=queue.Queue()
-        self._bg_seen_ts=0.0
+        self._bg_seen_ts=0.0; self._insets=(0.0,0.0)
         self._scan_token=0
         self.history=History(); self._scan_t0=0.0; self._scan_done=0
         self._scan_total=0; self._rerender_event=None; self._drain_event=None
@@ -969,6 +1013,9 @@ class MainUI(FloatLayout):
         Window.bind(size=self._on_window_size)
         Clock.schedule_once(lambda dt:self._apply_sizes(),0)
         Clock.schedule_once(lambda dt:self._apply_sizes(),0.2)
+        # Insets erst nach dem ersten Frame: vorher gibt es keine RootWindowInsets.
+        Clock.schedule_once(lambda dt:self._refresh_insets(),0.5)
+        Clock.schedule_once(lambda dt:self._refresh_insets(),1.5)
         if self.auto_scan: Clock.schedule_once(lambda dt:self._auto_start(),1.5)
 
     # ── Aufbau ──────────────────────────────────────────────────────
@@ -1141,6 +1188,10 @@ class MainUI(FloatLayout):
     def _on_window_size(self,*_):
         if self._resize_event is not None: Clock.unschedule(self._resize_event)
         self._resize_event=Clock.schedule_once(lambda dt:self._apply_sizes(),0.05)
+    def _refresh_insets(self):
+        try:
+            self._insets=android_insets(); self._apply_sizes()
+        except Exception as e: print(f"[Insets] {e}")
     def _apply_sizes(self):
         try:
             w,h=Window.width,Window.height
@@ -1149,10 +1200,15 @@ class MainUI(FloatLayout):
             if h<dp(500): lh,rh,ch=dp(56),dp(160),dp(42)
             elif h<dp(700): lh,rh,ch=dp(64),dp(178),dp(46)
             else: lh,rh,ch=dp(72),dp(190),dp(50)
+            top_in,bot_in=self._insets
             self.logo.height=lh
-            self.controls.pos=(0,0); self.controls.size=(w,ch)
-            self.results_panel.pos=(0,ch); self.results_panel.size=(w,rh)
-            self.radar.reserve_bottom=ch+rh; self.radar.reserve_top=lh
+            # pos_hint statt pos: FloatLayout haelt den Titel so auch bei
+            # Drehung/Resize unterhalb der Statusleiste bzw. des Notch.
+            self.logo.pos_hint={"x":0,"top":1.0-(top_in/h if h else 0)}
+            self.controls.pos=(0,bot_in); self.controls.size=(w,ch)
+            self.results_panel.pos=(0,bot_in+ch); self.results_panel.size=(w,rh)
+            self.radar.reserve_bottom=ch+rh+bot_in
+            self.radar.reserve_top=lh+top_in
         except Exception as e: print(f"[Sizes] {e}")
 
     # ── Bedienung ───────────────────────────────────────────────────
@@ -1502,6 +1558,7 @@ class PS5ProApp(App):
             if platform in ("android","ios"): Window.fullscreen='auto'
         except Exception: pass
         request_android_permissions()
+        android_prepare_window()
         self.root_layout=RootLayout(); return self.root_layout
     def on_pause(self):
         try: self.root_layout.main_ui.radar.pause()
@@ -1517,6 +1574,7 @@ class PS5ProApp(App):
             bg_service_stop()
             ui=self.root_layout.main_ui
             ui.radar.resume()
+            ui._refresh_insets()
             ui._bg_merge()
             if ui.auto_scan and not ui.scanning:
                 if time.time()>=ui.next_scan_at: ui._scan_start()

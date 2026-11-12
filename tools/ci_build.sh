@@ -24,7 +24,7 @@ missing=0
 for f in main.py scan_core.py service.py buildozer.spec icon.png \
          assets/icon_fg.png assets/icon_bg.png assets/notify_icon.png tools/selftest.py \
          tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
-         tools/ci_log_failure.sh; do
+         tools/ci_check_aab.sh tools/ci_log_failure.sh; do
     if [ ! -f "$f" ]; then
         echo "::error file=$f::Pflichtdatei fehlt: $f"
         missing=1
@@ -104,16 +104,42 @@ else
     echo "den Lizenz-Prompt selbst (android.accept_sdk_license = True)"
 fi
 
-say "APK bauen"
+# ARTIFACT=aab signiert ein App Bundle fuer Google Play, sonst Debug-APK.
+ARTIFACT="${ARTIFACT:-apk}"
 # Ohne VIRTUAL_ENV ruft buildozer intern `pip install --user` auf, was in einem
 # venv mit "Can not perform a '--user' install" abbricht.
 export VIRTUAL_ENV="$PWD/.venv"
 export PATH="$PWD/.venv/bin:$PATH"
 
-set +e
-.venv/bin/buildozer -v android debug 2>&1 | tee buildozer.log
-rc=${PIPESTATUS[0]}
-set -e
+if [ "$ARTIFACT" = "aab" ]; then
+    say "AAB bauen (signiert)"
+    missing=0
+    for v in P4A_RELEASE_KEYSTORE P4A_RELEASE_KEYSTORE_PASSWD \
+             P4A_RELEASE_KEYALIAS P4A_RELEASE_KEYALIAS_PASSWD; do
+        if [ -z "${!v:-}" ]; then
+            echo "::error::$v fehlt - AAB waere unsigniert und fuer Play unbrauchbar."
+            missing=1
+        fi
+    done
+    if [ "$missing" -ne 0 ]; then
+        echo "Secrets siehe PLAY_STORE.md (GitHub -> Settings -> Secrets and variables -> Actions)."
+        exit 1
+    fi
+    if [ ! -f "$P4A_RELEASE_KEYSTORE" ]; then
+        echo "::error::Keystore nicht gefunden: $P4A_RELEASE_KEYSTORE"
+        exit 1
+    fi
+    set +e
+    .venv/bin/buildozer -v android release 2>&1 | tee buildozer.log
+    rc=${PIPESTATUS[0]}
+    set -e
+else
+    say "APK bauen"
+    set +e
+    .venv/bin/buildozer -v android debug 2>&1 | tee buildozer.log
+    rc=${PIPESTATUS[0]}
+    set -e
+fi
 
 if [ "$rc" -ne 0 ]; then
     echo "::error::buildozer ist mit Code $rc gescheitert - Details in buildozer.log"
@@ -128,9 +154,14 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 say "Ergebnis"
-ls -lh bin/*.apk
-
-# "Build erfolgreich" heisst noch nicht, dass die richtige Python-Version
-# in der APK steckt. Genau das hat hier 40 Minuten gekostet.
-APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
-bash tools/ci_check_apk.sh "$APK" "$PYPIN"
+if [ "$ARTIFACT" = "aab" ]; then
+    ls -lh bin/*.aab
+    AAB=$(ls -1 bin/*.aab 2>/dev/null | head -n 1 || true)
+    bash tools/ci_check_aab.sh "$AAB" "$PYPIN"
+else
+    ls -lh bin/*.apk
+    # "Build erfolgreich" heisst noch nicht, dass die richtige Python-Version
+    # in der APK steckt. Genau das hat hier 40 Minuten gekostet.
+    APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
+    bash tools/ci_check_apk.sh "$APK" "$PYPIN"
+fi
