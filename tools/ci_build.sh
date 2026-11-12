@@ -92,6 +92,20 @@ echo "Host-Python: $(.venv/bin/python -V 2>&1)"
 say "SDK/NDK-Cache pruefen"
 bash tools/ci_fix_cache.sh
 
+# Der Actions-Cache stellt auch einen alten p4a-Dist her. Buildozer baut den
+# nicht neu, wenn nur die Spec sich geaendert hat (z. B. android.api 34 -> 36) -
+# dann landet still die alte targetSdk in der APK. Deshalb bei geaenderter Spec
+# den Dist-Build verwerfen; SDK/NDK in ~/.buildozer bleiben erhalten.
+say "Spec-Stand pruefen"
+SPEC_HASH=$(sha256sum buildozer.spec | cut -d' ' -f1)
+OLD_HASH=$(cat .buildozer/.spec-hash 2>/dev/null || true)
+if [ -d .buildozer ] && [ "$OLD_HASH" != "$SPEC_HASH" ]; then
+    echo "Spec geaendert - alten Dist-Build verwerfen (SDK/NDK bleiben)"
+    rm -rf .buildozer/android/platform/build-*
+fi
+mkdir -p .buildozer
+echo "$SPEC_HASH" > .buildozer/.spec-hash
+
 # Lizenzen nur in ein FERTIGES SDK schreiben. Ein selbst angelegtes SDK-Verzeichnis
 # laesst buildozer die Installation ueberspringen ("Android SDK found at ...");
 # danach fehlt tools/bin/sdkmanager und der Build bricht ab.
