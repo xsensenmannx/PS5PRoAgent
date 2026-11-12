@@ -19,6 +19,9 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht.
 * **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**.
+* **Ressourcen-schonend:** das Radar zeichnet im Leerlauf 12 statt 30 Bilder/s und
+  pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert, und die
+  Bot-Schutz-Prüfung liest nur die ersten 3 KB statt die ganze Seite zu kopieren.
 * Filter (Treffer/alle), Sortierung (Preis/Händler/Zeit), Händler-Auswahl, kurzer
   Tap auf eine Karte öffnet den Shop im Browser.
 
@@ -44,9 +47,15 @@ icon.png                      App-Icon (512×512)
 assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
 tools/selftest.py             Logiktests ohne Kivy (CI-Gate)
+tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal)
+tools/ci_check_apk.sh         prüft die fertige APK (Größe, Python-Version)
+tools/ci_licenses.sh          akzeptiert die Android-SDK-Lizenzen
+tools/ci_fix_cache.sh         räumt halb geladene SDK/NDK-Bäume auf
 PS5Pro_APK_Colab.ipynb        Build-Notebook für Colab
 GITHUB_ANLEITUNG.md           Build über GitHub Actions (Web-Upload und CLI)
 .github/workflows/build-apk.yml   CI-Build
+.github/workflows/release.yml     Tag v* -> APK als Release-Asset
+.github/workflows/diagnose.yml    manueller Diagnose-Lauf
 ps5pro.zip                    Upload-Paket für Colab
 ```
 
@@ -57,7 +66,7 @@ python3 tools/selftest.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung und
-die Händlerdaten — 35 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie
+die Händlerdaten — 50 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie
 vor jedem Build aus.
 
 ## Grenzen

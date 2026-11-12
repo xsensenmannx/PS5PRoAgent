@@ -24,8 +24,12 @@ Die eigentliche Arbeit steckt in drei Skripten, die mit dem Projekt hochgeladen 
 | `tools/ci_build.sh` | prüft Pflichtdateien, installiert Systempakete, legt das venv mit Python 3.11.9 an, akzeptiert Lizenzen, baut die APK |
 | `tools/ci_licenses.sh` | schreibt die akzeptierten SDK-Lizenzen in ein **fertig installiertes** SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb heruntergeladene SDK/NDK-Bäume, an denen buildozer sonst dauerhaft scheitert |
+| `tools/ci_check_apk.sh` | prüft die fertige APK: plausible Größe und die gepinnte Python-Version wirklich enthalten |
 
 Beide laufen auch lokal auf Linux/WSL: `bash tools/ci_build.sh`.
+
+`.github/workflows/release.yml` ist genauso aufgebaut und ruft dasselbe Skript auf — es
+läuft nur bei einem Tag (`v*`) und hängt die APK zusätzlich an das Release.
 
 ---
 
@@ -50,6 +54,7 @@ tools/selftest.py
 tools/ci_build.sh
 tools/ci_licenses.sh
 tools/ci_fix_cache.sh
+tools/ci_check_apk.sh
 assets/icon_fg.png
 assets/icon_bg.png
 ```
@@ -101,7 +106,7 @@ workflows → Save**, dann **Actions → APK bauen → Run workflow**.
 | --- | --- | --- |
 | Auschecken | Sekunden | lädt deinen Commit |
 | Java 17 | ~20 s | Temurin-JDK, das Gradle erwartet |
-| **Logiktests** | ~2 s | 40 Zusicherungen; rot = kein Build |
+| **Logiktests** | ~2 s | 50 Zusicherungen; rot = kein Build |
 | Build-Cache | ~1 min | SDK/NDK (~2 GB) aus dem Cache oder Download |
 | **APK bauen** | 20–35 min | ruft `tools/ci_build.sh` auf (Pflichtdateien, Pakete, venv, Lizenzen, Build) |
 | APK als Artifact | Sekunden | lädt `bin/*.apk` hoch |
@@ -187,12 +192,45 @@ nach 5–15 Minuten liegt das neue Artifact bereit. Neue APK über die alte inst
 App-Daten bleiben erhalten, solange der Paketname `de.ps5pro.ps5prosearchagent` gleich
 bleibt.
 
-## Optional: dauerhafter Download-Link
+## Dauerhafter Download-Link (Release)
 
-Artifacts verfallen nach 90 Tagen und sind nur eingeloggt sichtbar. Für einen Link direkt
-aufs Handy: **Releases → Draft a new release**, Tag z. B. `v1.0`, APK als Asset anhängen.
-Automatisch geht das mit einem zusätzlichen `softprops/action-gh-release`-Schritt — sag
-Bescheid, dann baue ich ihn ein.
+Artifacts verfallen nach 90 Tagen und sind nur eingeloggt sichtbar. Der Workflow
+`.github/workflows/release.yml` baut die APK bei einem **Tag** und hängt sie an ein
+Release — der Link ist danach ohne Login auf dem Handy zu öffnen.
+
+**Tag setzen, ohne Kommandozeile:**
+
+1. **Code** → rechts **Releases** → **Draft a new release**.
+2. Bei **Choose a tag** `v1.0` eintippen → **Create new tag: v1.0 on publish**.
+3. Titel z. B. `v1.0` → **Publish release**.
+
+Der Tag zeigt damit auf den aktuellen Stand von `main`, und der Workflow **Release**
+startet. Nach 20–40 Minuten (erster Lauf länger) liegt die APK am Release:
+**Releases → v1.0 → Assets → `ps5prosearchagent-1.0-arm64-v8a-debug.apk`**.
+
+**Mit der Kommandozeile:**
+
+```bash
+git tag v1.0
+git push origin v1.0
+```
+
+Der Workflow legt das Release selbst an (Titel = Tag, hier `v1.0`). Ein schon
+publiziertes Release stört nicht — die APK wird dort ergänzt, der Titel bleibt.
+
+**Beim nächsten Release:** in `buildozer.spec` `version = 1.1` committen, dann `v1.1`
+taggen. Tag und Spec-Version dürfen abweichen, aber der Dateiname der APK enthält die
+Version aus der Spec — gleiche Nummern halten die Zuordnung eindeutig.
+
+**Tag am falschen Commit oder vertippt?** Lokal und auf GitHub löschen, neu setzen:
+
+```bash
+git tag -d v1.0
+git push origin :refs/tags/v1.0
+```
+
+Ein bereits angelegtes Release bleibt dabei bestehen (samt alter APK) — im Zweifel im
+Web löschen und neu taggen.
 
 ## Play Store
 
