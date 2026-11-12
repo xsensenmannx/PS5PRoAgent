@@ -20,12 +20,14 @@ eigenes.
 | `buildozer.spec` | Build-Konfiguration (API, NDK, Icon, Rechte) |
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
-| `tools/selftest.py` | Logiktests ohne Kivy (40 Zusicherungen) |
+| `tools/selftest.py` | Logiktests ohne Kivy (50 Zusicherungen) |
 | `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb geladene SDK/NDK-Bäume (sonst überspringt buildozer die Installation) |
+| `tools/ci_check_apk.sh` | prüft die fertige APK (Größe, enthält `libpython3.11.so`) |
 | `PS5Pro_APK_Colab.ipynb` | Build-Notebook für Colab |
 | `.github/workflows/build-apk.yml` | CI-Build mit Artifact |
+| `.github/workflows/release.yml` | bei Tag `v*`: Build + APK als Release-Asset |
 | `.github/workflows/diagnose.yml` | manueller Diagnose-Lauf (SDK/NDK, venv, letzter Fehler) |
 | `ps5pro.zip` | Upload-Paket für Colab (main.py, spec, icons, `assets/`) |
 | `GITHUB_ANLEITUNG.md` | Build über GitHub Actions, Schritt für Schritt |
@@ -205,7 +207,7 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | `android.accept_sdk_license` | `True` | Keine interaktive Lizenzabfrage in Colab/CI. |
 | `android.archs` | `arm64-v8a` | Alle aktuellen Geräte sind 64-Bit; der 32-Bit-Pfad verdoppelte die Bauzeit und war die häufigste Fehlerquelle. Für alte Geräte `, armeabi-v7a` ergänzen. |
 | `android.permissions` | INTERNET, VIBRATE, POST_NOTIFICATIONS | Scan, haptisches Feedback, Alarm. |
-| `source.exclude_*` | `.buildozer, bin, __pycache__, _verify, .github, tools`; `*.zip, *.ipynb, *.md, *.log` | Doku, Build-Werkzeuge und Upload-Paket landen nicht in der APK. |
+| `source.exclude_*` | `.buildozer, bin, __pycache__, _verify, .github, .git, .venv, fonts, tools`; `*.zip, *.ipynb, *.md, *.log` | Doku, Git-Historie, Build-Werkzeuge und Upload-Paket landen nicht in der APK. |
 
 ---
 
@@ -252,10 +254,16 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 **Geprüft in dieser Umgebung** (Windows ohne Java/SDK, daher ohne echten Build):
 
 * `main.py` kompiliert fehlerfrei (CPython 3.12.8).
-* `tools/selftest.py`: 40 Zusicherungen grün — Preis-Parsing (`1.299,00 €`, `799,99`,
-  `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`, Zubehör-Ausschluss („DualSense
-  Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung, Verfügbarkeits-Heuristik,
-  Klassifizierung, Kürzel, 42 eindeutige Händler-URLs.
+* `tools/selftest.py`: 50 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
+  (`1.299,00 €`, `799,99`, `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`,
+  Zubehör-Ausschluss („DualSense Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung,
+  Verfügbarkeits-Heuristik, Klassifizierung, Kürzel, 42 eindeutige Händler-URLs und der
+  Python-Pin in der `buildozer.spec`.
+* Alle Shell-Skripte (`bash -n`) und alle drei Workflow-YAMLs sind syntaktisch gültig.
+* Optimierungen gemessen (CPython 3.12.10, synthetische 5-MB-Shopseite): Bot-Schutz-Prüfung
+  3,27 ms → 0,006 ms (nur noch 3 KB statt der ganzen Seite kleingeschrieben),
+  Produkt-/Verfügbarkeitsprüfung 136 ms → 120 ms. Ein kombinierter Produkt-Regex war in
+  der Messung 3,5× langsamer (154 ms) und wurde deshalb verworfen.
 * `buildozer.spec` parst (API 34, NDK 28c, minapi 24, p4a master), Notebook-JSON valide.
 * Icon-Assets: 432×432, korrekte Modi, in Kreis-Maske visuell geprüft.
 
