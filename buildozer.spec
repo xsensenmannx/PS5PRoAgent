@@ -43,8 +43,6 @@ version = 1.0
 # Python-Version festlegen
 requirements = python3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
-
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
