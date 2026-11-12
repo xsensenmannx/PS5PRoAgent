@@ -317,7 +317,7 @@ def spec_tests():
     """Der Build-Pin entscheidet ueber Erfolg oder Abbruch - deshalb geprueft.
 
     p4a baut ohne Pin CPython 3.14; Cython 0.29.36 (fest im p4a-Recipe) und
-    Kivy 2.3.0 koennen nur bis 3.12. Ausserdem verlangt p4a, dass python3 und
+    Kivy 2.3 koennen nur bis 3.12. Ausserdem verlangt p4a, dass python3 und
     hostpython3 exakt dieselbe Version haben.
     """
     c = configparser.ConfigParser()
@@ -332,7 +332,10 @@ def spec_tests():
           m.group(1) if m else None, h.group(1) if h else None)
     ver = m.group(1) if m else ""
     check("spec python <= 3.12", ver[:5] in ("3.10.", "3.11.", "3.12."), True)
-    check("spec kivy 2.3.0", "kivy==2.3.0" in req, True)
+    check("spec kivy 2.3.1", "kivy==2.3.1" in req, True)
+    # 2.3.0 bricht mit NDK 28c/clang 20 in cgl_gl.c ab: dort steht
+    # "const GLchar**" gegen "const GLchar* const *" der GLES-Header.
+    check("spec kivy nicht 2.3.0", "kivy==2.3.0" in req, False)
     check("spec api 34", c.get("app", "android.api"), "34")
 
 

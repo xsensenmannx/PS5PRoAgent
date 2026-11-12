@@ -4,7 +4,7 @@ Diese Datei dokumentiert die Open-Source-Bibliotheken, die in der Android-APK
 dieses Projekts enthalten sind. Sie ergänzt die [MIT-Lizenz](LICENSE), die nur
 den eigenen Projektcode (`main.py`, Build-Skripte, Doku, Icons) betrifft.
 
-Stand: November 2026. Maßgeblich ist `buildozer.spec`: **Kivy 2.3.0** und
+Stand: November 2026. Maßgeblich ist `buildozer.spec`: **Kivy 2.3.1** und
 **CPython 3.11.9** sind gepinnt, die übrigen Python-Pakete löst
 python-for-android beim Build in der jeweils aktuellen Fassung auf. Die
 kompletten Lizenztexte liegen den Quellen der Bibliotheken bei und sind über die
@@ -14,7 +14,7 @@ verlinkten Repositories abrufbar.
 
 | Bibliothek | Rolle in der App | Lizenz (SPDX) | Copyright |
 | --- | --- | --- | --- |
-| [Kivy](https://github.com/kivy/kivy) 2.3.0 | UI-Framework (Widgets, Canvas, Clock) | MIT | Kivy Team and contributors |
+| [Kivy](https://github.com/kivy/kivy) 2.3.1 | UI-Framework (Widgets, Canvas, Clock) | MIT | Kivy Team and contributors |
 | [python-for-android](https://github.com/kivy/python-for-android) | Build-Toolchain, Android-Bootstrap, `android`-Modul für Rechte/Vibration | MIT | Kivy Team and contributors |
 | [requests](https://github.com/psf/requests) | HTTP-Scan der Händler (mit `urllib3`) | Apache-2.0 | Kenneth Reitz and contributors |
 | [urllib3](https://github.com/urllib3/urllib3) | Transport, Connection-Pooling, TLS | MIT | Andrey Petrov and contributors |
@@ -64,7 +64,7 @@ python-for-android ab; die Liste folgt dem SDL2-Bootstrap.
 Die Paketliste folgt `requirements` in `buildozer.spec`:
 
 ```
-python3==3.11.9, hostpython3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests,
+python3==3.11.9, hostpython3==3.11.9, kivy==2.3.1, plyer, pyjnius, requests,
 urllib3, certifi, charset-normalizer, idna, android
 ```
 
