@@ -2,6 +2,7 @@
 import os, sys, json, re, time, math, random, queue, threading, hashlib
 from datetime import datetime
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 IS_MOBILE = ('ANDROID_ARGUMENT' in os.environ or sys.platform in ('android','ios'))
@@ -371,13 +372,20 @@ def extract_structured(html):
         if isinstance(off,list): off=off[0] if off else None
         if isinstance(off,dict):
             pv=parse_preis_str(off.get("price") or off.get("lowPrice"))
-            if pv is not None: res["preis"]=pv
+            # Plausibilitaet wie bei extract_meta_preis: 0,00 / 1,00 sind
+            # Platzhalter aus Shop-Vorlagen und wuerden sonst als Treffer
+            # gemeldet (Alarm fuer 0 Euro). Nach oben begrenzt gegen
+            # Phantasiewerte aus kaputten Feeds.
+            if pv is not None and MIN_PREIS<=pv<=5000: res["preis"]=pv
             av=str(off.get("availability","")).lower()
             if any(k in av for k in ("instock","preorder","backorder","instoreonly","limited")):
                 res["verfuegbar"]=True
             elif any(k in av for k in ("outofstock","soldout","discontinued")):
                 res["verfuegbar"]=False
-        break
+        # Weitere Product-Eintraege ansehen, solange noch kein brauchbarer
+        # Preis gefunden wurde: manche Shops liefern erst im zweiten Eintrag
+        # ein Angebot (der erste ist dann z. B. eine Variante ohne offers).
+        if res["preis"] is not None: break
     return res
 
 def extract_meta_preis(html):
@@ -432,12 +440,22 @@ def _try_url(u, att, proxy=None):
         sess=_session()
         if sess is not None:
             r=sess.get(uu,headers=hd,timeout=TIMEOUT,allow_redirects=True,proxies=pr)
-            if r.status_code==429: time.sleep(8); return None,"HTTP 429"
+            if r.status_code==429:
+                # Retry-After respektieren, aber gedeckelt - ein Shop mit
+                # "3600" soll den Scan nicht eine Stunde blockieren.
+                try: ra=int(r.headers.get("Retry-After","8"))
+                except (TypeError,ValueError): ra=8
+                time.sleep(min(max(ra,1),15)); return None,"HTTP 429"
             if r.status_code>=400: return None,f"HTTP {r.status_code}"
             return r.text,None
         req=Request(uu,headers=hd)
         with urlopen(req,timeout=TIMEOUT) as resp:
             return resp.read().decode("utf-8",errors="replace"),None
+    except HTTPError as e:
+        # urlopen wirft bei 4xx/5xx; ohne diese Normalisierung greift die
+        # 404/410-Abkürzung in fetch_html_multi nie und jeder umgezogene
+        # Haendler kostet drei Versuche samt Wartezeit.
+        return None,f"HTTP {e.code}"
     except Exception as e: return None,str(e)[:50]
 
 def fetch_html_multi(urls):

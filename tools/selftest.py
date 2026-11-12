@@ -179,6 +179,31 @@ def main_tests():
         HTML_OK.replace("InStock", "OutOfStock"))["verfuegbar"], False)
     check("jsonld ausschluss zubehoer", main.extract_structured(
         HTML_OK.replace("(E-Chassis)", "DualSense Edge Controller"))["ist_konsole"], False)
+    # Platzhalterpreise aus Shop-Vorlagen duerfen keinen Alarm ausloesen.
+    check("jsonld platzhalter 0,00", main.extract_structured(
+        HTML_OK.replace('"799,99"', '"0,00"'))["preis"], None)
+    check("jsonld preis unter minimum", main.extract_structured(
+        HTML_OK.replace('"799,99"', '"1,00"'))["preis"], None)
+    _zwei = ('<script type="application/ld+json">['
+             '{"@type":"Product","name":"Sony PlayStation 5 Pro 2 TB"},'
+             '{"@type":"Product","name":"Sony PlayStation 5 Pro 2 TB",'
+             '"offers":{"@type":"Offer","price":"799,00",'
+             '"availability":"InStock"}}]</script>')
+    check("jsonld zweiter eintrag preis",
+          main.extract_structured(_zwei)["preis"], 799.0)
+
+    # urllib-Fallback: HTTPError muss als "HTTP 404" ankommen, sonst greift
+    # die Schnellabschaltung fuer umgezogene Haendler nicht.
+    import urllib.error as _ue
+    _alt_rq, _alt_tried = main._RQ, main._RQ_TRIED
+    main._RQ, main._RQ_TRIED = None, True
+    def _boom(*_a, **_k):
+        raise _ue.HTTPError("http://x", 404, "Not Found", None, None)
+    _alt_urlopen = main.urlopen; main.urlopen = _boom
+    try:
+        check("urllib 404 normalisiert", main._try_url("http://x", 0)[1], "HTTP 404")
+    finally:
+        main.urlopen = _alt_urlopen; main._RQ, main._RQ_TRIED = _alt_rq, _alt_tried
     check("nur_konsole ohne product", main.pruefe_nur_konsole(
         "<html><body>PlayStation 5 Pro 2 TB Uebersicht</body></html>", {}), True)
     check("nur_konsole fremdprodukt", main.pruefe_nur_konsole("<html>xbox</html>", {}), False)
