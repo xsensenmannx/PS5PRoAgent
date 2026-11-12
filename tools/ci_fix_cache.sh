@@ -72,6 +72,20 @@ fix_platform() {
         fi
     done
 
+    # 3b. Betriebssystem: p4a legt hostpython3 und Hilfswerkzeuge als fertige
+    #     Binaries ab. Ein Cache von Ubuntu 26 laesst sich auf 24.04 nicht
+    #     starten (GLIBC-Version) - buildozer bricht dann nach wenigen Minuten
+    #     ab. SDK/NDK bleiben erhalten, nur die Build-Baeume fliegen raus.
+    local osid oldos
+    osid=$( (. /etc/os-release 2>/dev/null && printf '%s' "${VERSION_ID:-unknown}") || echo unknown )
+    oldos=$(cat "$PLATFORM/.p4a-os-id" 2>/dev/null || true)
+    if [ "$osid" != "unknown" ] && [ "$oldos" != "$osid" ]; then
+        echo "OS ${osid} (vorher: ${oldos:-unbekannt}) -> verwerfe kompilierte Build-Baeume"
+        rm -rf "$PLATFORM"/build-*
+        mkdir -p "$PLATFORM"
+        printf '%s\n' "$osid" > "$PLATFORM/.p4a-os-id"
+    fi
+
     if [ -n "$PIN" ]; then
         # 4. Versionswechsel: alte Builds mischen sonst 3.14-Header mit dem Pin.
         local MARK="$PLATFORM/.p4a-python-pin"

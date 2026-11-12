@@ -40,8 +40,12 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: buildozer-v4-${{ runner.os }}-
+          # Image im Schluessel: p4a legt Host-Python und Werkzeuge als fertige
+          # Binaries ab. Ein Cache von Ubuntu 26 laesst sich auf 24.04 nicht
+          # starten (GLIBC-Version) - der Build bricht dann nach Minuten ab.
+          # Bei Wechsel von runs-on diesen Wert mitziehen.
+          key: buildozer-v5-ubuntu2404-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-v5-ubuntu2404-
 
       - name: APK bauen
         timeout-minutes: 120
