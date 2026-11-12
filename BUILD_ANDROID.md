@@ -20,7 +20,7 @@ eigenes.
 | `buildozer.spec` | Build-Konfiguration (API, NDK, Icon, Rechte) |
 | `icon.png` | Launcher-Icon (512×512, Legacy) |
 | `assets/icon_fg.png`, `assets/icon_bg.png` | Adaptive Icon für Android 8+ |
-| `tools/selftest.py` | Logiktests ohne Kivy (61 Zusicherungen) |
+| `tools/selftest.py` | Logiktests ohne Kivy (67 Zusicherungen) |
 | `tools/ci_build.sh` | kompletter Build-Ablauf für Linux/CI (auch lokal: `bash tools/ci_build.sh`) |
 | `tools/ci_licenses.sh` | akzeptiert die Android-SDK-Lizenzen in einem fertig installierten SDK |
 | `tools/ci_fix_cache.sh` | entfernt halb geladene SDK/NDK-Bäume (sonst überspringt buildozer die Installation) |
@@ -207,7 +207,7 @@ Die App-Daten (Verlauf, Einstellungen) bleiben erhalten, solange der Paketname
 | `android.accept_sdk_license` | `True` | Keine interaktive Lizenzabfrage in Colab/CI. |
 | `android.archs` | `arm64-v8a` | Alle aktuellen Geräte sind 64-Bit; der 32-Bit-Pfad verdoppelte die Bauzeit und war die häufigste Fehlerquelle. Für alte Geräte `, armeabi-v7a` ergänzen. |
 | `android.permissions` | INTERNET, VIBRATE, POST_NOTIFICATIONS | Scan, haptisches Feedback, Alarm. |
-| `source.exclude_*` | `.buildozer, bin, __pycache__, _verify, .github, .git, .venv, fonts, tools`; `*.zip, *.ipynb, *.md, *.log` | Doku, Git-Historie, Build-Werkzeuge und Upload-Paket landen nicht in der APK. |
+| `source.exclude_*` | `.buildozer, bin, __pycache__, _verify, .github, .git, .venv, fonts, tools`; `ps5pro.zip, ps5pro_settings.json, ps5pro_history.json, *.ipynb, *.md, *.log` | Doku, Git-Historie, lokale App-Daten, Build-Werkzeuge und Upload-Paket landen nicht in der APK. |
 
 ---
 
@@ -254,7 +254,7 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 **Geprüft in dieser Umgebung** (Windows ohne Java/SDK, daher ohne echten Build):
 
 * `main.py` kompiliert fehlerfrei (CPython 3.12.8).
-* `tools/selftest.py`: 61 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
+* `tools/selftest.py`: 67 Zusicherungen grün (CPython 3.12.10) — Preis-Parsing
   (`1.299,00 €`, `799,99`, `EUR 1.199,00`), JSON-LD `InStock`/`OutOfStock`,
   Zubehör-Ausschluss („DualSense Edge"), Meta-Preis-Fallback, Bot-Schutz-Erkennung,
   Verfügbarkeits-Heuristik, Klassifizierung, Kürzel, 42 eindeutige Händler-URLs und der
@@ -268,7 +268,9 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
   Leerlauf, 30 beim Scan, Pause zeichnet nie, und die gezeichnete Bewegungszeit bleibt
   pro Sekunde exakt 1,0 s (der Sweep läuft dadurch bei beiden Bildraten gleich schnell).
 * `buildozer.spec` parst (API 34, NDK 28c, minapi 24, p4a master), Notebook-JSON valide.
-* Icon-Assets: 432×432, korrekte Modi, in Kreis-Maske visuell geprüft.
+* Icon-Assets: 432×432, korrekte Modi, mit der echten Adaptive-Icon-Maske (72 von
+  108 dp) auf Kreis und Squircle geprüft. Der vollflächig deckende Vordergrund ist
+  gewollt: sein Rahmen liegt außerhalb der Maske, sichtbar bleibt das Radar.
 
 **Nicht geprüft:** der Android-Build selbst und die App auf realer Hardware. Der erste
 echte Test ist der Lauf in Colab/Actions. Dort bitte gezielt prüfen: Start ohne Absturz,

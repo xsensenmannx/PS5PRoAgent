@@ -89,6 +89,11 @@ Leerzeichen**, keine Tabs.
 5e. Kontrolle: im Dateibaum liegt `.github/workflows/build-apk.yml`. Der erste Lauf
 startet automatisch innerhalb von ~10 Sekunden.
 
+5f. **Optional: Release-Workflow.** Genauso **Add file → Create new file** →
+`.github/workflows/release.yml` → Inhalt aus dem Projektordner einfügen → **Commit
+changes**. Ohne diese Datei baut nur der normale Workflow; mit ihr hängt sich die APK
+bei einem Tag zusätzlich an ein Release (siehe *Dauerhafter Download-Link*).
+
 **6. Den Lauf beobachten.**
 
 6a. Tab **Actions** → links **APK bauen** → rechts die Liste der Läufe.
@@ -106,7 +111,7 @@ workflows → Save**, dann **Actions → APK bauen → Run workflow**.
 | --- | --- | --- |
 | Auschecken | Sekunden | lädt deinen Commit |
 | Java 17 | ~20 s | Temurin-JDK, das Gradle erwartet |
-| **Logiktests** | ~2 s | 61 Zusicherungen; rot = kein Build |
+| **Logiktests** | ~2 s | 67 Zusicherungen; rot = kein Build |
 | Build-Cache | ~1 min | SDK/NDK (~2 GB) aus dem Cache oder Download |
 | **APK bauen** | 20–35 min | ruft `tools/ci_build.sh` auf (Pflichtdateien, Pakete, venv, Lizenzen, Build) |
 | APK als Artifact | Sekunden | lädt `bin/*.apk` hoch |
