@@ -408,12 +408,15 @@ def spec_tests():
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
     check("spec hintergrund-service", c.get("app", "services"),
-          "ps5proscan:service.py:foreground:sticky:foregroundServiceType=dataSync")
+          "ps5proscan:service.py:foreground:sticky:foregroundServiceType=specialUse")
     perms = c.get("app", "android.permissions")
     check("spec foreground-recht", "FOREGROUND_SERVICE" in perms, True)
-    check("spec dataSync-recht", "FOREGROUND_SERVICE_DATA_SYNC" in perms, True)
+    check("spec specialUse-recht", "FOREGROUND_SERVICE_SPECIAL_USE" in perms, True)
     check("spec notify-icon",
           "drawable/notify_icon.png" in c.get("app", "android.add_resources"), True)
+    # specialUse braucht den Subtyp im Manifest; der p4a-Hook traegt ihn ein.
+    check("spec p4a-hook", c.get("app", "p4a.hook"), "tools/p4a_hook.py")
+    check("hook-datei vorhanden", os.path.exists(os.path.join(ROOT, "tools", "p4a_hook.py")), True)
 
 
 if __name__ == "__main__":

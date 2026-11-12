@@ -120,13 +120,18 @@ icon.adaptive_background.filename = %(source.dir)s/assets/icon_bg.png
 
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions.html for all the supported syntaxes and properties)
-android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC
+android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE
 
 # Hintergrund-Scan: eigener Prozess, damit Treffer auch bei geschlossener App
 # gemeldet werden. :foreground = Pflicht-Notification, :sticky = Android startet
-# den Dienst nach einem Kill neu, foregroundServiceType ist ab Android 14 Pflicht
-# (dataSync = Netzwerk-Synchronisation, passt fuer periodische Abfragen).
-services = ps5proscan:service.py:foreground:sticky:foregroundServiceType=dataSync
+# den Dienst nach einem Kill neu, foregroundServiceType ist ab Android 14 Pflicht.
+# specialUse statt dataSync: dataSync wird auf Android 15 nach 6 Stunden pro
+# 24 h beendet (Exception, wenn der Dienst nicht selbst stoppt) und taugt nicht
+# fuer einen dauerhaft laufenden Preis-Beobachter.
+services = ps5proscan:service.py:foreground:sticky:foregroundServiceType=specialUse
+
+# Ergänzt den von Play geforderten specialUse-Subtyp im <service>-Element.
+p4a.hook = tools/p4a_hook.py
 
 # Eigenes PNG als Statusleisten-Icon. Das adaptive App-Icon (XML) ist als
 # Small-Icon ungueltig - p4a wuerde es sonst nehmen und startForeground scheitert.
