@@ -60,7 +60,7 @@ jobs:
             fi
             export PATH="$HOME/.local/bin:$PATH"
             echo "uv: $(uv --version 2>&1)"
-            uv venv --python 3.12 .venv || echo "venv-Anlage fehlgeschlagen"
+            uv venv --python 3.11.9 .venv || echo "venv-Anlage fehlgeschlagen"
             uv pip install --python .venv/bin/python --upgrade pip setuptools wheel || echo "pip/setuptools/wheel fehlgeschlagen"
             uv pip install --python .venv/bin/python "git+https://github.com/kivy/buildozer" "cython==0.29.37" legacy-cgi || echo "buildozer-Installation fehlgeschlagen"
             echo ""

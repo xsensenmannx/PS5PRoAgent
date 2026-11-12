@@ -346,6 +346,9 @@ android.display_cutout = never
 
 # (str) python-for-android branch to use, defaults to master
 # master ist fuer Host-Python <= 3.12 freigegeben (develop braucht 3.14).
+# Achtung: Das p4a-Rezept "python3" gibt die Ziel-Python-Version vor (aktuell
+# 3.11.9) und p4a verlangt, dass der Host-Python im venv exakt dieselbe Version
+# hat. Nach einem p4a-Update ggf. die venv-Version in tools/ci_build.sh anpassen.
 p4a.branch = master
 
 # (str) python-for-android specific commit to use, defaults to HEAD, must be within p4a.branch
