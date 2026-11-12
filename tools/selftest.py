@@ -197,6 +197,30 @@ def main_tests():
              '"availability":"InStock"}}]</script>')
     check("jsonld zweiter eintrag preis",
           core.extract_structured(_zwei)["preis"], 799.0)
+    _verschachtelt = ('<script type="application/ld+json">'
+                     '{"@type":"Product","name":"Sony PlayStation 5 Pro 2 TB",'
+                     '"offers":{"@type":"Offer","priceSpecification":'
+                     '{"price":"799,00","priceCurrency":"EUR"},'
+                     '"availability":"InStock"}}</script>')
+    check("jsonld verschachtelter preis",
+          core.extract_structured(_verschachtelt)["preis"], 799.0)
+    _neu_gebraucht = ('<script type="application/ld+json">'
+                      '{"@type":"Product","name":"Sony PlayStation 5 Pro 2 TB",'
+                      '"offers":['
+                      '{"@type":"Offer","price":"500,00",'
+                      '"itemCondition":"https://schema.org/UsedCondition",'
+                      '"availability":"InStock"},'
+                      '{"@type":"Offer","price":"799,00",'
+                      '"itemCondition":"https://schema.org/NewCondition",'
+                      '"availability":"InStock"}]}</script>')
+    _neu = core.extract_structured(_neu_gebraucht)
+    check("jsonld neues angebot gewinnt", _neu["preis"], 799.0)
+    check("jsonld zustand neu", _neu["condition"], "new")
+    _usd = HTML_OK.replace('"799,99"', '"799,99"').replace(
+        '"priceCurrency":"EUR"', '"priceCurrency":"USD"')
+    check("jsonld fremdwaehrung ignoriert", core.extract_structured(_usd)["preis"], None)
+    check("jsonld marke erkannt", core.pruefe_nur_konsole(
+        "<html>PlayStation®5 Pro 2 TB</html>", {}), True)
 
     # urllib-Fallback: HTTPError muss als "HTTP 404" ankommen, sonst greift
     # die Schnellabschaltung fuer umgezogene Haendler nicht.
@@ -223,6 +247,20 @@ def main_tests():
     check("meta preis unter minimum", core.extract_meta_preis("<p>Preis: 99,00 €</p>"), None)
     check("meta preis vierstellig", core.extract_meta_preis(
         "<p>Preis: 1099,00 €</p>"), 1099.0)
+    check("meta preis attributreihenfolge", core.extract_meta_preis(
+        '<meta content="899,00" property="product:price:amount">'), 899.0)
+    check("meta preis microdata", core.extract_meta_preis(
+        '<span itemprop="price" content="849,00"></span>'), 849.0)
+    check("meta preis microdata text", core.extract_meta_preis(
+        '<span itemprop="price">799,00 €</span>'), 799.0)
+    check("meta preis punktdezimal", core.extract_meta_preis(
+        '<p>Preis: 799.00 €</p>'), 799.0)
+    check("meta verfuegbar", core.extract_meta_verfuegbarkeit(
+        '<meta property="og:availability" content="https://schema.org/InStock">'),
+        (True, True))
+    check("meta ausverkauft", core.extract_meta_verfuegbarkeit(
+        '<meta property="og:availability" content="https://schema.org/OutOfStock">'),
+        (False, False))
 
     # Bot-Schutz und Verfuegbarkeit
     check("challenge erkannt", core.detect_challenge("just a moment..."), True)
@@ -491,8 +529,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "3.1")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "10")
+    check("spec version", c.get("app", "version"), "3.2")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "11")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -669,6 +707,26 @@ def feature_tests():
             finally:
                 core.fetch_mit_cache = alt_fetch
             check("Remote-Parser Scan-Preis", srr.get("preis"), 799.0)
+
+            # JSON-LD "ausverkauft" darf nicht von einem alten Meta-Tag
+            # "InStock" ueberstimmt werden.
+            html_meta_konflikt = ('<script type="application/ld+json">'
+                                  '{"@type":"Product","name":"Sony PlayStation 5 Pro 2 TB",'
+                                  '"offers":{"@type":"Offer","price":"799,00",'
+                                  '"availability":"https://schema.org/OutOfStock"}}'
+                                  '</script>'
+                                  '<meta property="og:availability" '
+                                  'content="https://schema.org/InStock">')
+            alt_fetch = core.fetch_mit_cache
+            try:
+                core.fetch_mit_cache = lambda urls, cancel=None: (
+                    html_meta_konflikt, urls[0], None, {})
+                core.reset_http_cache()
+                r_meta = core.scan_einen({"name": "Amazon DE", "land": "DE",
+                                          "urls": ["https://www.amazon.de/dp/META"]})
+            finally:
+                core.fetch_mit_cache = alt_fetch
+            check("JSON-LD vor Meta-Verfuegbarkeit", r_meta.get("klass"), "unavail")
             check("Remote-Parser Scan-Signal", srr.get("signal"), "remote")
             check("Remote-Parser Scan-Treffer", srr.get("klass"), "hit")
 

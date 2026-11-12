@@ -3,7 +3,7 @@
 # wirklich enthalten. Genau hier lag der teure Fehler - buildozer meldet
 # "Android packaging done", die APK enthaelt aber libpython3.14 statt 3.11.
 #
-# Aufruf: bash tools/ci_check_apk.sh bin/ps5prosearchagent-3.1-arm64-v8a-debug.apk 3.11.9
+# Aufruf: bash tools/ci_check_apk.sh bin/ps5prosearchagent-3.2-arm64-v8a-debug.apk 3.11.9
 set -euo pipefail
 
 APK="${1:-}"

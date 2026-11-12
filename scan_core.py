@@ -318,8 +318,8 @@ AUSVERKAUFT = ["nicht verfügbar","derzeit nicht verfügbar","ausverkauft","out 
     "currently unavailable","nicht bestellbar"]
 POSITIV = ["in den warenkorb","add to cart","jetzt kaufen","buy now","jetzt bestellen",
     "lieferung in","auf lager","sofort lieferbar","in stock","available","jetzt vorbestellen"]
-PRODUKT_MUSTER = [re.compile(r"playstation[\s\-]?5[\s\-]?pro\b",re.I),
-                  re.compile(r"\bps5[\s\-]?pro\b",re.I)]
+PRODUKT_MUSTER = [re.compile(r"playstation[\s\-®™]*5[\s\-®™]*pro\b",re.I),
+                  re.compile(r"\bps5[\s\-®™]*pro\b",re.I)]
 PRODUKT_2TB = re.compile(r"\b2\s*(?:tb|terabyte)\b",re.I)
 PRODUKT_AUSSCHLUSS = ["dualsense edge","edge controller","ps portal","portal remote",
     "pulse headset","pulse explore","psvr2","vr2 headset","faceplate","face plate",
@@ -401,6 +401,43 @@ def _availability_flags(av):
     if any(k in a for k in ("outofstock","soldout","discontinued")): return False,False
     return None,None
 
+def _offer_specs(off):
+    """priceSpecification kann ein Objekt oder eine Liste sein."""
+    specs = off.get("priceSpecification") if isinstance(off, dict) else None
+    if isinstance(specs, dict): return [specs]
+    if isinstance(specs, list): return [s for s in specs if isinstance(s, dict)]
+    return []
+
+
+def _offer_preis(off):
+    """Preis aus Offer, AggregateOffer oder verschachtelter priceSpecification."""
+    if not isinstance(off, dict): return None
+    for key in ("price", "lowPrice"):
+        p = parse_preis_str(off.get(key))
+        if p is not None and MIN_PREIS <= p <= 5000: return p
+    for spec in _offer_specs(off):
+        p = parse_preis_str(spec.get("price") or spec.get("lowPrice"))
+        if p is not None and MIN_PREIS <= p <= 5000: return p
+    return None
+
+
+def _offer_waehrung(off):
+    """Leere Waehrung erlauben, fremde Waehrungen aber nicht als Euro zaehlen."""
+    if not isinstance(off, dict): return ""
+    for quelle in [off] + _offer_specs(off):
+        c = quelle.get("priceCurrency")
+        if c: return str(c).strip().upper()
+    return ""
+
+
+def _offer_verfuegbarkeit(off):
+    if not isinstance(off, dict): return ""
+    for quelle in [off] + _offer_specs(off):
+        a = quelle.get("availability")
+        if a: return str(a)
+    return ""
+
+
 def extract_structured(html):
     res={"ist_konsole":False,"preis":None,"verfuegbar":None,
          "signal":"jsonld","condition":None,"seller":None,
@@ -417,22 +454,38 @@ def extract_structured(html):
         if any(ex in low for ex in PRODUKT_AUSSCHLUSS): continue
         res["ist_konsole"]=True
         off=p.get("offers")
-        if isinstance(off,list): off=off[0] if off else None
-        if isinstance(off,dict):
-            pv=parse_preis_str(off.get("price") or off.get("lowPrice"))
+        offers=off if isinstance(off,list) else [off]
+        # Bei mehreren Angeboten gewinnt das guenstigste neue Angebot; nur
+        # wenn es keines gibt, wird Gebrauchtware genommen. So wird ein
+        # vorhandenes neues 800-Euro-Angebot nicht von einem alten 500-Euro-
+        # Gebrauchtangebot verdraengt.
+        neu=None; sonst=None
+        for angebot in offers:
+            if not isinstance(angebot,dict): continue
+            waehrung=_offer_waehrung(angebot)
+            if waehrung and waehrung not in ("EUR","€"): continue
+            pv=_offer_preis(angebot)
+            cond=_condition_norm(angebot.get("itemCondition") or p.get("itemCondition"))
+            av=_offer_verfuegbarkeit(angebot)
+            seller=(_seller_name(angebot.get("seller")) or _seller_name(p.get("seller")))
+            kandidat=(pv,av,cond,seller)
+            if pv is not None and not ist_gebraucht(cond):
+                if neu is None or pv<neu[0]: neu=kandidat
+            elif sonst is None:
+                sonst=kandidat
+        wahl=neu or sonst
+        if wahl:
+            pv,av,cond,seller=wahl
             # Plausibilitaet wie bei extract_meta_preis: 0,00 / 1,00 sind
             # Platzhalter aus Shop-Vorlagen und wuerden sonst als Treffer
             # gemeldet (Alarm fuer 0 Euro). Nach oben begrenzt gegen
             # Phantasiewerte aus kaputten Feeds.
-            if pv is not None and MIN_PREIS<=pv<=5000: res["preis"]=pv
-            av=str(off.get("availability",""))
+            if pv is not None: res["preis"]=pv
             res["verfuegbarkeit"]=av or None
             v,sofort=_availability_flags(av)
             if v is not None: res["verfuegbar"]=v
             if sofort is not None: res["sofort"]=sofort
-            cond=_condition_norm(off.get("itemCondition") or p.get("itemCondition"))
             if cond: res["condition"]=cond
-            seller=(_seller_name(off.get("seller")) or _seller_name(p.get("seller")))
             if seller: res["seller"]=seller
         # Weitere Product-Eintraege ansehen, solange noch kein brauchbarer
         # Preis gefunden wurde: manche Shops liefern erst im zweiten Eintrag
@@ -442,14 +495,17 @@ def extract_structured(html):
 
 def extract_meta_preis(html):
     pats = [
-        r'<meta[^>]+property=["\']product:price:amount["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\']',
         r'<meta[^>]+itemprop=["\']price["\'][^>]+content=["\']([^"\']+)',
-        r'<meta[^>]+property=["\']og:price:amount["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+itemprop=["\']price["\']',
+        r'<[^>]+itemprop=["\']price["\'][^>]+(?:content|data-price)=["\']([^"\']+)',
+        r'<[^>]+(?:content|data-price)=["\']([^"\']+)["\'][^>]+itemprop=["\']price["\']',
+        r'<[^>]+itemprop=["\'](?:price|lowPrice)["\'][^>]*>([^<]{1,40})</',
         r'data-price=["\']([^"\']+)["\']',
-        r'"price"\s*:\s*"?(\d+[.,]\d{2})"?',
-        r'"priceValue"\s*:\s*"?(\d+[.,]\d{2})"?',
-        r'((?:\d{1,3}(?:\.\d{3})+|\d+),\d{2})\s*(?:€|EUR)',
-        r'(?:€|EUR)\s*((?:\d{1,3}(?:\.\d{3})+|\d+),\d{2})'
+        r'"(?:price|priceValue)"\s*:\s*"?((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})"?',
+        r'((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})\s*(?:€|EUR|&euro;|&#8364;)',
+        r'(?:€|EUR|&euro;|&#8364;)\s*((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})'
     ]
     for pat in pats:
         try:
@@ -458,6 +514,21 @@ def extract_meta_preis(html):
                 if p is not None and MIN_PREIS<=p<=1500: return p
         except re.error: continue
     return None
+
+def extract_meta_verfuegbarkeit(html):
+    """schema.org-Verfuegbarkeit aus Meta-Tags oder Microdata."""
+    pats = [
+        r'<meta[^>]+(?:property|name)=["\'](?:og|product):availability["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og|product):availability["\']',
+        r'<link[^>]+itemprop=["\']availability["\'][^>]+href=["\']([^"\']+)',
+        r'<meta[^>]+itemprop=["\']availability["\'][^>]+content=["\']([^"\']+)',
+    ]
+    for pat in pats:
+        for m in re.finditer(pat,html,re.I):
+            v,sofort=_availability_flags(m.group(1))
+            if v is not None: return v,sofort
+    return None,None
+
 
 def detect_challenge(low): return any(p in low for p in CHALLENGE_PATTERNS)
 
@@ -837,7 +908,12 @@ def scan_einen(h, cancel=None):
         if not pruefe_nur_konsole(html,s):
             return _res(h,None,"unknown",d,"nicht PS5 Pro 2TB",fu)
         remote=remote_parser_ergebnis(html,h.get("parser"))
+        meta_v,meta_sofort=extract_meta_verfuegbarkeit(html)
         v=remote.get("verfuegbar")
+        # Strukturierte Daten (JSON-LD) haben Vorrang vor einem eventuell
+        # veralteten Meta-Tag; erst danach greifen Meta und Text-Fallback.
+        if v is None: v=s.get("verfuegbar")
+        if v is None: v=meta_v
         if v is None: v=pruefe_verfuegbar(html,s)
         p=remote.get("preis")
         if p is None: p=s.get("preis")
@@ -847,6 +923,7 @@ def scan_einen(h, cancel=None):
                 "meta" if p is not None else "text")
         sofort=remote.get("sofort")
         if sofort is None: sofort=s.get("sofort")
+        if sofort is None: sofort=meta_sofort
         if sofort is None and v: sofort=ist_sofort_verfuegbar(html)
         if _abgebrochen(cancel): raise ScanAbgebrochen
         res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,

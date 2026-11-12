@@ -10,9 +10,11 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 * **Parallel-Scan** über 42 Shops (DE + AT) mit 6 Threads, Retry und wechselnden
   User-Agents.
-* **Preis-Erkennung** über JSON-LD (`schema.org/Product`), Meta-Tags und Text-Fallback —
+* **Preis-Erkennung** über JSON-LD (`schema.org/Product`, auch verschachtelte
+  `priceSpecification` und Angebotslisten), Meta-Tags/Microdata und Text-Fallback —
   inklusive Filter gegen Zubehör (DualSense Edge, Portal, Laufwerk …) und gegen alles,
-  was nicht die 2-TB-Konsole ist.
+  was nicht die 2-TB-Konsole ist. Bei mehreren Angeboten gewinnt das günstigste
+  neue Angebot vor Gebrauchtware; Fremdwährungen werden nicht als Euro gezählt.
 * **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen),
   sonst „ZU TEUER"; Bot-Schutz und Fehler werden getrennt ausgewiesen.
 * **Fairer Bot-Schutz:** 403/CAPTCHA wird erkannt und nicht wiederholt; 429
@@ -117,7 +119,7 @@ python3 tools/kivy_smoke.py
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
 HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
-Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 551 Zusicherungen,
+Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 563 Zusicherungen,
 ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test ist ebenfalls
 ein eigenes CI-Gate und braucht kein Android-Gerät.
 
@@ -159,6 +161,9 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v3.2** – Robustere Treffer (versionCode 11): verschachtelte JSON-LD-Angebote,
+  Angebotslisten mit „neu vor gebraucht“, Meta-/Microdata-Preise, Punkt-Dezimalpreise
+  und Meta-Verfügbarkeit. Enthält den vollständigen Stand aus v3.1.
 * **v3.1** – Fairer Scan (versionCode 10): 429 wartet gemäß `Retry-After` und
   wird höchstens einmal wiederholt; 403/CAPTCHA wird ohne weitere Versuche als
   Bot-Schutz gemeldet. Enthält den vollständigen Stand aus v3.0.
