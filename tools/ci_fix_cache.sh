@@ -30,7 +30,9 @@ ROOT_WORKSPACE="$HERE/.buildozer/android/platform"
 # Erster Treffer von python3==x.y.z in der Spec.
 PIN="${P4A_PYTHON_PIN-}"
 if [ -z "$PIN" ] && [ -f "$HERE/buildozer.spec" ]; then
-    PIN=$(sed -n 's/.*python3==\([0-9][0-9.]*\).*/\1/p' "$HERE/buildozer.spec" | head -n 1)
+    # [[:space:],] davor, sonst trifft das Muster auch das "python3==" in
+    # "hostpython3==" und liefert die falsche Version.
+    PIN=$(sed -n 's/.*[[:space:],]python3==\([0-9][0-9.]*\).*/\1/p' "$HERE/buildozer.spec" | head -n 1)
 fi
 
 fix_platform() {
