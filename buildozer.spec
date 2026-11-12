@@ -41,7 +41,7 @@ version = 1.0
 # version.filename = %(source.dir)s/main.py
 
 # Python-Version festlegen
-requirements = python3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
+requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
 # comma separated e.g. requirements = sqlite3,kivy
 
 # (str) Custom source folders for requirements
