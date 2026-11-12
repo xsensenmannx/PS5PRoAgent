@@ -6,6 +6,7 @@ importiert werden, deshalb liegt diese Logik hier getrennt.
 """
 import os, sys, json, re, time, random, threading, traceback
 from datetime import datetime
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -58,6 +59,10 @@ MAX_SERIE_PUNKTE = 120
 BG_STATUS_FILE = "ps5pro_bg.json"
 HEALTH_FILE = "ps5pro_health.json"
 CRASH_FILE = "ps5pro_crash.log"
+SHOP_CONFIG_FILE = "ps5pro_shop_config.json"
+SHOP_CONFIG_URL = "https://raw.githubusercontent.com/xsensenmannx/PS5PRoAgent/main/shop_config.json"
+SHOP_CONFIG_MAX_BYTES = 128 * 1024
+SHOP_CONFIG_MAX_ALTER = 86400
 
 # ── Händler ─────────────────────────────────────────────────────────
 def _h(n,l,u): return {"name":n,"land":l,"urls":[u]}
@@ -105,6 +110,83 @@ HAENDLER = [
     _h("Computerexpert AT","AT","https://shop.computerexpert.at/suche?q=playstation+5+pro+2tb"),
     _h("Aetka DE","DE","https://aetka.de/suche?q=playstation+5+pro+2tb"),
 ]
+
+def _host(u):
+    try:
+        p=urlparse(str(u))
+        return (p.hostname or "").lower()
+    except Exception: return ""
+
+def _erlaubte_hosts():
+    return {_host(u) for h in HAENDLER for u in h["urls"] if _host(u)}
+
+def validiere_shop_config(data):
+    """Nur URLs auf bereits bekannten Shop-Hosts, nur HTTPS, kein Code."""
+    if not isinstance(data,dict) or data.get("schema")!=1: return None
+    shops=data.get("shops")
+    if not isinstance(shops,dict): return None
+    namen={h["name"] for h in HAENDLER}; erlaubt=_erlaubte_hosts()
+    out={}
+    for name,eintrag in shops.items():
+        if name not in namen: return None
+        urls=eintrag.get("urls") if isinstance(eintrag,dict) else eintrag
+        if isinstance(urls,str): urls=[urls]
+        if not isinstance(urls,list) or not (1<=len(urls)<=3): return None
+        sauber=[]
+        for u in urls:
+            if not isinstance(u,str) or len(u)>500: return None
+            p=urlparse(u)
+            if p.scheme!="https" or not p.hostname: return None
+            if p.hostname.lower() not in erlaubt: return None
+            if p.username or p.password: return None
+            sauber.append(u)
+        out[name]=sauber
+    return out
+
+def wende_shop_config(shops):
+    """Ersetzt nur die URLs bekannter Haendler; Namen und Anzahl bleiben stabil."""
+    if not isinstance(shops,dict): return 0
+    by={h["name"]:h for h in HAENDLER}; n=0
+    for name,urls in shops.items():
+        if name in by and urls:
+            by[name]["urls"]=list(urls); n+=1
+    return n
+
+def lade_shop_config():
+    """Lokalen Cache laden; ohne Cache bleibt die eingebaute Liste aktiv."""
+    try:
+        with open(os.path.join(_data_dir(),SHOP_CONFIG_FILE),"r",encoding="utf-8") as f:
+            d=json.load(f)
+        shops=validiere_shop_config(d.get("config") if isinstance(d,dict) else None)
+        return wende_shop_config(shops) if shops is not None else 0
+    except Exception: return 0
+
+def aktualisiere_shop_config(force=False):
+    """Einmal pro Tag die veroeffentlichte URL-Liste holen (ETag/304 inklusive)."""
+    pfad=os.path.join(_data_dir(),SHOP_CONFIG_FILE)
+    cached=None
+    try:
+        with open(pfad,"r",encoding="utf-8") as f: cached=json.load(f)
+        ts=float(cached.get("ts") or 0)
+        if not force and time.time()-ts<SHOP_CONFIG_MAX_ALTER:
+            shops=validiere_shop_config(cached.get("config"))
+            return wende_shop_config(shops) if shops is not None else 0
+    except Exception: pass
+    try:
+        html,_u,_cached,_meta=fetch_mit_cache([SHOP_CONFIG_URL])
+        if not html or len(html)>SHOP_CONFIG_MAX_BYTES: raise ValueError("Config zu gross")
+        data=json.loads(html); shops=validiere_shop_config(data)
+        if shops is None: raise ValueError("Config ungueltig")
+        tmp=pfad+".tmp"
+        with open(tmp,"w",encoding="utf-8") as f:
+            json.dump({"ts":time.time(),"config":data},f,ensure_ascii=False)
+        os.replace(tmp,pfad)
+        return wende_shop_config(shops)
+    except Exception:
+        if isinstance(cached,dict):
+            shops=validiere_shop_config(cached.get("config"))
+            if shops is not None: return wende_shop_config(shops)
+        return 0
 
 UA_PROFILES = [
     {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},

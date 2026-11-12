@@ -179,6 +179,12 @@ def main():
     arg = _argument()
     if arg.get("data_dir"):
         core.set_data_dir(arg["data_dir"])
+    # Remote-URL-Liste einmal pro Dienststart; Fallback bleibt die eingebaute Liste.
+    try:
+        core.lade_shop_config()
+        core.aktualisiere_shop_config()
+    except Exception:
+        pass
     try:
         intervall = core.bg_intervall(arg.get("interval"), MIN_INTERVALL)
     except Exception:

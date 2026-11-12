@@ -23,6 +23,9 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Shop-Health**: zeigt pro Händler den letzten Zustand, Fehlerzähler und
   Alter des letzten erfolgreichen Scans; auffällige Shops lassen sich einzeln
   erneut prüfen.
+* **Remote-Shop-Liste**: URL-Korrekturen werden über `shop_config.json`
+  veröffentlicht und täglich geladen – ohne neues APK. Akzeptiert werden nur
+  HTTPS-URLs auf bereits bekannten Shop-Hosts.
 * **Alarm-Regeln**: nur sofort verfügbar, nur echte Tiefstpreise, Ruhezeit
   23–07, eigene Preisgrenze und Händler-Stummschaltung.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
@@ -62,6 +65,7 @@ main.py                       Oberfläche (Kivy) und App-Start
 scan_core.py                  Scan-/Preis-/Speicherlogik ohne Kivy (auch im Service)
 service.py                    Hintergrund-Scan als Android-Foreground-Service
 buildozer.spec                Android-Build-Konfiguration
+shop_config.json              Remote-Vorlage für URL-Korrekturen (täglich geladen)
 icon.png                      App-Icon (512×512)
 assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
@@ -91,12 +95,14 @@ python3 tools/selftest.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
-HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health und kleine Shop-Fixtures —
-145 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie vor jedem
+HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config und kleine
+Shop-Fixtures — 151 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie vor jedem
 Build aus.
 
 ## Versionen
 
+* **v1.3** – Remote-Shop-Liste, Onboarding und tägliche URL-Aktualisierung
+  (versionCode 4).
 * **v1.2** – Shop-Health, Fixtures, Treffer-Metadaten (Zustand/Verkäufer/
   Vorbestellung), Alarm-Regeln, Detailansicht und Crash-Log (versionCode 3).
 * **v1.1** – HTTP-Cache/304, Preisverlauf mit Sparkline, Heartbeat-Warnung,
@@ -109,7 +115,28 @@ Build aus.
 * Hintergrund-Scans können von OEM-Akku-Managern oder nach einem Neustart beendet
   werden; die App erkennt das über den Heartbeat und bietet die Systemeinstellungen an.
 * Shops ändern URLs und verschärfen Bot-Schutz. Einzelne Händler können dauerhaft
-  „BOT-SCHUTZ" melden — dann hilft nur eine neue URL in `HAENDLER`.
+  „BOT-SCHUTZ" melden — dann hilft eine neue URL in `HAENDLER` oder in der
+  Remote-Datei `shop_config.json`.
+
+## Shop-URLs ohne APK aktualisieren
+
+`shop_config.json` wird aus dem `main`-Branch geladen und streng geprüft:
+
+```json
+{
+  "schema": 1,
+  "shops": {
+    "MediaMarkt DE": {
+      "urls": ["https://www.mediamarkt.de/de/product/_sony-playstationr5-pro-2-tb-konsole-3018022.html"]
+    }
+  }
+}
+```
+
+Erlaubt sind nur HTTPS-URLs auf Hosts, die bereits in der eingebauten Händlerliste
+stehen. Die App lädt höchstens einmal pro Tag, nutzt ETag/304 und fällt bei Fehlern
+auf die eingebaute Liste zurück. Der Button **SHOPS → SHOP-LISTE AKTUALISIEREN**
+erzwingt einen Abruf.
 * Debug-APK zum Sideloading; für den Play Store ist ein signierter AAB-Build nötig.
 
 ## Lizenz

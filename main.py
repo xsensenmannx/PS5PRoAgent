@@ -38,6 +38,7 @@ from scan_core import (
     HAENDLER, MAX_PREIS, BG_STATUS_FILE, format_preis, classify,
     _safe_scan, _res, WORKER, History, Settings, data_dir, Health, health, reset_health,
     alarm_erlaubt, ist_gebraucht, install_crash_hook, read_crash_log,
+    lade_shop_config, aktualisiere_shop_config,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -1129,6 +1130,8 @@ class MainUI(FloatLayout):
     def __init__(self,**kw):
         super().__init__(**kw)
         self.scanning=False; self.scanned={}; self.settings=Settings()
+        try: lade_shop_config()
+        except Exception: pass
         saved=self.settings.get("active_haendler")
         if saved:
             self.active_haendler=set(saved)&{h["name"] for h in HAENDLER}
@@ -1162,12 +1165,17 @@ class MainUI(FloatLayout):
         self._bg_warn_until=0.0
         self._bg_text=None; self._bg_text_at=0.0
         self._build_ui()
+        try:
+            threading.Thread(target=self._shop_config_bg,daemon=True).start()
+        except Exception: pass
         Window.bind(size=self._on_window_size)
         Clock.schedule_once(lambda dt:self._apply_sizes(),0)
         Clock.schedule_once(lambda dt:self._apply_sizes(),0.2)
         # Insets erst nach dem ersten Frame: vorher gibt es keine RootWindowInsets.
         Clock.schedule_once(lambda dt:self._refresh_insets(),0.5)
         Clock.schedule_once(lambda dt:self._refresh_insets(),1.5)
+        if not self.settings.get("onboarded",False):
+            Clock.schedule_once(self._show_onboarding,1.0)
         if self.auto_scan: Clock.schedule_once(lambda dt:self._auto_start(),1.5)
 
     # ── Aufbau ──────────────────────────────────────────────────────
@@ -1478,6 +1486,39 @@ class MainUI(FloatLayout):
         self._toast("TESTALARM GESENDET" if ok else "TESTALARM FEHLGESCHLAGEN",
                     color=CARD_STATUS["hit"] if ok else PS1_YELLOW)
 
+    def _show_onboarding(self,*_):
+        """Einmalige kurze Erklaerung der drei wichtigsten Gesten."""
+        self.settings.set("onboarded",True)
+        box=BoxLayout(orientation="vertical",spacing=dp(7),padding=dp(13))
+        box.add_widget(Label(text="[b]WILLKOMMEN[/b]",markup=True,color=PS1_YELLOW,
+                             font_size=sp(18),font_name=SST_FONT,
+                             size_hint_y=None,height=dp(28)))
+        box.add_widget(Label(text="PS5 PRO 2 TB RADAR",color=PS1_SILVER,
+                             font_size=sp(10),font_name=SST_FONT,
+                             size_hint_y=None,height=dp(18)))
+        text=("• [b]SCAN[/b] fragt alle Shops ab.\n"
+              "• [b]LANGES TIPPEN[/b] auf eine Karte zeigt Preisverlauf, Zustand und Verkäufer.\n"
+              "• [b]SHOPS[/b] zeigt, welcher Händler gerade nicht erreichbar ist.\n"
+              "• [b]REGELN[/b] steuert Tiefstpreis, Ruhezeit und Händler-Stummschaltung.")
+        m=Label(text=text,markup=True,color=PS1_GREY,font_size=sp(9.5),
+                font_name=SST_FONT,halign="left",valign="top")
+        m.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); box.add_widget(m)
+        row=BoxLayout(size_hint_y=None,height=dp(38),spacing=dp(6))
+        start=PS1Button(text="SCAN STARTEN",accent=PS1_GREEN,font_size=sp(9.5))
+        rules=PS1Button(text="ALARM EINRICHTEN",accent=PS1_PINK,font_size=sp(9.5))
+        later=PS1Button(text="SPÄTER",accent=PS1_SILVER,font_size=sp(9.5))
+        p=Popup(title="",content=box,size_hint=(0.93,None),height=dp(300),
+                background_color=(0.08,0.08,0.09,1),separator_height=0)
+        def go(start_scan=False,open_rules=False):
+            p.dismiss()
+            if start_scan and not self.scanning: self._scan_start()
+            if open_rules: self._open_alarm_rules()
+        start.bind(on_release=lambda *_:go(True,False))
+        rules.bind(on_release=lambda *_:go(False,True))
+        later.bind(on_release=lambda *_:go())
+        row.add_widget(start); row.add_widget(rules); row.add_widget(later)
+        box.add_widget(row); p.open()
+
     def _open_alarm_rules(self):
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(9))
         t=Label(text="[b]ALARM-REGELN[/b]",markup=True,color=PS1_SILVER,
@@ -1599,7 +1640,23 @@ class MainUI(FloatLayout):
         rb.bind(on_release=retry); lb.bind(on_release=log)
         cb.bind(on_release=lambda *_:p.dismiss())
         btns.add_widget(rb); btns.add_widget(lb); btns.add_widget(cb)
-        box.add_widget(btns); p.open()
+        box.add_widget(btns)
+        cfg=PS1Button(text="SHOP-LISTE AKTUALISIEREN",accent=PS1_PINK,
+                      font_size=sp(9),size_hint_y=None,height=dp(32))
+        def load_cfg(*_):
+            self._toast("SHOP-LISTE WIRD GELADEN...",color=PS1_BLUE)
+            threading.Thread(target=self._shop_config_bg,args=(True,),daemon=True).start()
+        cfg.bind(on_release=load_cfg); box.add_widget(cfg)
+        p.open()
+
+    def _shop_config_bg(self,force=False):
+        try: n=aktualisiere_shop_config(force)
+        except Exception: n=0
+        if n:
+            try:
+                Clock.schedule_once(
+                    lambda dt:self._toast(f"SHOP-LISTE: {n} URLS AKTIV",color=PS1_GREEN),0)
+            except Exception: pass
 
     def _open_detail(self,r,serie):
         name=r.get("haendler","?")

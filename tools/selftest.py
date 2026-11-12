@@ -407,8 +407,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "1.2")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "3")
+    check("spec version", c.get("app", "version"), "1.3")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "4")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -491,6 +491,27 @@ def feature_tests():
         core._crash_schreiben("test", "Traceback: Testfehler")
         check("Crash-Log schreibbar", "Testfehler" in core.read_crash_log(), True)
         core.clear_crash_log()
+
+        # Remote-Shop-Liste: nur HTTPS auf bekannten Hosts, Cache wird angewendet.
+        alt_urls = {h["name"]: list(h["urls"]) for h in core.HAENDLER}
+        try:
+            cfg = {"schema": 1, "shops": {"Amazon DE": {
+                "urls": ["https://www.amazon.de/dp/REMOTE-TEST"]}}}
+            geprueft = core.validiere_shop_config(cfg)
+            check("Remote-Config gueltig", geprueft is not None, True)
+            check("Remote-Config wendet URL an",
+                  core.wende_shop_config(geprueft), 1)
+            amazon = next(h for h in core.HAENDLER if h["name"] == "Amazon DE")
+            check("Remote-Config URL gesetzt", amazon["urls"][0].endswith("REMOTE-TEST"), True)
+            check("Remote-Config http abgelehnt", core.validiere_shop_config(
+                {"schema": 1, "shops": {"Amazon DE": {"urls": ["http://www.amazon.de/x"]}}}), None)
+            check("Remote-Config fremder Host abgelehnt", core.validiere_shop_config(
+                {"schema": 1, "shops": {"Amazon DE": {"urls": ["https://evil.example/x"]}}}), None)
+            with open(os.path.join(tmp, core.SHOP_CONFIG_FILE), "w", encoding="utf-8") as f:
+                json.dump({"ts": 1, "config": cfg}, f)
+            check("Remote-Config Cache geladen", core.lade_shop_config(), 1)
+        finally:
+            for h in core.HAENDLER: h["urls"] = alt_urls[h["name"]]
 
         # Alarm-Regeln: Vorbestellung, Gebrauchtware, Mute, Tiefstpreis, Ruhezeit.
         neu = {"haendler": "Shop A", "preis": 799.0, "condition": "new", "sofort": True}
