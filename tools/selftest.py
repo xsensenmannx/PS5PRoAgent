@@ -12,6 +12,7 @@ import configparser
 import os
 import re
 import sys
+import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -210,6 +211,48 @@ def main_tests():
         for h in main.HAENDLER), True)
 
 
+def retry_tests():
+    """Dauerhafte Fehler duerfen keine Wartezeit kosten, temporaere schon.
+
+    404/410 bringen bei jedem User-Agent dasselbe Ergebnis: drei Versuche mit
+    0,4 s + 2 s + 5 s Pause werfen pro umgezogenem Haendler rund 7 s Scan-Zeit
+    weg. 5xx/Timeout muessen dagegen weiter probiert werden.
+    """
+    echt = main._try_url
+    echt_zeit = main.time
+    # Nur sleep ersetzen, damit der Test nicht wirklich wartet.
+    main.time = types.SimpleNamespace(sleep=lambda s: None)
+    try:
+        calls = []
+        main._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 404"))[1]
+        try:
+            main.fetch_html_multi(["https://example.invalid"])
+            fehler = None
+        except RuntimeError as e:
+            fehler = str(e)
+        check("404 Fehlertext", fehler, "HTTP 404")
+        check("404 nur ein Versuch", len(calls), 1)
+
+        calls.clear()
+        main._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 500"))[1]
+        try:
+            main.fetch_html_multi(["https://example.invalid"])
+        except RuntimeError:
+            pass
+        check("500 dreimal probiert", len(calls), 3)
+
+        calls.clear()
+        main._try_url = lambda u, a, p=None: (calls.append(a), (None, "HTTP 403"))[1]
+        try:
+            main.fetch_html_multi(["https://example.invalid"])
+        except RuntimeError:
+            pass
+        check("403 dreimal probiert", len(calls), 3)
+    finally:
+        main._try_url = echt
+        main.time = echt_zeit
+
+
 def spec_tests():
     """Der Build-Pin entscheidet ueber Erfolg oder Abbruch - deshalb geprueft.
 
@@ -236,6 +279,7 @@ def spec_tests():
 if __name__ == "__main__":
     try:
         main_tests()
+        retry_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.

@@ -35,19 +35,35 @@ from kivy.uix.widget import Widget
 from kivy.animation import Animation
 from kivy.utils import get_color_from_hex, platform
 
-try:
-    import requests as _rq
-except ImportError:
-    _rq = None
+_RQ = None
+_RQ_TRIED = False
+
+def _requests():
+    """requests erst beim ersten Netzaufruf importieren (Kaltstart).
+
+    Der Import zieht urllib3, idna und charset-normalizer mit. Auf Android kostet
+    das beim Start spuerbar Zeit, bevor das erste Bild steht - gebraucht wird es
+    aber erst beim ersten Scan. Faellt die Bibliothek aus, bleibt der urllib-Pfad.
+    """
+    global _RQ, _RQ_TRIED
+    if not _RQ_TRIED:
+        _RQ_TRIED = True
+        try:
+            import requests as _m
+            _RQ = _m
+        except ImportError:
+            _RQ = None
+    return _RQ
 
 _TLS = threading.local()
 
 def _session():
     """Eine requests.Session pro Thread - ein geteiltes Session-Objekt ist nicht thread-sicher."""
-    if _rq is None: return None
+    rq = _requests()
+    if rq is None: return None
     s = getattr(_TLS, "session", None)
     if s is None:
-        s = _rq.Session()
+        s = rq.Session()
         s.headers.update({"Accept-Encoding":"gzip, deflate",
                           "Connection":"keep-alive","DNT":"1"})
         _TLS.session = s
@@ -378,9 +394,10 @@ def detect_challenge(low): return any(p in low for p in CHALLENGE_PATTERNS)
 
 def pruefe_nur_konsole(html, st):
     if st.get("ist_konsole"): return True
-    low=html.lower()
-    if not any(rx.search(low) for rx in PRODUKT_MUSTER): return False
-    return bool(PRODUKT_2TB.search(low))
+    # Beide Muster sind re.I - ein zusaetzliches html.lower() wuerde nur eine
+    # zweite Kopie der Seite im Speicher anlegen (bei Shops leicht 2-6 MB).
+    if not any(rx.search(html) for rx in PRODUKT_MUSTER): return False
+    return bool(PRODUKT_2TB.search(html))
 
 def pruefe_verfuegbar(html, st):
     if st.get("verfuegbar") is not None: return st["verfuegbar"]
@@ -418,13 +435,24 @@ def fetch_html_multi(urls):
     last=None
     proxy=os.environ.get("PS5_PROXY","").strip() or None
     for att in range(3):
+        dauerhaft=False
         for u in urls:
             h,e=_try_url(u,att,proxy)
             if h:
-                if detect_challenge(h.lower()[:3000]): last="Bot-Challenge"; continue
+                # Nur den Kopf pruefen - h.lower() auf einer 5-MB-Seite kostet
+                # unnoetig Zeit und Speicher.
+                if detect_challenge(h[:3000].lower()): last="Bot-Challenge"; continue
                 return h,u
             last=e
+            # 404/410 bleiben bei jedem User-Agent bestehen. Drei Versuche kosten
+            # hier nur ~7 s Wartezeit pro umgezogenem Haendler, ohne Chance auf
+            # Erfolg; alles andere (Timeout, 403, 429, 5xx) wird weiter probiert.
+            if e in ("HTTP 404","HTTP 410"):
+                if len(urls)==1:
+                    dauerhaft=True; break
+                continue
             time.sleep((0.4,2.0,5.0)[att]+random.uniform(0,1.0))
+        if dauerhaft: break
     raise RuntimeError(last or "alle URLs fehlgeschlagen")
 
 def _res(h,preis,klass,dauer,err,final_url=None):
@@ -436,7 +464,7 @@ def scan_einen(h):
     st=time.time()
     try:
         html,fu=fetch_html_multi(h["urls"]); d=time.time()-st
-        if detect_challenge(html.lower()[:3000]):
+        if detect_challenge(html[:3000].lower()):
             return _res(h,None,"challenge",d,"Bot-Challenge",fu)
         s=extract_structured(html)
         if not pruefe_nur_konsole(html,s):
@@ -651,12 +679,30 @@ class RadarWidget(Widget):
                     size_hint=(None,None),size=(dp(24),dp(10)),opacity=0)
             l.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             self.add_widget(l); self._bls.append((deg,l))
+        self._acc=0.0; self._paused=False
         Clock.schedule_interval(self._tick,1/30)
+
+    def pause(self):
+        """Im Hintergrund nicht weiterzeichnen - sonst rechnet das Radar im Akku-Betrieb weiter."""
+        self._paused=True
+
+    def resume(self):
+        self._paused=False; self._acc=0.0; self._redraw()
+
     def _tick(self,dt):
+        if self._paused: return True
+        # Der Sweep dreht im Leerlauf nur 30 Grad/s - dafuer reichen 12 Bilder/s.
+        # Waehrend eines Scans wird mit 30 Bildern/s gezeichnet. Die Winkel- und
+        # Symbolgeschwindigkeit haengt an der echten Zeit (step), nicht an der
+        # Bildrate, damit die Optik identisch bleibt und nur weniger gezeichnet wird.
+        self._acc+=dt
+        if self._acc < (1/30.0 if self.scanning else 1/12.0): return True
+        step=self._acc; self._acc=0.0
         s=180.0 if self.scanning else 30.0
-        self.angle=(self.angle+s*dt)%360
+        self.angle=(self.angle+s*step)%360
+        k=step*30.0
         for f in self._fl:
-            f["x"]+=f["vx"]; f["y"]+=f["vy"]
+            f["x"]+=f["vx"]*k; f["y"]+=f["vy"]*k
             if not (0.1<f["x"]<0.9): f["vx"]*=-1
             if not (0.1<f["y"]<0.9): f["vy"]*=-1
         self._redraw()
@@ -942,7 +988,7 @@ class LogoWidget(FloatLayout):
 
         self.bind(pos=self._sync,size=self._sync)
         Clock.schedule_once(self._sync,0)
-        Clock.schedule_interval(self._anim,1/20)
+        Clock.schedule_interval(self._anim,1/10)
 
     def _sync(self,*_):
         w,h=self.width,self.height
@@ -1702,10 +1748,14 @@ class PS5ProApp(App):
         except Exception: pass
         request_android_permissions()
         self.root_layout=RootLayout(); return self.root_layout
-    def on_pause(self): return True
+    def on_pause(self):
+        try: self.root_layout.main_ui.radar.pause()
+        except Exception: pass
+        return True
     def on_resume(self):
         try:
             ui=self.root_layout.main_ui
+            ui.radar.resume()
             if ui.auto_scan and not ui.scanning:
                 if time.time()>=ui.next_scan_at: ui._scan_start()
         except Exception: pass
