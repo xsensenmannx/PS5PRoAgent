@@ -47,10 +47,10 @@ fi
 
 if [ "${SKIP_VENV:-0}" != "1" ]; then
     say "Python 3.11.9 + Buildozer"
-    # p4a verlangt: hostpython3 == python3. Das python3-Rezept im ausgecheckten
-    # p4a ist 3.11.9 - deshalb muss auch der Host im venv 3.11.9 sein. Mit einem
-    # neueren Host bricht der Build ab mit:
-    #   "python3 should have same version as hostpython3, 3.11.9 != 3.x.y"
+    # p4a master baut ohne Pin CPython 3.14.2, das sich mit Cython 0.29 und
+    # Kivy 2.3.0 nicht kompilieren laesst. buildozer.spec pinnt python3 und
+    # hostpython3 deshalb auf 3.11.9; der Host im venv ist derselbe Stand,
+    # damit koennen Ziel- und Host-Version nicht auseinanderlaufen.
     if ! command -v uv >/dev/null 2>&1; then
         curl -LsSf https://astral.sh/uv/install.sh | sh
     fi
@@ -96,6 +96,12 @@ if [ "$rc" -ne 0 ]; then
     tac buildozer.log | grep -B 40 -m1 'Command failed' | tac | tail -60 || true
     echo "--- letzte 20 Zeilen ---"
     tail -20 buildozer.log
+    # Bekannte Signatur: es wurde gegen ein zu neues CPython gebaut.
+    if grep -qE 'include/python3\.(1[3-9])' buildozer.log; then
+        echo "::error::Gebaut wurde gegen Python 3.1x. Der Pin aus buildozer.spec"
+        echo "(python3==3.11.9, hostpython3==3.11.9) hat nicht gegriffen."
+        echo "p4a-Checkout verwerfen: rm -rf .buildozer/android/platform/python-for-android"
+    fi
     exit "$rc"
 fi
 
