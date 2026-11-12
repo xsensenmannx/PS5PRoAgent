@@ -9,7 +9,7 @@
 # "sdkmanager is not installed" ab, egal wie oft man neu startet.
 #
 # Hintergrund Python: p4a baut ohne Pin CPython 3.14.2. Das laesst sich mit
-# Cython 0.29.36 (fest im p4a-Recipe) und Kivy 2.3.0 nicht kompilieren - ab
+# Cython 0.29.36 (fest im p4a-Recipe) und Kivy 2.3 nicht kompilieren - ab
 # Python 3.13 aendert sich die Signatur von _PyLong_AsByteArray, und der von
 # Cython erzeugte C-Code ruft sie mit zu wenigen Argumenten auf. Deshalb pinnt
 # buildozer.spec python3 und hostpython3 auf dieselbe Version. Hier wird

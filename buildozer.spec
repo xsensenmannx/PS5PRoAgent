@@ -43,14 +43,21 @@ version = 1.0
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
 # Python MUSS gepinnt werden. p4a master baut ohne Pin CPython 3.14.2; damit
-# laesst sich Kivy 2.3.0 nicht kompilieren: ab 3.13 aendert sich die Signatur
+# laesst sich Kivy 2.3 nicht kompilieren: ab 3.13 aendert sich die Signatur
 # von _PyLong_AsByteArray, und der von Cython 0.29.36 (fest im p4a-Recipe)
 # erzeugte C-Code ruft sie mit zu wenigen Argumenten auf - der Build bricht
 # mitten in window_info.c ab. 3.11.9 entspricht dem Host im venv
 # (tools/ci_build.sh), damit kann keine Version auseinanderlaufen. hostpython3
 # muss identisch sein, sonst bricht p4a mit "python3 should have same version
 # as hostpython3" ab.
-requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
+#
+# Kivy 2.3.1 statt 2.3.0: clang 20 aus NDK 28c behandelt unvereinbare
+# Funktionszeiger-Typen als Fehler. 2.3.0 deklariert in cgl_gl.pyx
+# glShaderSource als "const GLchar**", die GLES-Header liefern aber
+# "const GLchar* const *" - der Build bricht in cgl_gl.c mit "incompatible
+# function pointer types" ab (Backend subprocess exited ... build_wheel).
+# 2.3.1 uebernimmt die Header-Signatur und castet SDL_SetEventFilter korrekt.
+requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.1, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
 
 
 # (str) Custom source folders for requirements
