@@ -24,7 +24,8 @@ missing=0
 for f in main.py scan_core.py service.py buildozer.spec icon.png \
          assets/icon_fg.png assets/icon_bg.png assets/notify_icon.png tools/selftest.py \
          tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
-         tools/ci_check_aab.sh tools/p4a_hook.py tools/ci_log_failure.sh; do
+         tools/ci_check_aab.sh tools/p4a_hook.py tools/ci_log_failure.sh \
+         android_src/de/ps5pro/ps5prosearchagent/BootReceiver.java; do
     if [ ! -f "$f" ]; then
         echo "::error file=$f::Pflichtdatei fehlt: $f"
         missing=1

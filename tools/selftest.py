@@ -213,7 +213,7 @@ def main_tests():
         "<html><body>PlayStation 5 Pro 2 TB Uebersicht</body></html>", {}), True)
     check("nur_konsole fremdprodukt", core.pruefe_nur_konsole("<html>xbox</html>", {}), False)
     # Ohne Android/Activity duerfen die Insets nichts verschieben.
-    check("insets ohne android", main.android_insets(), (0.0, 0.0))
+    check("insets ohne android", main.android_insets(), (0.0, 0.0, 0.0, 0.0))
 
     # Meta-Preis-Fallback
     check("meta preis", core.extract_meta_preis(
@@ -407,8 +407,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "1.3")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "4")
+    check("spec version", c.get("app", "version"), "1.4")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "5")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -571,6 +571,64 @@ def fixture_tests():
             check("fixture %s %s" % (name, feld), wert, exp[feld])
 
 
+def adaptive_boot_tests():
+    """Responsive Geometrie und Boot-Receiver ohne Android pruefen."""
+    g = main.layout_geometrie(420, 820)
+    check("Layout Hochformat", g["wide"], False)
+    check("Layout Hochformat Panel", g["panel_w"], 420)
+    check("Layout Hochformat Panel-Position", g["panel_x"], 0)
+
+    g = main.layout_geometrie(1280, 800)
+    check("Layout Tablet quer", g["wide"], True)
+    check("Layout Tablet zwei Spalten", g["panel_x"] + g["panel_w"], 1280)
+    check("Layout Tablet Panel gedeckelt", g["panel_w"] <= 460, True)
+    check("Layout Tablet Trefferflaeche", g["results_h"] >= 240, True)
+
+    check("Layout Foldable quer", main.layout_geometrie(884, 700)["wide"], True)
+    check("Layout Handy quer bleibt kompakt",
+          main.layout_geometrie(800, 360)["wide"], False)
+    check("Layout Tablet hoch bleibt einspaltig",
+          main.layout_geometrie(800, 1280)["wide"], False)
+
+    g = main.layout_geometrie(1280, 800, top_in=40, bottom_in=20,
+                              left_in=30, right_in=50)
+    check("Layout rechte Insets", g["panel_x"] + g["panel_w"], 1230)
+    check("Layout linke Insets", g["panel_x"] >= 30, True)
+
+    spec = open(os.path.join(ROOT, "buildozer.spec"), encoding="utf-8").read()
+    check("Boot-Permission", "RECEIVE_BOOT_COMPLETED" in spec, True)
+    check("Boot-Java-Quelle", "android.add_src = android_src" in spec, True)
+    check("Querformat erlaubt", "orientation = all" in spec, True)
+    java = open(os.path.join(ROOT, "android_src", "de", "ps5pro",
+                             "ps5prosearchagent", "BootReceiver.java"),
+                encoding="utf-8").read()
+    check("BootReceiver-Klasse",
+          "public class BootReceiver extends BroadcastReceiver" in java, True)
+    check("BootReceiver-Action", "ACTION_BOOT_COMPLETED" in java, True)
+    check("BootReceiver-Service", "ServicePs5proscan.start" in java, True)
+    check("BootReceiver-AUTO-Guard", 'optBoolean("auto_scan", false)' in java, True)
+    check("BootReceiver-Update", "ACTION_MY_PACKAGE_REPLACED" in java, True)
+
+    # Hook wirklich gegen ein synthetisches Manifest laufen lassen: so faellt
+    # ein ungueltiger Receiver-Eintrag vor dem 40-Minuten-Build auf.
+    import importlib.util
+    import xml.etree.ElementTree as ET
+    hp = os.path.join(ROOT, "tools", "p4a_hook.py")
+    hs = importlib.util.spec_from_file_location("p4a_hook_test", hp)
+    hook = importlib.util.module_from_spec(hs); hs.loader.exec_module(hook)
+    manifest = (
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+        '<application>'
+        '<service android:name="de.ps5pro.ps5prosearchagent.ServicePs5proscan" />'
+        '</application></manifest>')
+    neu = hook.erweitere_manifest(manifest)
+    ET.fromstring(neu)
+    check("Manifest BootReceiver", ".BootReceiver" in neu, True)
+    check("Manifest BootAction", "android.intent.action.BOOT_COMPLETED" in neu, True)
+    check("Manifest specialUse", "PROPERTY_SPECIAL_USE_FGS_SUBTYPE" in neu, True)
+    check("Manifest idempotent", hook.erweitere_manifest(neu).count(".BootReceiver"), 1)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -578,6 +636,7 @@ if __name__ == "__main__":
         radar_tests()
         service_tests()
         feature_tests()
+        adaptive_boot_tests()
         fixture_tests()
         spec_tests()
     finally:

@@ -67,7 +67,7 @@ und **nicht** im Release – es ist ausdruecklich nicht fuer Play geeignet.
 
 ## 4. Was der Tag-Lauf baut
 
-Bei `git tag v1.3 && git push origin refs/tags/v1.3` laufen zwei Jobs (die
+Bei `git tag v1.4 && git push origin refs/tags/v1.4` laufen zwei Jobs (die
 Release `v1.0` bleibt unveraendert bestehen):
 
 1. **release** – Debug-APK wie bisher (Sideloading) → Release-Asset `*.apk`.
@@ -89,10 +89,10 @@ ARTIFACT=aab bash tools/ci_build.sh
 
 ## 5. versionCode
 
-`buildozer.spec` setzt fuer v1.3 `android.numeric_version = 4`. Google Play verlangt
+`buildozer.spec` setzt fuer v1.4 `android.numeric_version = 5`. Google Play verlangt
 fuer **jeden** Upload einen **hoeheren** versionCode – vor dem naechsten Upload
-erhoehen (5, 6, …). Die sichtbare Version (`version = 1.3`) ist davon unabhaengig;
-bei einem echten Release beide anheben (z. B. `1.4` / `5`).
+erhoehen (6, 7, …). Die sichtbare Version (`version = 1.4`) ist davon unabhaengig;
+bei einem echten Release beide anheben (z. B. `1.5` / `6`).
 
 ## 6. Play Console – einmalige Einrichtung
 
@@ -125,8 +125,17 @@ dafuer die Debug-APK aus demselben Release verwenden.
 * Ab targetSdk 35 zeichnet Android hinter Status- und Navigationsleiste.
   Die App liest die Insets per pyjnius (`android_insets()` in `main.py`) und
   verschiebt Titel, ErgebnisPanel und Buttons; der Gestenbereich unten wird
-  mit `mandatorySystemGestures` freigehalten. `android.display_cutout = shortEdges`
-  erlaubt die Nutzung der Notch-Flaeche, der Ausschnitt kommt als oberer Rand zurueck.
+  mit `mandatorySystemGestures` freigehalten. Im Querformat werden auch linke
+  und rechte Insets (seitliche Navigationsleiste/Notch) beruecksichtigt.
+  `android.display_cutout = shortEdges` erlaubt die Nutzung der Notch-Flaeche.
+* **Tablets/Foldables:** `orientation = all` erlaubt das Querformat; ab 600 dp
+  Breite schaltet die Oberflaeche auf eine zweispaltige Ansicht mit vertikaler
+  Trefferliste rechts um. Das ist reine Kivy-Layout-Logik, keine zweite Activity.
+* **Boot-Receiver:** `RECEIVE_BOOT_COMPLETED` ist deklariert. Der Java-Receiver
+  `BootReceiver` startet den `specialUse`-Foreground-Service nach `BOOT_COMPLETED`
+  oder `MY_PACKAGE_REPLACED` nur dann, wenn `auto_scan` in den Einstellungen aktiv
+  ist. Android 15 erlaubt diesen Service-Typ aus dem Boot-Receiver; er ist nicht
+  in der Liste der gesperrten Typen.
 * Der Hintergrund-Service nutzt **`specialUse`**, nicht `dataSync`: Android 15
   beendet `dataSync`-Foreground-Services nach **6 Stunden pro 24 h** und wirft
   eine Exception, wenn der Dienst nicht selbst stoppt. Ein dauerhaft laufender
@@ -141,10 +150,10 @@ dafuer die Debug-APK aus demselben Release verwenden.
 
 ```bash
 # Signatur des AAB
-keytool -printcert -jarfile bin/ps5prosearchagent-1.3-arm64-v8a-release.aab | head
+keytool -printcert -jarfile bin/ps5prosearchagent-1.4-arm64-v8a-release.aab | head
 
 # targetSdk im gebauten Bundle (aapt2 aus den Android build-tools)
-aapt2 dump badging bin/ps5prosearchagent-1.3-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
+aapt2 dump badging bin/ps5prosearchagent-1.4-arm64-v8a-release.aab | grep -E "sdkVersion|targetSdkVersion|package"
 ```
 
 Erwartet: `targetSdkVersion:'36'`, Paket `de.ps5pro.ps5prosearchagent`,

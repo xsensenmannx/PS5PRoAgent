@@ -34,7 +34,7 @@ source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .ven
 source.exclude_patterns = ps5pro.zip, ps5pro_settings.json, ps5pro_history.json, *.ipynb, *.md, *.log
 
 # (str) Application versioning (method 1)
-version = 1.3
+version = 1.4
 
 # (str) Application versioning (method 2)
 # version.regex = __version__ = ['"](.*)['"]
@@ -72,7 +72,9 @@ icon.filename = %(source.dir)s/icon.png
 
 # (list) Supported orientations
 # Valid options are: landscape, portrait, portrait-reverse, landscape-reverse, or all
-orientation = portrait
+# Tablets und Foldables sollen ihr Querformat nutzen; das Layout schaltet in
+# main.py ab 600 dp Breite auf die zweispaltige Ansicht um.
+orientation = all
 
 # (list) List of services to declare
 # This is currently only relevant to Android services.
@@ -120,7 +122,7 @@ icon.adaptive_background.filename = %(source.dir)s/assets/icon_bg.png
 
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions.html for all the supported syntaxes and properties)
-android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE
+android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE, RECEIVE_BOOT_COMPLETED
 
 # Hintergrund-Scan: eigener Prozess, damit Treffer auch bei geschlossener App
 # gemeldet werden. :foreground = Pflicht-Notification, :sticky = Android startet
@@ -132,6 +134,10 @@ services = ps5proscan:service.py:foreground:sticky:foregroundServiceType=special
 
 # Ergänzt den von Play geforderten specialUse-Subtyp im <service>-Element.
 p4a.hook = tools/p4a_hook.py
+
+# Java-Klasse für den manifest-deklarierten BOOT_COMPLETED-Receiver. Sie
+# startet den Dienst nur, wenn AUTO in den Einstellungen aktiviert ist.
+android.add_src = android_src
 
 # Eigenes PNG als Statusleisten-Icon. Das adaptive App-Icon (XML) ist als
 # Small-Icon ungueltig - p4a wuerde es sonst nehmen und startForeground scheitert.
@@ -335,7 +341,7 @@ android.archs = arm64-v8a
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # Google Play verlangt fuer JEDEN Upload einen hoeheren versionCode. Vor dem
 # naechsten Play-Upload hier +1 (die Anzeige-Version oben bleibt davon unabhaengig).
-android.numeric_version = 4
+android.numeric_version = 5
 
 # (str) The format used to package the app for release mode (aab or apk or aar).
 # Play nimmt nur AABs an; die Debug-APK fuer Sideloading bleibt wie gehabt.

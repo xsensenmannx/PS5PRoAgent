@@ -36,6 +36,12 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
   Im Hintergrund höchstens alle 15 Minuten, damit Akku und Datenvolumen tragen.
   Ein Heartbeat zeigt, wann zuletzt gescannt wurde; bleibt der Dienst wegen
   Akku-Optimierung stehen, warnt die App und verlinkt die Systemeinstellungen.
+* **Neustart-fest**: Ist AUTO aktiv, startet der geschützte Foreground-Service
+  nach einem Neustart oder App-Update automatisch wieder. Der Boot-Receiver
+  prüft zuerst die lokale Einstellung und startet nur dann.
+* **Tablet- und Foldable-Layout**: Im Querformat ab 600 dp werden Treffer zu
+  einer vertikalen Liste am rechten Rand, das Radar bleibt links. Dialoge sind
+  in der Breite begrenzt; linke/rechte System-Insets werden berücksichtigt.
 * **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**.
 * **Ressourcen-schonend:** das Radar zeichnet im Leerlauf 12 statt 30 Bilder/s und
   pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert. Der
@@ -65,6 +71,7 @@ main.py                       Oberfläche (Kivy) und App-Start
 scan_core.py                  Scan-/Preis-/Speicherlogik ohne Kivy (auch im Service)
 service.py                    Hintergrund-Scan als Android-Foreground-Service
 buildozer.spec                Android-Build-Konfiguration
+android_src/.../BootReceiver.java  startet den Service nach Neustart/App-Update
 shop_config.json              Remote-Vorlage für URL-Korrekturen (täglich geladen)
 icon.png                      App-Icon (512×512)
 assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
@@ -95,12 +102,14 @@ python3 tools/selftest.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
-HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config und kleine
-Shop-Fixtures — 151 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie vor jedem
+HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config, responsive
+Layout-Geometrie und Boot-Manifest — 175 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie vor jedem
 Build aus.
 
 ## Versionen
 
+* **v1.4** – Boot-Receiver für den Hintergrund-Service und adaptives
+  Querformat-Layout für Tablets/Foldables (versionCode 5).
 * **v1.3** – Remote-Shop-Liste, Onboarding und tägliche URL-Aktualisierung
   (versionCode 4).
 * **v1.2** – Shop-Health, Fixtures, Treffer-Metadaten (Zustand/Verkäufer/
@@ -112,8 +121,12 @@ Build aus.
 
 ## Grenzen
 
-* Hintergrund-Scans können von OEM-Akku-Managern oder nach einem Neustart beendet
-  werden; die App erkennt das über den Heartbeat und bietet die Systemeinstellungen an.
+* Hintergrund-Scans können von OEM-Akku-Managern beendet werden; der Boot-Receiver
+  startet nach Neustart/Update nur, wenn AUTO aktiv ist. Der Heartbeat zeigt,
+  ob der Dienst tatsächlich läuft, und verlinkt die Systemeinstellungen.
+* Der Boot-Start erfolgt erst nach dem Entsperren (kein Direct-Boot-Zugriff auf
+  die Einstellungen). Nach einem vom Nutzer erzwungenen Stopp startet Android
+  den Receiver erst wieder nach dem nächsten manuellen Öffnen der App.
 * Shops ändern URLs und verschärfen Bot-Schutz. Einzelne Händler können dauerhaft
   „BOT-SCHUTZ" melden — dann hilft eine neue URL in `HAENDLER` oder in der
   Remote-Datei `shop_config.json`.

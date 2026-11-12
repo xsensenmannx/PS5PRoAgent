@@ -273,33 +273,40 @@ def request_android_permissions():
 
 # ── Edge-to-Edge (Android 15+ / targetSdk 35+) ─────────────────────
 def android_insets():
-    """(oben, unten) in dp: Statusleiste, Notch und Gestenbereich.
+    """(oben, unten, links, rechts) in dp: Statusleiste, Notch und Gestenbereich.
 
     Ab targetSdk 35 zeichnet Android die App hinter Systemleisten. Kivy kennt
     keine Insets, deshalb werden die Bedienelemente hier um den gemeldeten
-    Rand verschoben. Ohne Android oder ohne Activity bleibt alles bei 0.
+    Rand verschoben. Im Querformat sitzt die Navigationsleiste oft seitlich,
+    deshalb werden auch linke und rechte Insets beruecksichtigt. Ohne Android
+    oder ohne Activity bleibt alles bei 0.
     """
-    if platform!="android": return (0.0,0.0)
+    if platform!="android": return (0.0,0.0,0.0,0.0)
     try:
         from jnius import autoclass
         act=autoclass("org.kivy.android.PythonActivity").mActivity
         ins=act.getWindow().getDecorView().getRootWindowInsets()
-        if ins is None: return (0.0,0.0)
+        if ins is None: return (0.0,0.0,0.0,0.0)
         d=act.getResources().getDisplayMetrics().density or 1.0
         if autoclass("android.os.Build$VERSION").SDK_INT>=30:
             T=autoclass("android.view.WindowInsets$Type")
-            top=max(ins.getInsets(T.statusBars()).top,
-                    ins.getInsets(T.displayCutout()).top)
+            status=ins.getInsets(T.statusBars()); cut=ins.getInsets(T.displayCutout())
+            nav=ins.getInsets(T.navigationBars())
+            gest=ins.getInsets(T.mandatorySystemGestures())
+            top=max(status.top,cut.top)
             # mandatorySystemGestures liegt auch bei ausgeblendeter Leiste an:
             # sonst sitzen die unteren Buttons im Zurueck-Gestenbereich.
-            bot=max(ins.getInsets(T.navigationBars()).bottom,
-                    ins.getInsets(T.mandatorySystemGestures()).bottom,
-                    ins.getInsets(T.displayCutout()).bottom)
+            bot=max(nav.bottom,gest.bottom,cut.bottom)
+            left=max(nav.left,gest.left,cut.left)
+            right=max(nav.right,gest.right,cut.right)
         else:
             top=ins.getSystemWindowInsetTop()
             bot=ins.getSystemWindowInsetBottom()
-        return (max(0,int(top))/d, max(0,int(bot))/d)
-    except Exception: return (0.0,0.0)
+            left=ins.getSystemWindowInsetLeft()
+            right=ins.getSystemWindowInsetRight()
+        return (max(0,int(top))/d,max(0,int(bot))/d,
+                max(0,int(left))/d,max(0,int(right))/d)
+    except Exception: return (0.0,0.0,0.0,0.0)
 
 def android_prepare_window():
     """Helle Systemleisten-Symbole auf dunklem Hintergrund (Android 15+)."""
@@ -383,6 +390,9 @@ class HScrollView(ScrollView):
         super().__init__(**kw)
     def on_touch_down(self, touch):
         if touch.is_mouse_scrolling and self.collide_point(*touch.pos):
+            if self.do_scroll_y and touch.button in ('scrollup', 'scrolldown'):
+                step=-0.12 if touch.button=='scrollup' else 0.12
+                self.scroll_y = min(1.0, max(0.0, self.scroll_y + step)); return True
             if touch.button in ('scrollup', 'scrollleft'):
                 self.scroll_x = max(0.0, self.scroll_x - 0.12); return True
             elif touch.button in ('scrolldown', 'scrollright'):
@@ -1125,6 +1135,52 @@ class HandlerPickerContent(BoxLayout):
         if not s: self._on_apply(None,"empty")
         else: self._on_apply(s,None)
 
+
+def layout_geometrie(w,h,top_in=0.0,bottom_in=0.0,left_in=0.0,right_in=0.0):
+    """Berechnet die responsive Aufteilung ohne Kivy-Abhaengigkeit.
+
+    Hochformat: Radar oben, Trefferleiste unten, Bedienung ganz unten.
+    Querformat auf Tablet/Foldable: Treffer werden zu einer vertikalen Liste
+    am rechten Rand, das Radar bleibt links. Die Funktion ist absichtlich
+    klein und testbar; sie zeichnet nichts.
+    """
+    w=max(dp(1),float(w)); h=max(dp(1),float(h))
+    left=max(0.0,float(left_in)); right=max(0.0,float(right_in))
+    top=max(0.0,float(top_in)); bottom=max(0.0,float(bottom_in))
+    usable_w=max(dp(1),w-left-right)
+
+    if h<dp(500): lh,rh,ch=dp(56),dp(160),dp(42)
+    elif h<dp(700): lh,rh,ch=dp(64),dp(178),dp(46)
+    else: lh,rh,ch=dp(72),dp(190),dp(50)
+
+    # Auch im Hochformat darf die Trefferleiste bei sehr kleinen Displays
+    # nicht unter das Logo oder aus dem Fenster wachsen.
+    verfuegbar=max(dp(120),h-top-lh-bottom-ch)
+    rh=min(rh,verfuegbar)
+    panel_w=usable_w; panel_x=left; panel_y=bottom+ch
+    results_h=rh; logo_w=usable_w; wide=False
+
+    # Ab 600 dp Breite ist genug Platz fuer zwei Spalten. Die Hoehe muss
+    # ebenfalls reichen, damit ein Landscape-Handy nicht zur engen Liste wird.
+    if (usable_w>=dp(600) and h>=dp(480) and usable_w>h*1.15):
+        kandidat=min(dp(460),max(dp(320),usable_w*0.42))
+        kandidat_x=w-right-kandidat
+        kandidat_logo=kandidat_x-left
+        kandidat_h=h-top-lh-bottom-ch
+        if kandidat_logo>=dp(260) and kandidat_h>=dp(240):
+            wide=True; panel_w=kandidat; panel_x=kandidat_x
+            results_h=kandidat_h; logo_w=kandidat_logo
+
+    return {
+        "wide":wide,"logo_h":lh,"logo_w":logo_w,"controls_h":ch,
+        "results_h":results_h,"panel_w":panel_w,"panel_x":panel_x,
+        "panel_y":panel_y,"usable_w":usable_w,
+        "radar_w":panel_x if wide else w,
+        "radar_bottom":ch+bottom if wide else ch+results_h+bottom,
+        "radar_top":lh+top,
+    }
+
+
 # ══════════ MAIN UI ══════════
 class MainUI(FloatLayout):
     def __init__(self,**kw):
@@ -1157,7 +1213,8 @@ class MainUI(FloatLayout):
         self.notify_sofort=bool(self.settings.get("notify_sofort",True))
         self.quiet_hours=bool(self.settings.get("quiet_hours",False))
         self._known_hits=set(); self.queue=queue.Queue()
-        self._bg_seen_ts=0.0; self._insets=(0.0,0.0)
+        self._bg_seen_ts=0.0; self._insets=(0.0,0.0,0.0,0.0)
+        self._wide=False; self._results_mode_set=False
         self._scan_token=0
         self.history=History(); self._scan_t0=0.0; self._scan_done=0
         self._scan_total=0; self._rerender_event=None; self._drain_event=None
@@ -1237,7 +1294,8 @@ class MainUI(FloatLayout):
         self.results_row=BoxLayout(orientation="horizontal",
                                    size_hint=(None,1),
                                    spacing=dp(8),padding=(dp(8),dp(6)))
-        self.results_row.bind(minimum_width=self.results_row.setter("width"))
+        self.results_row.bind(minimum_width=self._sync_row_width,
+                              minimum_height=self._sync_row_height)
         self.results_scroll.add_widget(self.results_row)
         self.results_scroll.bind(width=lambda w,v:self._resize_placeholder(v))
         self.results_panel.add_widget(self.results_scroll)
@@ -1360,23 +1418,63 @@ class MainUI(FloatLayout):
         try:
             self._insets=android_insets(); self._apply_sizes()
         except Exception as e: print(f"[Insets] {e}")
+    def _sync_row_width(self,row,value):
+        if not self._wide:
+            row.width=max(dp(1),value)
+    def _sync_row_height(self,row,value):
+        if self._wide:
+            row.height=max(dp(1),value)
+    def _set_results_mode(self,wide):
+        """Hochformat = horizontale Karten, Querformat = vertikale Liste."""
+        wide=bool(wide)
+        if self._results_mode_set and wide==self._wide: return
+        self._wide=wide; self._results_mode_set=True
+        self.results_scroll.do_scroll_x=not wide
+        self.results_scroll.do_scroll_y=wide
+        self.results_scroll.scroll_x=0; self.results_scroll.scroll_y=0
+        self.results_row.orientation="vertical" if wide else "horizontal"
+        self.results_row.size_hint=(1,None) if wide else (None,1)
+        if wide: self.results_row.width=max(dp(1),self.results_panel.width)
+        else: self.results_row.height=max(dp(1),self.results_scroll.height)
+        self.prev_btn.opacity=0 if wide else 1
+        self.next_btn.opacity=0 if wide else 1
+        self.prev_btn.disabled=wide; self.next_btn.disabled=wide
+        self.prev_btn.width=0 if wide else dp(24)
+        self.next_btn.width=0 if wide else dp(24)
+        self._clear_results(); self._last_sig=None
+        if self.scanning:
+            self._show_placeholder("SCANNE...","TIPPE STOP ZUM ABBRECHEN")
+        elif self.scanned:
+            self._rerender()
+        else:
+            mp_txt="offen" if self.max_preis is None else f"{int(self.max_preis)} €"
+            self._show_placeholder("SYSTEM BEREIT",f"PS5 PRO 2 TB · PREIS MAX {mp_txt}")
     def _apply_sizes(self):
         try:
             w,h=Window.width,Window.height
             if w<=0 or h<=0:
                 Clock.schedule_once(lambda dt:self._apply_sizes(),0.15); return
-            if h<dp(500): lh,rh,ch=dp(56),dp(160),dp(42)
-            elif h<dp(700): lh,rh,ch=dp(64),dp(178),dp(46)
-            else: lh,rh,ch=dp(72),dp(190),dp(50)
-            top_in,bot_in=self._insets
-            self.logo.height=lh
+            # android_insets() liefert dp; Fensterkoordinaten sind Pixel.
+            top_in,bot_in,left_in,right_in=(dp(x) for x in self._insets)
+            g=layout_geometrie(w,h,top_in,bot_in,left_in,right_in)
+            self.logo.height=g["logo_h"]
             # pos_hint statt pos: FloatLayout haelt den Titel so auch bei
             # Drehung/Resize unterhalb der Statusleiste bzw. des Notch.
-            self.logo.pos_hint={"x":0,"top":1.0-(top_in/h if h else 0)}
-            self.controls.pos=(0,bot_in); self.controls.size=(w,ch)
-            self.results_panel.pos=(0,bot_in+ch); self.results_panel.size=(w,rh)
-            self.radar.reserve_bottom=ch+rh+bot_in
-            self.radar.reserve_top=lh+top_in
+            self.logo.size_hint_x=None; self.logo.width=g["logo_w"]
+            self.logo.pos_hint={"x":(left_in/w if w else 0),
+                                "top":1.0-(top_in/h if h else 0)}
+            self.controls.pos=(left_in,bot_in)
+            self.controls.size=(g["usable_w"],g["controls_h"])
+            self.results_panel.pos=(g["panel_x"],g["panel_y"])
+            self.results_panel.size=(g["panel_w"],g["results_h"])
+            if g["wide"]:
+                self.radar.size_hint=(None,None)
+                self.radar.pos=(0,0); self.radar.size=(max(dp(1),g["radar_w"]),h)
+            else:
+                self.radar.size_hint=(1,1); self.radar.size=(w,h)
+            self.radar.reserve_bottom=g["radar_bottom"]
+            self.radar.reserve_top=g["radar_top"]
+            self._set_results_mode(g["wide"])
         except Exception as e: print(f"[Sizes] {e}")
 
     # ── Bedienung ───────────────────────────────────────────────────
@@ -1507,7 +1605,8 @@ class MainUI(FloatLayout):
         start=PS1Button(text="SCAN STARTEN",accent=PS1_GREEN,font_size=sp(9.5))
         rules=PS1Button(text="ALARM EINRICHTEN",accent=PS1_PINK,font_size=sp(9.5))
         later=PS1Button(text="SPÄTER",accent=PS1_SILVER,font_size=sp(9.5))
-        p=Popup(title="",content=box,size_hint=(0.93,None),height=dp(300),
+        p=Popup(title="",content=box,size_hint=(None,None),
+                width=min(dp(520),Window.width*0.93),height=dp(300),
                 background_color=(0.08,0.08,0.09,1),separator_height=0)
         def go(start_scan=False,open_rules=False):
             p.dismiss()
@@ -1575,8 +1674,14 @@ class MainUI(FloatLayout):
 
         cb=PS1Button(text="SCHLIESSEN",accent=PS1_BLUE,font_size=sp(10),
                      size_hint_y=None,height=dp(34))
-        p=Popup(title="",content=box,size_hint=(0.92,None),
-                height=min(dp(440),Window.height*0.82),
+        # Auf kleinen Querformat-Displays ist der Inhalt hoeher als das Popup;
+        # dann bleibt er wenigstens scrollbar statt unten abgeschnitten zu sein.
+        box.size_hint=(1,None)
+        box.bind(minimum_height=box.setter("height"))
+        sv=ScrollView(bar_width=dp(4)); sv.add_widget(box)
+        p=Popup(title="",content=sv,size_hint=(None,None),
+                width=min(dp(560),Window.width*0.92),
+                height=min(dp(440),Window.height*0.9),
                 background_color=(0.08,0.08,0.09,1),separator_height=0)
         cb.bind(on_release=lambda *_:p.dismiss()); box.add_widget(cb)
         p.open()
@@ -1627,7 +1732,9 @@ class MainUI(FloatLayout):
         rb=PS1Button(text="FEHLER PRUEFEN",accent=PS1_YELLOW,font_size=sp(9))
         lb=PS1Button(text="LOG TEILEN",accent=PS1_BLUE,font_size=sp(9))
         cb=PS1Button(text="ZU",accent=PS1_SILVER,font_size=sp(9))
-        p=Popup(title="",content=box,size_hint=(0.95,0.82),
+        p=Popup(title="",content=box,size_hint=(None,None),
+                width=min(dp(680),Window.width*0.92),
+                height=min(dp(640),Window.height*0.82),
                 background_color=(0.08,0.08,0.09,1),separator_height=0)
         def retry(*_):
             if not fehler:
@@ -1710,8 +1817,12 @@ class MainUI(FloatLayout):
         row=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
         ob=PS1Button(text="SHOP OEFFNEN",accent=PS1_GREEN,font_size=sp(9))
         cb=PS1Button(text="SCHLIESSEN",accent=PS1_SILVER,font_size=sp(9))
-        p=Popup(title="",content=box,size_hint=(0.94,None),
-                height=min(dp(420),Window.height*0.82),
+        box.size_hint=(1,None)
+        box.bind(minimum_height=box.setter("height"))
+        sv=ScrollView(bar_width=dp(4)); sv.add_widget(box)
+        p=Popup(title="",content=sv,size_hint=(None,None),
+                width=min(dp(560),Window.width*0.94),
+                height=min(dp(420),Window.height*0.9),
                 background_color=(0.08,0.08,0.09,1),separator_height=0)
         ob.bind(on_release=lambda *_: (p.dismiss(),open_url(r.get("url"))))
         cb.bind(on_release=lambda *_:p.dismiss())
@@ -1731,7 +1842,8 @@ class MainUI(FloatLayout):
             if ref["p"]: ref["p"].dismiss()
         c=HandlerPickerContent(current=self.active_haendler,on_apply=on_apply)
         ph=max(dp(260),min(Window.height*0.7,Window.height-dp(80)))
-        p=Popup(title="",content=c,size_hint=(0.94,None),height=ph,
+        p=Popup(title="",content=c,size_hint=(None,None),
+                width=min(dp(560),Window.width*0.94),height=ph,
                 pos_hint={"center_x":0.5,"y":0.02},
                 background_color=(0.08,0.08,0.09,1),separator_height=0)
         ref["p"]=p; p.open()
@@ -1826,7 +1938,8 @@ class MainUI(FloatLayout):
         b1.bind(on_release=lambda *_: (ref["p"] and ref["p"].dismiss(),open_app_settings()))
         b2.bind(on_release=lambda *_: ref["p"] and ref["p"].dismiss())
         row.add_widget(b1); row.add_widget(b2); box.add_widget(row)
-        p=Popup(title="",content=box,size_hint=(0.9,None),height=dp(220),
+        p=Popup(title="",content=box,size_hint=(None,None),
+                width=min(dp(520),Window.width*0.9),height=dp(220),
                 background_color=(0.08,0.08,0.09,1),separator_height=0)
         ref["p"]=p; p.open()
 
@@ -1840,15 +1953,19 @@ class MainUI(FloatLayout):
         self.results_row.clear_widgets()
         self._placeholder=None; self._last_sig=None
     def _resize_placeholder(self,w):
-        if self._placeholder is not None:
+        if self._placeholder is not None and not self._wide:
             self._placeholder.width=max(dp(240),w)
     def _show_placeholder(self,titel,unter):
         self._clear_results()
         w=(self.results_scroll.width if self.results_scroll.width>dp(20)
            else Window.width-dp(16))
-        box=BoxLayout(orientation="vertical",size_hint=(None,1),
-                      width=max(dp(240),w),
-                      spacing=dp(2),padding=dp(10))
+        if self._wide:
+            box=BoxLayout(orientation="vertical",size_hint=(1,None),
+                          height=dp(180),spacing=dp(2),padding=dp(10))
+        else:
+            box=BoxLayout(orientation="vertical",size_hint=(None,1),
+                          width=max(dp(240),w),
+                          spacing=dp(2),padding=dp(10))
         box.add_widget(Widget())
         symrow=BoxLayout(orientation="horizontal",size_hint_y=None,height=dp(20))
         symrow.add_widget(Widget())
@@ -1904,9 +2021,11 @@ class MainUI(FloatLayout):
         self._last_sig=sig
         for n in namen:
             r=self.scanned[n]
-            self.results_row.add_widget(
-                ResultCard(r,r.get("_is_new",False),r.get("_prev"),
-                           self.history.get_serie(n),detail_cb=self._open_detail))
+            card=ResultCard(r,r.get("_is_new",False),r.get("_prev"),
+                            self.history.get_serie(n),detail_cb=self._open_detail)
+            if self._wide:
+                card.size_hint=(1,None); card.height=dp(156)
+            self.results_row.add_widget(card)
         if sx>0:
             Clock.schedule_once(lambda dt:setattr(self.results_scroll,"scroll_x",sx),0)
 

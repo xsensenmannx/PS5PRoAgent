@@ -1,4 +1,4 @@
-# Baut bei einem Tag (z. B. v1.3) die APK und haengt sie an das Release.
+# Baut bei einem Tag (z. B. v1.4) die APK und haengt sie an das Release.
 # Der Download-Link ist danach ohne GitHub-Login auf dem Handy zu oeffnen.
 # Die eigentliche Arbeit steckt wie im Build-Workflow in tools/ci_build.sh.
 name: Release
