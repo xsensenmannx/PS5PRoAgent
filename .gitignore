@@ -1,0 +1,12 @@
+# Build-Artefakte und Caches gehoeren nicht ins Repository
+.buildozer/
+bin/
+.venv/
+_verify/
+__pycache__/
+*.pyc
+*.log
+
+# Lokale App-Daten
+ps5pro_settings.json
+ps5pro_history.json

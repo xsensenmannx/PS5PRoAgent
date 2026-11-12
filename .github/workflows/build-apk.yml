@@ -1,0 +1,79 @@
+name: APK bauen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - main.py
+      - buildozer.spec
+      - icon.png
+      - "assets/**"
+      - "tools/**"
+      - .github/workflows/build-apk.yml
+
+# Bei mehreren Commits kurz hintereinander (z. B. Web-Upload) nur den neuesten bauen.
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Logiktests
+        run: python3 tools/selftest.py
+
+      - name: Build-Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-v3-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-v3-${{ runner.os }}-
+
+      - name: APK bauen
+        timeout-minutes: 120
+        run: bash tools/ci_build.sh
+
+      - name: APK als Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps5pro-apk
+          path: bin/*.apk
+          if-no-files-found: error
+
+      - name: Fehlerbericht in die Zusammenfassung
+        if: failure()
+        run: |
+          {
+            echo "## Build fehlgeschlagen"
+            echo ""
+            echo "### Letzte Zeilen"
+            echo "\`\`\`"
+            if [ -f buildozer.log ]; then
+              tail -n 60 buildozer.log
+            else
+              echo "kein buildozer.log vorhanden - der Fehler lag vor dem Build (z. B. Logiktests)"
+            fi
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log bei Fehler
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-log
+          path: buildozer.log
+          if-no-files-found: ignore
