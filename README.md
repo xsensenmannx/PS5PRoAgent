@@ -19,6 +19,9 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht.
 * **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**.
+* **Ressourcen-schonend:** das Radar zeichnet im Leerlauf 12 statt 30 Bilder/s und
+  pausiert im Hintergrund, `requests` wird erst beim ersten Scan importiert, und die
+  Bot-Schutz-Prüfung liest nur die ersten 3 KB statt die ganze Seite zu kopieren.
 * Filter (Treffer/alle), Sortierung (Preis/Händler/Zeit), Händler-Auswahl, kurzer
   Tap auf eine Karte öffnet den Shop im Browser.
 
@@ -63,7 +66,7 @@ python3 tools/selftest.py
 ```
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung und
-die Händlerdaten — 46 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie
+die Händlerdaten — 50 Zusicherungen, ohne Kivy und ohne Android. Der Workflow führt sie
 vor jedem Build aus.
 
 ## Grenzen

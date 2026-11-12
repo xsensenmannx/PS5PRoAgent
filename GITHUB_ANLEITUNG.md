@@ -106,7 +106,7 @@ workflows → Save**, dann **Actions → APK bauen → Run workflow**.
 | --- | --- | --- |
 | Auschecken | Sekunden | lädt deinen Commit |
 | Java 17 | ~20 s | Temurin-JDK, das Gradle erwartet |
-| **Logiktests** | ~2 s | 46 Zusicherungen; rot = kein Build |
+| **Logiktests** | ~2 s | 50 Zusicherungen; rot = kein Build |
 | Build-Cache | ~1 min | SDK/NDK (~2 GB) aus dem Cache oder Download |
 | **APK bauen** | 20–35 min | ruft `tools/ci_build.sh` auf (Pflichtdateien, Pakete, venv, Lizenzen, Build) |
 | APK als Artifact | Sekunden | lädt `bin/*.apk` hoch |
