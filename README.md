@@ -51,6 +51,7 @@ tools/ci_fix_cache.sh         räumt halb geladene SDK/NDK-Bäume auf
 PS5Pro_APK_Colab.ipynb        Build-Notebook für Colab
 GITHUB_ANLEITUNG.md           Build über GitHub Actions (Web-Upload und CLI)
 .github/workflows/build-apk.yml   CI-Build
+.github/workflows/release.yml     Tag v* -> APK als Release-Asset
 .github/workflows/diagnose.yml    manueller Diagnose-Lauf
 ps5pro.zip                    Upload-Paket für Colab
 ```

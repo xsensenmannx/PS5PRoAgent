@@ -27,6 +27,7 @@ eigenes.
 | `tools/ci_check_apk.sh` | prüft die fertige APK (Größe, enthält `libpython3.11.so`) |
 | `PS5Pro_APK_Colab.ipynb` | Build-Notebook für Colab |
 | `.github/workflows/build-apk.yml` | CI-Build mit Artifact |
+| `.github/workflows/release.yml` | bei Tag `v*`: Build + APK als Release-Asset |
 | `.github/workflows/diagnose.yml` | manueller Diagnose-Lauf (SDK/NDK, venv, letzter Fehler) |
 | `ps5pro.zip` | Upload-Paket für Colab (main.py, spec, icons, `assets/`) |
 | `GITHUB_ANLEITUNG.md` | Build über GitHub Actions, Schritt für Schritt |
