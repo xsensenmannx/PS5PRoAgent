@@ -2,7 +2,6 @@
 import os, sys, json, re, time, math, random, queue, threading, hashlib
 from datetime import datetime
 from urllib.request import Request, urlopen
-from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 IS_MOBILE = ('ANDROID_ARGUMENT' in os.environ or sys.platform in ('android','ios'))
@@ -208,7 +207,7 @@ HAENDLER = [
     _h("shöpping.at","AT","https://www.shoepping.at/suche?q=playstation+5+pro+2tb"),
     _h("Geizhals AT","AT","https://geizhals.at/sony-playstation-5-pro-2tb-weiss-a3298140.html"),
     _h("Computerexpert AT","AT","https://shop.computerexpert.at/suche?q=playstation+5+pro+2tb"),
-    _h("Aetka AT","AT","https://aetka.de/suche?q=playstation+5+pro+2tb"),
+    _h("Aetka DE","DE","https://aetka.de/suche?q=playstation+5+pro+2tb"),
 ]
 
 UA_PROFILES = [
@@ -310,8 +309,18 @@ def format_preis(p):
 def parse_preis_str(s):
     if s is None: return None
     s = re.sub(r"&nbsp;|\s|€|EUR|\$|£|USD|GBP","",str(s).strip(),flags=re.I)
-    s = re.sub(r"[a-zA-Z]","",s)
+    # Shops schreiben "799,00 €*", "(799,00 €)", "1.299,–" oder "799,-".
+    # Fuer den Preis zaehlen nur Ziffern, Punkt, Komma und Bindestrich - Sternchen,
+    # Klammern, Fuellwoerter und der Halbgeviertstrich fliegen raus. Ohne das landete
+    # eine voellig normale Preisangabe mit Fussnote als "PREIS OFFEN".
+    s = s.replace("–","-").replace("—","-")
+    s = re.sub(r"[^0-9.,\-]","",s)
     if not s: return None
+    # "799,-" / "1.299,--" = ganze Euro ohne Nachkommastellen
+    m = re.match(r"^(\d{1,3}(?:\.\d{3})+|\d+),-+$",s)
+    if m:
+        try: return float(m.group(1).replace(".",""))
+        except ValueError: pass
     # Komma ist das Dezimaltrennzeichen - mit oder ohne Tausenderpunkt.
     # "1.234,56" und "1234,56" (vierstellig, ohne Punkt) landen hier beide richtig.
     m = re.match(r"^(\d{1,3}(?:\.\d{3})+|\d+),(\d{1,2})$",s)
@@ -655,6 +664,23 @@ class Toast(Label):
     def _hide(self,*_): Animation(opacity=0,d=0.3).start(self)
 
 # ══════════ RADAR (PS1 BIOS look) ══════════
+RADAR_FPS_IDLE = 12.0   # Leerlauf: der Sweep dreht nur 30 Grad/s
+RADAR_FPS_SCAN = 30.0   # waehrend eines Scans
+
+def radar_frame_step(acc, dt, scanning, paused):
+    """Reine Entscheidung, ob dieser Tick gezeichnet wird (testbar ohne Kivy).
+
+    Rueckgabe ``(zeichnen, neuer_acc, step)``. ``step`` ist die seit dem letzten
+    Bild verstrichene Zeit - Winkel und Symbolbewegung haengen daran, nicht an der
+    Bildrate, damit die Optik bei 12 und 30 Bildern/s gleich schnell wirkt.
+    Pausiert wird weder gezeichnet noch Zeit angesammelt.
+    """
+    if paused: return False, acc, 0.0
+    acc += dt
+    limit = 1.0/(RADAR_FPS_SCAN if scanning else RADAR_FPS_IDLE)
+    if acc < limit: return False, acc, 0.0
+    return True, 0.0, acc
+
 class RadarWidget(Widget):
     angle=NumericProperty(0.0); blips=ListProperty([])
     scanning=BooleanProperty(False)
@@ -690,14 +716,8 @@ class RadarWidget(Widget):
         self._paused=False; self._acc=0.0; self._redraw()
 
     def _tick(self,dt):
-        if self._paused: return True
-        # Der Sweep dreht im Leerlauf nur 30 Grad/s - dafuer reichen 12 Bilder/s.
-        # Waehrend eines Scans wird mit 30 Bildern/s gezeichnet. Die Winkel- und
-        # Symbolgeschwindigkeit haengt an der echten Zeit (step), nicht an der
-        # Bildrate, damit die Optik identisch bleibt und nur weniger gezeichnet wird.
-        self._acc+=dt
-        if self._acc < (1/30.0 if self.scanning else 1/12.0): return True
-        step=self._acc; self._acc=0.0
+        zeichnen,self._acc,step=radar_frame_step(self._acc,dt,self.scanning,self._paused)
+        if not zeichnen: return True
         s=180.0 if self.scanning else 30.0
         self.angle=(self.angle+s*step)%360
         k=step*30.0
@@ -1767,7 +1787,6 @@ if __name__=="__main__":
         err=traceback.format_exc()
         print("\n\n=== STARTUP CRASH ===\n"+err+"\n=====================\n")
         try:
-            from kivy.uix.popup import Popup
             c=ScrollView()
             l=Label(text=err,text_size=(dp(400),None),size_hint_y=None,markup=False)
             l.bind(texture_size=l.setter("size")); c.add_widget(l)
