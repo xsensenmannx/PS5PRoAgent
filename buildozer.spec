@@ -40,7 +40,8 @@ version = 1.0
 # version.regex = __version__ = ['"](.*)['"]
 # version.filename = %(source.dir)s/main.py
 
-# (list) Application requirements
+# Python-Version festlegen
+requirements = python3==3.11.9, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
 # comma separated e.g. requirements = sqlite3,kivy
 requirements = python3, kivy==2.3.0, plyer, pyjnius, requests, urllib3, certifi, charset-normalizer, idna, android
 
@@ -108,7 +109,7 @@ icon.adaptive_background.filename = %(source.dir)s/assets/icon_bg.png
 android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS
 
 
-# (list) features (adds uses-feature -tags to manifest)
+# Bewährtes NDK für Kivy 2.3 nutzen android.ndk = 25b
 #android.features = android.hardware.usb.host
 
 # (int) Target Android API, should be as high as possible.
