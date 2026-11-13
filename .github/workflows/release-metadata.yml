@@ -1,0 +1,42 @@
+name: Release-Metadaten
+
+on:
+  # Einmalig beim Hinzufuegen dieser Datei: bestehende Beta-Releases korrigieren.
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-metadata.yml
+  # Neue Releases: nach erfolgreichem Release-Lauf den Beta-Tag pruefen.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mark-beta-prerelease:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Beta-Releases als Pre-release markieren
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          tags=()
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            case "$RUN_TAG" in
+              *beta*) tags+=("$RUN_TAG") ;;
+            esac
+          else
+            tags=(v1.0beta v4.0-beta v4.0-beta2)
+          fi
+          for tag in "${tags[@]}"; do
+            echo "Markiere $tag als Pre-release"
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+              -F prerelease=true >/dev/null
+          done
