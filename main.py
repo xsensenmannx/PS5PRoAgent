@@ -121,6 +121,10 @@ RADAR_DIM   = get_color_from_hex("#122b45")
 RADAR_TICK  = get_color_from_hex("#2f6fa8")
 RADAR_SWEEP = get_color_from_hex("#5aa8ff")
 RADAR_TXT   = get_color_from_hex("#4f86b8")
+# Ruhige Bewegung: Sweep und Sonar-Pings laufen im Scan genauso wie im
+# Leerlauf. Frueher drehte der Sweep waehrend eines Scans 6x schneller.
+RADAR_SWEEP_GRAD_S = 30.0
+RADAR_PING_HZ      = 0.55
 
 # ── Helfer ──────────────────────────────────────────────────────────
 def open_url(u):
@@ -549,8 +553,7 @@ class RadarWidget(Widget):
     def _tick(self,dt):
         zeichnen,self._acc,step=radar_frame_step(self._acc,dt,self.scanning,self._paused)
         if not zeichnen: return True
-        s=180.0 if self.scanning else 30.0
-        self.angle=(self.angle+s*step)%360
+        self.angle=(self.angle+RADAR_SWEEP_GRAD_S*step)%360
         k=step*30.0
         for f in self._fl:
             f["x"]+=f["vx"]*k; f["y"]+=f["vy"]*k
@@ -607,7 +610,7 @@ class RadarWidget(Widget):
                      width=dp(1.8 if mj else (1.2 if md else 0.7)))
             # Langsame Sonar-Pings: zwei weiche Ringe laufen nach aussen.
             # Waehrend eines Scans schneller, im Leerlauf kaum merklich.
-            cycle=(now*(2.4 if self.scanning else 0.55))%1.0
+            cycle=(now*RADAR_PING_HZ)%1.0
             for off in (0.0,0.5):
                 p=(cycle+off)%1.0
                 rr=mr*(0.12+0.86*p)
