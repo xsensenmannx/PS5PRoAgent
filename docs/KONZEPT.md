@@ -75,10 +75,11 @@ Bereits gebaut und getestet:
 * **v1.4:** Verfügbarkeitszustände (Markt/Lotterie/Einladung/Vorbestellung),
   Konfidenz 0–100, Beleg-Ausschnitt mit Hash, GTIN/EAN, Bundle-Filter,
   Marketplace-Hinweis und ein 304-Cache mit maximal sechs Stunden Alter.
-* 777 Logiktests, sechs Kivy-Smoke-Läufe (inkl. 120 % Schrift), signierte Releases.
+* 785 Logiktests, sechs Kivy-Smoke-Läufe (inkl. 120 % Schrift), signierte Releases.
 
-Was das *nicht* löst: Das Handy schläft weiterhin, Lotterien werden nicht erkannt,
-und ein Treffer ist noch keine erklärte Entscheidung.
+Was das *nicht* löst: Das Handy schläft weiterhin, Lotterien werden nur erkannt,
+aber nicht automatisch bedient, und ein Treffer ist noch keine erklärte
+Entscheidung.
 
 ---
 
