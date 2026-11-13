@@ -18,12 +18,12 @@ die Datei antippen und die Installation aus dieser Quelle erlauben.
 | **v5.1** | Die aktuelle Version (versionCode 18). Diese APK installieren. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
-Es gibt nur diese zwei Releases. Alle Zwischenstände, Beta-Versionen und
-Test-Releases wurden entfernt. Alle Downloads:
+Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
+aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
-> **Eine Nummer für alles:** App, `main`-Branch und Download heißen **v5.1**.
-> Eine eigene v5.0-Datei wird nicht mehr angeboten.
+> **Eine Nummer für alles:** App, `main`-Branch, Release und Download heißen
+> **v5.1**. Der Button oben führt immer zur aktuellen APK.
 
 ## Was die App kann
 
@@ -181,7 +181,7 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionshistorie
 
-Es bleiben nur diese zwei Releases:
+Aktueller Stand und Archiv:
 
 * **v5.1** – Die aktuelle Version (versionCode 18): Radar und Trefferliste sind
   in Hoch- und Querformat fest getrennt, die Treffer-Marken bleiben innerhalb
