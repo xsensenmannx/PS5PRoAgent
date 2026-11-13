@@ -67,6 +67,62 @@ jobs:
           KEY_ALIAS: ps5pro
         run: bash tools/ci_build.sh
 
+      - name: bundletool laden
+        run: |
+          set -euo pipefail
+          BT="$RUNNER_TEMP/bundletool-all-1.18.3.jar"
+          curl -fsSL -o "$BT" \
+            https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $BT" \
+            | sha256sum -c -
+          java -jar "$BT" version
+
+      - name: AAB validieren und Universal-APK bauen
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BT="$RUNNER_TEMP/bundletool-all-1.18.3.jar"
+          AAB=$(ls bin/*.aab | head -n 1)
+          echo "Bundle: $AAB"
+          java -jar "$BT" validate --bundle="$AAB"
+          printf '%s' "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/ks.pass"
+          chmod 600 "$RUNNER_TEMP/ks.pass"
+          trap 'rm -f "$RUNNER_TEMP/ks.pass"' EXIT
+          java -jar "$BT" build-apks \
+            --bundle="$AAB" \
+            --output="$RUNNER_TEMP/ps5pro-universal.apks" \
+            --mode=universal \
+            --ks="$RUNNER_TEMP/release.p12" \
+            --ks-key-alias=ps5pro \
+            --ks-pass="file:$RUNNER_TEMP/ks.pass" \
+            --key-pass="file:$RUNNER_TEMP/ks.pass"
+          unzip -o -q "$RUNNER_TEMP/ps5pro-universal.apks" universal.apk -d "$RUNNER_TEMP"
+          cp "$RUNNER_TEMP/ps5pro-universal.apks" bin/
+          cp "$RUNNER_TEMP/universal.apk" bin/ps5pro-universal.apk
+          ls -lh bin/ps5pro-universal.apk bin/ps5pro-universal.apks
+
+      - name: Universal-APK signieren und Manifest pruefen
+        env:
+          EXPECTED_CERT_SHA256: "63:E5:1D:83:8B:FE:14:38:C6:D6:14:3D:F9:7D:46:D5:73:55:BC:D3:83:3A:BB:44:A2:31:BE:CF:D5:C5:70:DD"
+        run: |
+          set -euo pipefail
+          APKSIGNER=$(ls -1 "$HOME"/.buildozer/android/platform/android-sdk/build-tools/*/apksigner | tail -n 1)
+          AAPT2=$(ls -1 "$HOME"/.buildozer/android/platform/android-sdk/build-tools/*/aapt2 | tail -n 1)
+          "$AAPT2" dump badging bin/ps5pro-universal.apk \
+            | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)"
+          "$APKSIGNER" verify --print-certs bin/ps5pro-universal.apk
+          ACTUAL=$("$APKSIGNER" verify --print-certs bin/ps5pro-universal.apk \
+            | grep -i "SHA-256 digest" | head -n 1 \
+            | sed 's/.*: //' | tr -d ':\r ' | tr 'A-F' 'a-f')
+          EXPECTED=$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
+          [ "$ACTUAL" = "$EXPECTED" ] || {
+            echo "::error::Universal-APK nicht mit dem Upload-Key signiert: $ACTUAL"
+            exit 1
+          }
+          sha256sum bin/ps5pro-universal.apk bin/ps5pro-universal.apks >> aab.sha256
+          cat aab.sha256
+
       - name: AAB und Protokoll sichern
         if: always()
         uses: actions/upload-artifact@v4
@@ -74,6 +130,8 @@ jobs:
           name: ps5pro-aab
           path: |
             bin/*.aab
+            bin/*.apks
+            bin/*.apk
             aab.sha256
             buildozer.log
           if-no-files-found: warn
