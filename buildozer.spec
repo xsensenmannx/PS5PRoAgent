@@ -341,7 +341,7 @@ android.archs = arm64-v8a
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # Google Play verlangt fuer JEDEN Upload einen hoeheren versionCode. Vor dem
 # naechsten Play-Upload hier +1 (die Anzeige-Version oben bleibt davon unabhaengig).
-android.numeric_version = 14
+android.numeric_version = 15
 
 # (str) The format used to package the app for release mode (aab or apk or aar).
 # Play nimmt nur AABs an; die Debug-APK fuer Sideloading bleibt wie gehabt.

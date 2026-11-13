@@ -213,32 +213,32 @@ Release — der Link ist danach ohne Login auf dem Handy zu öffnen.
 **Tag setzen, ohne Kommandozeile:**
 
 1. **Code** → rechts **Releases** → **Draft a new release**.
-2. Bei **Choose a tag** `v4.0-beta` eintippen → **Create new tag: v4.0-beta on publish**.
-3. Titel z. B. `v4.0 Beta` → **Publish release**.
+2. Bei **Choose a tag** `v4.0-beta2` eintippen → **Create new tag: v4.0-beta2 on publish**.
+3. Titel z. B. `v4.0 Beta 2` → **Publish release**.
 
 Der Tag zeigt damit auf den aktuellen Stand von `main`, und der Workflow **Release**
 startet. Nach 20–40 Minuten (erster Lauf länger) liegt die APK am Release:
-**Releases → v4.0-beta → Assets → `ps5prosearchagent-4.0-arm64-v8a-debug.apk`**.
+**Releases → v4.0-beta2 → Assets → `ps5prosearchagent-4.0-arm64-v8a-debug.apk`**.
 
 **Mit der Kommandozeile:**
 
 ```bash
-git tag v4.0-beta
-git push origin v4.0-beta
+git tag v4.0-beta2
+git push origin v4.0-beta2
 ```
 
-Der Workflow legt das Release selbst an (Titel = Tag, hier `v4.0-beta`). Ein schon
+Der Workflow legt das Release selbst an (Titel = Tag, hier `v4.0-beta2`). Ein schon
 publiziertes Release stört nicht — die APK wird dort ergänzt, der Titel bleibt.
 
 **Release-Stand:** `buildozer.spec` setzt `version = 4.0`; der finale Tag heißt
-`v4.0-beta`. Tag und Spec-Version dürfen abweichen, aber der Dateiname der APK enthält die
+`v4.0-beta2`. Tag und Spec-Version dürfen abweichen, aber der Dateiname der APK enthält die
 Version aus der Spec — gleiche Nummern halten die Zuordnung eindeutig.
 
 **Tag am falschen Commit oder vertippt?** Lokal und auf GitHub löschen, neu setzen:
 
 ```bash
-git tag -d v4.0-beta
-git push origin :refs/tags/v4.0-beta
+git tag -d v4.0-beta2
+git push origin :refs/tags/v4.0-beta2
 ```
 
 Ein bereits angelegtes Release bleibt dabei bestehen (samt alter APK) — im Zweifel im
@@ -251,4 +251,4 @@ Dafür braucht es einen signierten **AAB**: `android.release_artifact = aab`,
 `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` und
 `ANDROID_KEY_PASSWORD`. Ohne diese Secrets erzeugt der v4.0-Beta-Lauf nur ein
 Smoke-Test-AAB. Die vollständige Anleitung inklusive nachträglichem AAB-Release
-für v4.0-beta steht in [PLAY_STORE.md](PLAY_STORE.md).
+für v4.0-beta2 steht in [PLAY_STORE.md](PLAY_STORE.md).

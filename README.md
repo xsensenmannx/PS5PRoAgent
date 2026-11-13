@@ -163,6 +163,12 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v4.0 Beta 2** – Länderflagge in der Trefferliste (versionCode 15): Die
+  Flagge steht klein in der Meta-Zeile vor `DE · 12:00` und zeigt die Herkunft
+  des Treffers; vor dem Händlernamen bleibt die Zeile symbolfrei. Keine
+  Händler-Kachel und keine Pfeil-Buttons mehr vor der Liste; der Händlername
+  bekommt die freie Breite. Der BOT-SCHUTZ-Hinweis ist mit 8,2 sp lesbarer und
+  bleibt auf 246 dp vollständig sichtbar.
 * **v4.0 Beta** – Aufgeräumte Trefferliste (versionCode 14): keine Händler-Kachel
   und keine Pfeil-Buttons mehr vor der Liste; der Händlername bekommt die freie
   Breite. Der BOT-SCHUTZ-Hinweis ist mit 8,2 sp lesbarer und bleibt auf 246 dp

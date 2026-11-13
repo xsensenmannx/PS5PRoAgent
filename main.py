@@ -873,12 +873,16 @@ class ResultCard(ButtonBehavior, BoxLayout):
         elif self._is_new: meta_txt="NEU · "+meta_txt
         elif ist_gebraucht(r.get("condition")): meta_txt="GEBRAUCHT · "+meta_txt
         elif r.get("sofort") is False: meta_txt="VORBEST. · "+meta_txt
+        meta_row=BoxLayout(orientation="horizontal",size_hint_y=None,
+                           height=dp(12),spacing=dp(3))
+        meta_row.add_widget(FlagWidget(r["land"],size=(dp(18),dp(12))))
         m=Label(text=meta_txt,color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
                 halign="left",valign="middle",
                 size_hint_y=None,height=dp(12),
                 shorten=True,shorten_from="right")
         m.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-        info.add_widget(m)
+        meta_row.add_widget(m)
+        info.add_widget(meta_row)
 
         holder.add_widget(info)
 

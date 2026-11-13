@@ -231,8 +231,9 @@ class SmokeApp(App):
         check("BOT-SCHUTZ: Hinweis auf Challenge",
               "SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT" in text, True)
         check("Trefferliste: kein Haendler-Symbol",
-              not any(type(w).__name__ in ("BrandTile", "FlagWidget")
-                      for w in card.walk()), True)
+              not any(type(w).__name__ == "BrandTile" for w in card.walk()), True)
+        check("Trefferliste: Flagge vorhanden",
+              any(isinstance(w, main.FlagWidget) for w in card.walk()), True)
         check("Trefferliste: vertikal", self.ui.results_row.orientation, "vertical")
         check("Trefferliste: kompakte Zeile", card.height <= main.dp(80), True)
 
@@ -280,8 +281,12 @@ class SmokeApp(App):
                  if isinstance(w, main.ResultCard)]
         check("Trefferliste: beide Treffer sichtbar", len(cards), 2)
         check("Trefferliste: kein Haendler-Symbol",
-              not any(type(w).__name__ in ("BrandTile", "FlagWidget")
+              not any(type(w).__name__ == "BrandTile"
                       for card in cards for w in card.walk()), True)
+        check("Trefferliste: Flaggen vorhanden",
+              all(any(isinstance(w, main.FlagWidget) and
+                      w.land == card.result.get("land")
+                      for w in card.walk()) for card in cards), True)
         check("Trefferliste: Restock-Hinweis",
               any("WIEDER DA" in str(getattr(w, "text", ""))
                   for card in cards for w in card.walk()), True)

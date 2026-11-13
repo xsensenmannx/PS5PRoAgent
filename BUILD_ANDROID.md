@@ -247,7 +247,7 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 
 Für den GitHub-Actions-Weg werden die vier Secrets aus [PLAY_STORE.md](PLAY_STORE.md)
 benötigt. Der v4.0-Beta-Stand kann nach dem Setzen der Secrets durch **Actions → Release
-→ v4.0-beta → Re-run all jobs** als AAB am bestehenden Release ergänzt werden.
+→ v4.0-beta2 → Re-run all jobs** als AAB am bestehenden Release ergänzt werden.
 
 ---
 

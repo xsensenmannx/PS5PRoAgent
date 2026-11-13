@@ -574,7 +574,7 @@ def spec_tests():
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
     check("spec version", c.get("app", "version"), "4.0")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "14")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "15")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
