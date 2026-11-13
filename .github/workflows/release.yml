@@ -24,6 +24,10 @@ jobs:
     timeout-minutes: 210
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Volle Historie und Tags: die Release-Notes listen die Commits
+          # seit dem letzten Tag auf.
+          fetch-depth: 0
 
       - name: Java 17
         uses: actions/setup-java@v6
@@ -90,10 +94,20 @@ jobs:
           APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
           bash tools/ci_check_apk_aapt2.sh "$APK"
 
+      - name: Release-Notes erzeugen
+        run: |
+          set -euo pipefail
+          APK=$(ls -1 bin/*.apk | head -n 1)
+          bash tools/release_notes.sh "${GITHUB_REF_NAME}" "$APK" release_notes.md
+          cat release_notes.md
+
       - name: APK ans Release haengen
         uses: softprops/action-gh-release@v3
         with:
           files: bin/*.apk
+          # Beschreibung kommt aus tools/release_notes.sh (Aenderungen seit
+          # dem letzten Tag, Installationshinweis, SHA-256 der APK).
+          body_path: release_notes.md
           # Ein erneuter Tag-Lauf soll das vorhandene Asset ersetzen, statt
           # mit "asset already exists" abzubrechen.
           overwrite_files: true
