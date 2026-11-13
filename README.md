@@ -69,10 +69,12 @@ Signal, Preistiefs und den Preisverlauf:
   neue Angebot vor Gebrauchtware; Fremdwährungen werden nicht als Euro gezählt.
 * **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen),
   sonst „ZU TEUER"; Bot-Schutz und Fehler werden getrennt ausgewiesen.
-* **Verfügbarkeitszustände (v1.4)**: `InStoreOnly`, `OnlineOnly`,
-  `LimitedAvailability`, Vorbestellung, Nachbestellung, Lotterie, Einladung und
-  Ausverkauf sind getrennte Zustände. Marktabholung, Lotterie und Einladung
-  erscheinen als **CHANCE** und lösen bewusst keinen „verfügbar"-Alarm aus.
+* **Verfügbarkeitszustände (v1.4)**: `InStoreOnly`, Vorbestellung,
+  Nachbestellung, Lotterie, Einladung und Ausverkauf sind getrennte Zustände;
+  `OnlineOnly` und `LimitedAvailability` zählen wie `InStock`. Marktabholung,
+  Lotterie und Einladung erscheinen als **CHANCE** und lösen bewusst keinen
+  „verfügbar"-Alarm aus. Vorbestellungen bleiben Treffer, aber nur mit
+  „NUR SOFORT: AUS" alarmierbar — wie in v1.3.
 * **Konfidenz und Beleg (v1.4)**: Jeder Treffer trägt 0–100 aus nachvollziehbaren
   Signalen (zweiter Abruf, Preis plausibel, Belegquelle, Zustand, Verkäufer,
   Frische, GTIN). Die Detailansicht zeigt den Beleg-Ausschnitt mit Zeitstempel
@@ -203,7 +205,7 @@ python3 tools/validate_shop_config.py
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
-responsive Layout-Geometrie und Boot-Manifest — 777 Zusicherungen, ohne Kivy
+responsive Layout-Geometrie und Boot-Manifest — 785 Zusicherungen, ohne Kivy
 und ohne Android. Der CI-Workflow führt sie bei jedem Push und Pull Request
 aus, der Release-Workflow zusätzlich vor jedem Release. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät; er läuft in
@@ -256,11 +258,17 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.4.0** – Die aktuelle Version (versionCode 10400): Verfügbarkeitszustände
-  statt eines booleschen „verfügbar", CHANCE für Marktabholung, Lotterie,
-  Einladung und Vorbestellung, Konfidenz 0–100 mit optionaler 70-%-Schwelle,
-  Beleg-Ausschnitt mit Hash, GTIN/EAN- und Bundle-Erkennung, Marketplace-Hinweis
-  und ein 304-Cache mit maximal sechs Stunden Alter. Dazu 777 Logiktests.
+* **v1.4.0** – Die aktuelle veröffentlichte Version (versionCode 10400):
+  Verfügbarkeitszustände statt eines booleschen „verfügbar", CHANCE für
+  Marktabholung, Lotterie, Einladung und Vorbestellung, Konfidenz 0–100 mit
+  optionaler 70-%-Schwelle, Beleg-Ausschnitt mit Hash, GTIN/EAN- und
+  Bundle-Erkennung, Marketplace-Hinweis und ein 304-Cache mit maximal sechs
+  Stunden Alter. Dazu 777 Logiktests.
+* **Review-Fixes (unveröffentlicht, main)** – `OnlineOnly` und
+  `LimitedAvailability` zählen wie `InStock`, `Discontinued` wie `SoldOut`;
+  Vorbestellungen laufen wieder über den v1.3-Pfad „NUR SOFORT"; nur belegte
+  Konfidenzsignale, kürzere Belege und besser lesbare UI-Labels. Dazu 785
+  Logiktests.
 * **v1.3** – Vorherige Version (versionCode 10300): Webhook-Alarme für ntfy,
   Telegram und Discord, Treffer-Verifikation mit Bestätigungskennzeichnung und
   „nur bestätigte Treffer", Schnell-Modus für sechs heiße Shops im Minutentakt.

@@ -68,19 +68,16 @@ CACHE_MAX_ALTER = 6 * 3600
 EVIDENCE_FILE = "ps5pro_evidence.json"
 MAX_BELEGE = 200
 
-# Zustaende statt eines booleschen "verfuegbar": Ein Marktmodell, eine
-# Lotterie und eine Einladung sind keine online kaufbare Konsole.
-AVAILABILITY_STATES = ("in_stock", "online_only", "limited", "pickup_only",
-                       "preorder", "backorder", "lottery", "invite",
-                       "sold_out", "discontinued", "unknown")
-CHANCE_STATES = frozenset(("pickup_only", "preorder", "backorder", "lottery", "invite"))
-SOLD_STATES = frozenset(("sold_out", "discontinued"))
+# Nur Zustaende, die sich unterschiedlich verhalten. OnlineOnly und
+# LimitedAvailability sind kaufbar wie InStock und werden dort eingereiht.
+CHANCE_STATES = frozenset(("pickup_only", "lottery", "invite"))
 BUNDLE_MUSTER = re.compile(
     r"\b(bundle|im\s+set|set\s+mit|inkl\.?\s+controller|mit\s+controller|"
     r"controller\s+bundle|zubehoer\s+inkl\.?)\b", re.I)
+# Nur spezifische Marker. "Gewinnspiel" steht zu oft in Fusszeilen und wuerde
+# einen echten Treffer faelschlich zur Chance machen.
 CHANCE_PATTERNS = (
-    ("lottery", ("lotterie", "verlosung", "gewinnspiel", "teilnahmeschluss",
-                 "teilnahme am gewinnspiel")),
+    ("lottery", ("lotterie", "verlosung", "teilnahmeschluss")),
     ("invite", ("nur mit einladung", "nur auf einladung", "invite only",
                 "invitation only", "einladung erforderlich")),
     ("pickup_only", ("nur im markt", "nur zur abholung", "click & collect",
@@ -357,8 +354,7 @@ PRODUKT_MUSTER = [re.compile(r"playstation[\s\-®™]*5[\s\-®™]*pro\b",re.I),
 PRODUKT_2TB = re.compile(r"\b2\s*(?:tb|terabyte)\b",re.I)
 PRODUKT_AUSSCHLUSS = ["dualsense edge","edge controller","ps portal","portal remote",
     "pulse headset","pulse explore","psvr2","vr2 headset","faceplate","face plate",
-    "disc drive","laufwerk","bundle","im set","inkl. controller",
-    "mit controller","controller bundle","30th anniversary bundle"]
+    "disc drive","laufwerk"]
 VORBESTELL_MUSTER = ["vorbestell","vorbestellung","preorder","pre-order","backorder",
                      "back-order","reservier"]
 GEBRAUCHT_MUSTER = ["usedcondition","used condition","refurbished","refurb",
@@ -429,31 +425,29 @@ def _seller_name(v):
     return ""
 
 def availability_state(av):
-    """schema.org-Verfuegbarkeit in einen expliziten Zustand uebersetzen.
+    """schema.org-Verfuegbarkeit auf die Zustaende reduzieren, die zaehlen.
 
-    Reihenfolge ist wichtig: ``InStoreOnly`` enthaelt ebenfalls ``instore``
-    und ``LimitedAvailability`` enthaelt ``limited``. Ohne die spezifischen
-    Pruefungen wuerde beides als sofort online verfuegbar gelten.
+    ``OnlineOnly`` und ``LimitedAvailability`` sind kaufbar wie ``InStock``
+    und werden dort eingereiht; ``Discontinued`` ist ausverkauft. Nur
+    Marktabholung, Vorbestellung/Nachbestellung und echte Chancen bleiben
+    eigene Zustaende.
     """
     a=str(av or "").lower()
     if not a: return None
     if "instoreonly" in a: return "pickup_only"
-    if "onlineonly" in a: return "online_only"
-    if "limitedavailability" in a or "limited" in a: return "limited"
     if any(k in a for k in ("preorder", "presale")): return "preorder"
     if "backorder" in a: return "backorder"
-    if any(k in a for k in ("outofstock", "soldout")): return "sold_out"
-    if "discontinued" in a: return "discontinued"
-    if "instock" in a: return "in_stock"
-    return "unknown"
+    if any(k in a for k in ("outofstock", "soldout", "discontinued")): return "sold_out"
+    if any(k in a for k in ("instock", "onlineonly", "limited")): return "in_stock"
+    return None
 
 
 def _availability_flags(av):
     """(verfuegbar, sofort) - kompatibel fuer die vorhandenen Aufrufer."""
     state=availability_state(av)
-    if state in ("in_stock", "online_only", "limited"): return True, True
-    if state in CHANCE_STATES: return True, False
-    if state in SOLD_STATES: return False, False
+    if state=="in_stock": return True, True
+    if state in ("preorder", "backorder") or state in CHANCE_STATES: return True, False
+    if state=="sold_out": return False, False
     return None, None
 
 
@@ -520,7 +514,8 @@ def extract_structured(html):
         if not any(rx.search(name) for rx in PRODUKT_MUSTER): continue
         if not PRODUKT_2TB.search(name): continue
         low=name.lower()
-        if any(ex in low for ex in PRODUKT_AUSSCHLUSS) or BUNDLE_MUSTER.search(name):
+        if any(ex in low for ex in PRODUKT_AUSSCHLUSS): continue
+        if BUNDLE_MUSTER.search(name):
             res["bundle"]=True
             continue
         res["ist_konsole"]=True
@@ -617,6 +612,8 @@ def extract_meta_verfuegbarkeit(html):
 
 
 def extract_meta_state(html):
+    # None bedeutet: kein verwertbarer Meta-Wert. So kann danach noch der
+    # Text-Fallback greifen, statt an einem "unknown" haengen zu bleiben.
     return availability_state(_meta_availability_raw(html))
 
 
@@ -751,15 +748,17 @@ def berechne_konfidenz(r):
     punkte=0
     if r.get("verify")=="bestaetigt": punkte+=40
     try:
-        if MIN_PREIS<=float(p)<=1100: punkte+=15
+        if MIN_PREIS<=float(p)<=1100: punkte+=10
     except (TypeError,ValueError): pass
     if r.get("avail_state") not in (None,"unknown") and \
             r.get("stock_source") in ("remote","jsonld","meta","text"):
         punkte+=15
-    if not ist_gebraucht(r.get("condition")): punkte+=10
-    if not r.get("marketplace"): punkte+=10
+    # Nur belegte Signale zaehlen. Ein unbekannter Zustand oder eine fehlende
+    # Frischeangabe darf die Konfidenz nicht kuenstlich auf 100 heben.
+    if r.get("condition")=="new": punkte+=10
+    if r.get("marketplace") is False: punkte+=10
     if r.get("gtin"): punkte+=5
-    if r.get("fresh",True): punkte+=10
+    if r.get("fresh") is True: punkte+=10
     punkte=min(100,punkte)
     # Ohne zweiten Abruf bleibt es bei 60 - die Schwelle 70 ist dann bewusst
     # nicht erreichbar, auch wenn alle anderen Signale passen.
@@ -778,7 +777,7 @@ def _sichtbarer_text(html):
 def beleg_erzeugen(html, preis, state="unknown"):
     """Kleiner, redigierter Beweis: Preis, Zustand, Zeitstempel und Hash.
 
-    Bewusst kein HTML und keine Tokens: maximal 180 Zeichen sichtbarer Text
+    Bewusst kein HTML und keine Tokens: maximal 120 Zeichen sichtbarer Text
     rund um den Preis. Der Hash macht den Ausschnitt spaeter pruefbar.
     """
     text=_sichtbarer_text(html)
@@ -797,10 +796,10 @@ def beleg_erzeugen(html, preis, state="unknown"):
             pos=text.lower().find(label)
             if pos>=0: break
     if pos<0: pos=0
-    ausschnitt=text[max(0,pos-80):pos+100].strip()
+    ausschnitt=text[max(0,pos-80):pos+100].strip()[:120]
     if not ausschnitt: return None
     return {"ts": datetime.now().isoformat(timespec="seconds"),
-            "preis": preis, "state": state, "excerpt": ausschnitt[:180],
+            "preis": preis, "state": state, "excerpt": ausschnitt,
             "hash": hashlib.sha256(ausschnitt.encode("utf-8")).hexdigest()[:16]}
 
 
@@ -837,7 +836,7 @@ def beleg_speichern(haendler, beleg):
 
 def classify(v,p,m,state=None):
     if state in CHANCE_STATES: return "chance"
-    if state in SOLD_STATES: return "unavail"
+    if state=="sold_out": return "unavail"
     if not v: return "unavail"
     if p is None: return "unknown"
     if m is None or p<=m: return "hit"
@@ -1449,6 +1448,7 @@ def verify_entscheidung(erster,zweiter):
     if not isinstance(erster,dict) or erster.get("klass")!="hit": return None
     if not isinstance(zweiter,dict): return "unbestaetigt"
     if zweiter.get("klass")=="unavail": return "weg"
+    if zweiter.get("klass")=="chance": return "chance"
     if zweiter.get("preis") is not None and zweiter.get("klass") in ("hit","expensive"):
         try:
             if abs(float(zweiter["preis"])-float(erster.get("preis") or 0))<=0.005:
@@ -1486,6 +1486,11 @@ def verify_treffer(h, erster, cancel=None, pause=2.0):
         erster["verify_preis"]=zweiter.get("preis")
     elif entscheidung=="weg":
         erster["klass"]="unavail"; erster["verify_preis"]=None
+    elif entscheidung=="chance":
+        # Der zweite Abruf zeigt Marktabholung/Lotterie/Einladung: kein
+        # kaufbarer Treffer mehr, also auch kein Verfuegbarkeitsalarm.
+        erster["klass"]="chance"; erster["sofort"]=False
+        erster["avail_state"]=zweiter.get("avail_state") or "pickup_only"
     try: erster["confidence"]=berechne_konfidenz(erster)
     except Exception: pass
     return erster

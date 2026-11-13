@@ -1031,8 +1031,10 @@ class ResultCard(ButtonBehavior, BoxLayout):
         elif self._is_new: meta_txt="NEU · "+meta_txt
         elif r.get("klass")=="chance": meta_txt="CHANCE · "+meta_txt
         elif ist_gebraucht(r.get("condition")): meta_txt="GEBRAUCHT · "+meta_txt
+        elif r.get("avail_state")=="backorder": meta_txt="NACHBEST. · "+meta_txt
         elif r.get("sofort") is False: meta_txt="VORBEST. · "+meta_txt
-        if r.get("marketplace"): meta_txt="MARKETPLACE · "+meta_txt
+        if r["klass"] in ("hit","chance") and r.get("confidence") is not None:
+            meta_txt=f"{int(r['confidence'])}% · "+meta_txt
         meta_row=BoxLayout(orientation="horizontal",size_hint_y=None,
                            height=dp(12)*s,spacing=dp(3))
         meta_row.add_widget(FlagWidget(r["land"],size=(dp(18)*s,dp(12)*s)))
@@ -1056,8 +1058,6 @@ class ResultCard(ButtonBehavior, BoxLayout):
                "weg":"WEG","unbestaetigt":"UNGEPRÜFT"}
         if r["klass"]=="hit" and r.get("verify") in vmap2:
             st=st+" · "+vmap2[r["verify"]]
-        if r["klass"] in ("hit","chance") and r.get("confidence") is not None:
-            st=st+f" · {int(r['confidence'])}%"
         st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
                      font_size=fs(8.5),font_name=SST_FONT,
                      halign="left",valign="middle",
@@ -2180,22 +2180,25 @@ class MainUI(FloatLayout):
         name=r.get("haendler","?")
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(10))
         titel=name + (" · " + format_preis(r["preis"]) if r.get("preis") is not None else "")
-        box.add_widget(Label(text=f"[b]{titel}[/b]",markup=True,color=PS1_TEXT,
-                             font_size=sp(15),font_name=SST_FONT,
-                             size_hint_y=None,height=dp(28)))
+        tl=Label(text=f"[b]{titel}[/b]",markup=True,color=PS1_TEXT,
+                 font_size=sp(15),font_name=SST_FONT,
+                 size_hint_y=None,height=dp(28),
+                 shorten=True,shorten_from="right")
+        tl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        box.add_widget(tl)
         cond=r.get("condition"); cond_txt=("GEBRAUCHT/REFURB" if ist_gebraucht(cond)
                                           else "NEU" if cond=="new" else "UNBEKANNT")
-        state_map={"in_stock":"AUF LAGER","online_only":"ONLINE",
-                   "limited":"BEGRENZT","pickup_only":"NUR IM MARKT",
+        state_map={"in_stock":"AUF LAGER","pickup_only":"NUR IM MARKT",
                    "preorder":"VORBESTELLUNG","backorder":"NACHBESTELLUNG",
                    "lottery":"LOTTERIE","invite":"EINLADUNG",
-                   "sold_out":"AUSVERKAUFT","discontinued":"EINGESTELLT",
-                   "unknown":"UNBEKANNT"}
+                   "sold_out":"AUSVERKAUFT","unknown":"UNBEKANNT"}
         state_txt=state_map.get(r.get("avail_state"),
                                 str(r.get("verfuegbarkeit") or "—"))
         sofort=r.get("sofort")
         if r.get("klass")=="chance" or r.get("avail_state") in CHANCE_STATES:
             sofort_txt="CHANCE (KEIN ALARM)"
+        elif r.get("avail_state")=="backorder":
+            sofort_txt="NACHBESTELLUNG"
         else:
             sofort_txt=("SOFORT" if sofort is True else
                         "VORBESTELLUNG" if sofort is False else "UNBEKANNT")
@@ -2204,6 +2207,8 @@ class MainUI(FloatLayout):
                 ("SIGNAL",str(r.get("signal") or "—").upper())]
         if r.get("confidence") is not None:
             zeilen.insert(1,("KONFIDENZ",f"{int(r['confidence'])} / 100"))
+        if r.get("marketplace"):
+            zeilen.append(("MARKTPLATZ","JA · FREMDVERKÄUFER"))
         if r.get("gtin"):
             zeilen.append(("GTIN/EAN",str(r["gtin"])))
         if r.get("bundle"):
@@ -2214,7 +2219,8 @@ class MainUI(FloatLayout):
             zeit=ts[11:19] if len(ts)>=19 else ts
             zeilen.append(("BELEG",f"{zeit} · {beleg.get('hash','')}"))
         vmap={"bestaetigt":"BESTÄTIGT","geaendert":"PREIS GEÄNDERT",
-              "weg":"2. ABRUF: WEG","unbestaetigt":"UNBESTÄTIGT"}
+              "weg":"2. ABRUF: WEG","chance":"2. ABRUF: CHANCE",
+              "unbestaetigt":"UNBESTÄTIGT"}
         if r.get("verify") in vmap:
             zeilen.append(("VERIFIKATION",vmap[r["verify"]]))
         hzustand=Health().all().get(name) or {}
@@ -2231,7 +2237,7 @@ class MainUI(FloatLayout):
         if isinstance(beleg,dict) and beleg.get("excerpt"):
             bl=Label(text="BELEG: "+str(beleg["excerpt"]),color=PS1_SILVER,
                      font_size=sp(8),font_name=SST_FONT,halign="left",valign="top",
-                     size_hint_y=None,height=dp(34))
+                     size_hint_y=None,height=dp(40))
             bl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             box.add_widget(bl)
         tief30=tief_30(serie); allzeit=self.history.get_tief(name)

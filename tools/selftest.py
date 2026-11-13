@@ -1273,10 +1273,12 @@ def v14_tests():
           "in_stock")
     check("v1.4 state InStoreOnly",
           core.availability_state("https://schema.org/InStoreOnly"), "pickup_only")
-    check("v1.4 state OnlineOnly",
-          core.availability_state("https://schema.org/OnlineOnly"), "online_only")
-    check("v1.4 state LimitedAvailability",
-          core.availability_state("https://schema.org/LimitedAvailability"), "limited")
+    check("v1.4 state OnlineOnly wie InStock",
+          core.availability_state("https://schema.org/OnlineOnly"), "in_stock")
+    check("v1.4 state LimitedAvailability wie InStock",
+          core.availability_state("https://schema.org/LimitedAvailability"), "in_stock")
+    check("v1.4 state Discontinued wie SoldOut",
+          core.availability_state("https://schema.org/Discontinued"), "sold_out")
     check("v1.4 state PreOrder",
           core.availability_state("https://schema.org/PreOrder"), "preorder")
     check("v1.4 state BackOrder",
@@ -1287,10 +1289,19 @@ def v14_tests():
           core._availability_flags("https://schema.org/InStoreOnly"), (True, False))
     check("v1.4 Chance-Klasse", core.classify(True, 799.0, 900.0, "pickup_only"),
           "chance")
-    check("v1.4 OnlineOnly bleibt Treffer",
-          core.classify(True, 799.0, 900.0, "online_only"), "hit")
+    check("v1.4 InStock bleibt Treffer",
+          core.classify(True, 799.0, 900.0, "in_stock"), "hit")
     check("v1.4 Lotterie erkannt",
           core.chance_aus_text("Teilnahme nur per Lotterie moeglich"), "lottery")
+    check("v1.4 Gewinnspiel allein keine Chance",
+          core.chance_aus_text("Gewinnspiel im Footer"), None)
+    check("v1.4 Vorbestellung bleibt Treffer",
+          core.classify(True, 799.0, 900.0, "preorder"), "hit")
+    check("v1.4 2. Abruf wird Chance",
+          core.verify_entscheidung(
+              {"klass":"hit","preis":799.0},
+              {"klass":"chance","preis":799.0,"avail_state":"pickup_only"}),
+          "chance")
     check("v1.4 Einladung erkannt",
           core.chance_aus_text("Nur mit Einladung bestellbar"), "invite")
     check("v1.4 Marktabholung erkannt",
@@ -1309,6 +1320,9 @@ def v14_tests():
              "stock_source": "jsonld", "condition": "new", "marketplace": False,
              "gtin": "0711719570280", "fresh": True}
     check("v1.4 Konfidenz ungeprueft", core.berechne_konfidenz(dict(basis)), 60)
+    ohne_zustand={k:v for k,v in basis.items() if k!="condition"}
+    check("v1.4 Konfidenz ohne Zustand",
+          core.berechne_konfidenz(ohne_zustand), 50)
     check("v1.4 Konfidenz bestaetigt",
           core.berechne_konfidenz({**basis, "verify": "bestaetigt"}), 100)
     check("v1.4 Chance gedeckelt",
@@ -1319,6 +1333,7 @@ def v14_tests():
     check("v1.4 Beleg Preis", beleg.get("preis"), 799.0)
     check("v1.4 Beleg Hash", len(beleg.get("hash") or ""), 16)
     check("v1.4 Beleg Ausschnitt", "799,00" in (beleg.get("excerpt") or ""), True)
+    check("v1.4 Beleg kurz", len(beleg.get("excerpt") or "") <= 120, True)
 
     tmp = tempfile.mkdtemp(prefix="ps5pro-v14-")
     try:
@@ -1357,6 +1372,12 @@ def v14_tests():
         check("v1.4 Konfidenz-Schwelle laesst durch",
               core.alarm_erlaubt({**ruhig, "confidence": 90}, None,
                                  _S(confidence_min=70)), True)
+        vor = {"klass": "hit", "preis": 799.0, "haendler": "Shop V",
+               "sofort": False, "condition": "new", "avail_state": "preorder"}
+        check("v1.4 Vorbestellung mit NUR SOFORT AUS",
+              core.alarm_erlaubt(vor, None, _S(notify_sofort=False)), True)
+        check("v1.4 Vorbestellung standardmaessig still",
+              core.alarm_erlaubt(vor, None, _S()), False)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
