@@ -1,0 +1,85 @@
+# Prueft jeden Push und Pull Request: Shop-Konfiguration, Logiktests und den
+# Kivy-Smoke-Test in mehreren Fenstergroessen (Hoch- und Querformat), damit
+# Layout-Fehler vor dem Release auffallen.
+# Der Release-Workflow (.github/workflows/release.yml) wiederholt die Gates
+# zusaetzlich vor dem APK-Build.
+name: CI
+
+on:
+  push:
+    # Alle Branches, aber keine Tags - die baut release.yml.
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Ein neuer Push auf denselben Branch bricht den alten Lauf ab.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Shop-Config und Logiktests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Python 3.11.9
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11.9"
+
+      - name: Shop-Konfiguration pruefen
+        run: python tools/validate_shop_config.py
+
+      - name: Logiktests
+        run: python tools/selftest.py
+
+  layout:
+    name: Kivy-Smoke ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      # Alle Groessen laufen lassen, auch wenn eine scheitert.
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Telefon klein 360x780"
+            width: 360
+            height: 780
+          - name: "Telefon 420x820"
+            width: 420
+            height: 820
+          - name: "Querformat 720x480"
+            width: 720
+            height: 480
+          - name: "Tablet 884x700"
+            width: 884
+            height: 700
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Kivy und Xvfb installieren
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            xvfb python3-venv libgl1 libgl1-mesa-dri libglu1-mesa \
+            libegl1 libgles2 libmtdev1
+          # System-Python fuer den UI-Smoke; der APK-Build nutzt den Pin
+          # aus buildozer.spec.
+          /usr/bin/python3 -m venv /tmp/ps5pro-kivy
+          /tmp/ps5pro-kivy/bin/pip install --quiet "kivy[base]==2.3.1"
+
+      - name: Smoke-Test
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          PS5PRO_SMOKE_WIDTH: ${{ matrix.width }}
+          PS5PRO_SMOKE_HEIGHT: ${{ matrix.height }}
+        run: |
+          set -o pipefail
+          echo "Fenster: ${PS5PRO_SMOKE_WIDTH}x${PS5PRO_SMOKE_HEIGHT}"
+          xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" \
+            /tmp/ps5pro-kivy/bin/python tools/kivy_smoke.py 2>&1 | tee smoke.log

@@ -136,6 +136,7 @@ tools/p4a_hook.py             ergänzt den specialUse-Subtyp im Android-Manifest
 tools/release_notes.sh        Release-Beschreibung (Änderungen, Installation, SHA-256)
 tools/ci_sign_apk.sh          signiert die APK mit dem festen Release-Schlüssel
 tools/ci_log_failure.sh       zeigt bei einem CI-Fehler den Buildozer-Log
+.github/workflows/ci.yml      Push/PR -> Shop-Config, Logiktests, Kivy-Smoke (4 Groessen)
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
 LICENSE                       MIT-Lizenz
 THIRD_PARTY_NOTICES.md        Lizenzen der gebündelten Bibliotheken
@@ -153,8 +154,10 @@ Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
 responsive Layout-Geometrie und Boot-Manifest — 660 Zusicherungen, ohne Kivy
-und ohne Android. Der Release-Workflow führt sie vor jedem Release aus. Der Kivy-Smoke-Test
-ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät.
+und ohne Android. Der CI-Workflow führt sie bei jedem Push und Pull Request
+aus, der Release-Workflow zusätzlich vor jedem Release. Der Kivy-Smoke-Test
+ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät; er läuft in
+der CI in vier Fenstergrößen (360×780, 420×820, 720×480, 884×700).
 `tools/validate_shop_config.py` prüft die echte `shop_config.json` mit genau
 derselben Validierung wie die App und läuft im Release-Workflow vor
 den Logiktests.
