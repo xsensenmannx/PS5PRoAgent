@@ -33,7 +33,8 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
   und täglich geladen – ohne neues APK. Akzeptiert werden nur HTTPS-URLs auf
   bekannten Shop-Hosts und literale, begrenzte Marker; kein Code, keine Regexe.
 * **Alarm-Regeln**: nur sofort verfügbar, nur echte Tiefstpreise, Ruhezeit
-  23–07, eigene Preisgrenze und Händler-Stummschaltung.
+  23–07, eigene Preisgrenze und Händler-Stummschaltung. Ein Restock wird auch
+  dann gemeldet, wenn der Preis gegenüber dem letzten Treffer unverändert ist.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
   Treffer eines Laufs werden gruppiert.
@@ -120,7 +121,7 @@ python3 tools/kivy_smoke.py
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
 HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
-Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 569 Zusicherungen,
+Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 572 Zusicherungen,
 ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test ist ebenfalls
 ein eigenes CI-Gate und braucht kein Android-Gerät.
 
@@ -162,6 +163,13 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v4.0 Beta** – Aufgeräumte Trefferliste (versionCode 14): keine Händler-Kachel
+  und keine Pfeil-Buttons mehr vor der Liste; der Händlername bekommt die freie
+  Breite. Der BOT-SCHUTZ-Hinweis ist mit 8,2 sp lesbarer und bleibt auf 246 dp
+  vollständig sichtbar. Vordergrund und Hintergrund nutzen dieselbe Alarmlogik:
+  Wieder-Verfügbarkeit wird auch bei gleichem Preis gemeldet, Preiserhöhungen
+  lösen keinen Alarm aus. Der Preisverlauf speichert jetzt alle plausiblen
+  Preise und die Verfuegbarkeit. 572 Zusicherungen. Enthält v3.3.1.
 * **v3.3.1** – Layout-Patch (versionCode 13): Der BOT-SCHUTZ-Hinweis steht
   auf einer eigenen vollbreiten Zeile und bleibt auch auf schmalen Displays
   vollständig sichtbar; die breitere Preisspalte verhindert abgeschnittene

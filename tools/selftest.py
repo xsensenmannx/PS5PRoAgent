@@ -270,12 +270,6 @@ def main_tests():
     check("verfuegbar positiv", core.pruefe_verfuegbar(
         "in den warenkorb jetzt kaufen", {"verfuegbar": None}), True)
 
-    # Kuerzel
-    check("initials PS Direct", main.initials_for("PS Direct DE"), "PS")
-    check("initials MediaMarkt", main.initials_for("MediaMarkt AT"), "MM")
-    check("initials Amazon", main.initials_for("Amazon DE"), "AM")
-    check("initials Notebooksbilliger", main.initials_for("Notebooksbilliger"), "NB")
-
     # Haendlerdaten
     names = [h["name"] for h in core.HAENDLER]
     check("haendler eindeutig", len(names), len(set(names)))
@@ -579,8 +573,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "3.3.1")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "13")
+    check("spec version", c.get("app", "version"), "4.0")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "14")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -663,6 +657,16 @@ def feature_tests():
                                          for i in range(130)]
         hist.update([{"haendler": "Shop A", "klass": "hit", "preis": 999.0}])
         check("Serie gedeckelt", len(hist.get_serie("Shop A")), core.MAX_SERIE_PUNKTE)
+
+        # Verfuegbarkeit wird auch ohne Preis gespeichert; daraus entsteht der
+        # Restock-Alarm, wenn der Shop spaeter wieder liefert.
+        hist.update([{"haendler": "Shop B", "klass": "unavail", "preis": None}])
+        check("Verfuegbarkeit ausverkauft", hist.get_verfuegbar("Shop B"), False)
+        hist.update([{"haendler": "Shop B", "klass": "hit", "preis": 799.0}])
+        check("Verfuegbarkeit wieder da", hist.get_verfuegbar("Shop B"), True)
+        check("Restock-Ereignis",
+              core.alarm_ereignis({"klass": "hit", "preis": 799.0}, 799.0, False),
+              "restock")
 
         # Health: ein Fehler erhoeht den Zaehler, ein Erfolg setzt ihn zurueck.
         core.reset_health()
@@ -835,6 +839,17 @@ def feature_tests():
             neu, 749.0, {"notify_low_only": True}), False)
         check("Alarm neuer Tiefstpreis", core.alarm_erlaubt(
             neu, 749.0, {"notify_low_only": False}), True)
+        check("Alarm Restock am Tief", core.alarm_erlaubt(
+            {**neu, "_restock": True}, 799.0, {"notify_low_only": True}), True)
+        check("Alarm-Ereignis neu",
+              core.alarm_ereignis({"klass": "hit", "preis": 799.0}, None, None),
+              "new")
+        check("Alarm-Ereignis gleicher Preis",
+              core.alarm_ereignis({"klass": "hit", "preis": 799.0}, 799.0, True),
+              None)
+        check("Alarm-Ereignis kein Treffer",
+              core.alarm_ereignis({"klass": "unavail", "preis": None}, 799.0, False),
+              None)
         check("Alarm Ruhezeit", core.alarm_erlaubt(
             neu, None, {"quiet_hours": True}, __import__("datetime").datetime(2026, 1, 1, 23, 30)), False)
 

@@ -230,6 +230,9 @@ class SmokeApp(App):
         text = " ".join(str(getattr(w, "text", "")) for w in card.walk())
         check("BOT-SCHUTZ: Hinweis auf Challenge",
               "SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT" in text, True)
+        check("Trefferliste: kein Haendler-Symbol",
+              not any(type(w).__name__ in ("BrandTile", "FlagWidget")
+                      for w in card.walk()), True)
         check("Trefferliste: vertikal", self.ui.results_row.orientation, "vertical")
         check("Trefferliste: kompakte Zeile", card.height <= main.dp(80), True)
 
@@ -248,17 +251,19 @@ class SmokeApp(App):
         price = next(w for w in card.walk()
                      if isinstance(w, main.Label) and "1.299" in str(w.text))
 
-        def natural_width(label):
+        def natural_size(label):
             c = CoreLabel(text=label.text, font_name=label.font_name,
                           font_size=label.font_size, bold=label.bold,
                           markup=label.markup)
             c.refresh()
-            return c.texture.size[0]
+            return c.texture.size
 
+        hint_size = natural_size(hint)
+        price_size = natural_size(price)
         check("BOT-SCHUTZ: Hinweis passt bei 246 dp",
-              hint.width >= natural_width(hint), True)
+              hint.width >= hint_size[0] and hint.height >= hint_size[1], True)
         check("BOT-SCHUTZ: Preis passt bei 246 dp",
-              price.width >= natural_width(price), True)
+              price.width >= price_size[0] and price.height >= price_size[1], True)
 
     def result_list(self):
         basis = {"land": "DE", "zeit": "12:00", "condition": "new",
@@ -267,13 +272,19 @@ class SmokeApp(App):
             "Shop A": {"haendler": "Shop A", "preis": 899.0,
                        "klass": "hit", "_is_new": False, **basis},
             "Shop B": {"haendler": "Shop B", "preis": 799.0,
-                       "klass": "hit", "_is_new": True, **basis},
+                       "klass": "hit", "_is_new": False, "_restock": True, **basis},
         }
         self.ui._rerender()
         self.pump()
         cards = [w for w in self.ui.results_row.children
                  if isinstance(w, main.ResultCard)]
         check("Trefferliste: beide Treffer sichtbar", len(cards), 2)
+        check("Trefferliste: kein Haendler-Symbol",
+              not any(type(w).__name__ in ("BrandTile", "FlagWidget")
+                      for card in cards for w in card.walk()), True)
+        check("Trefferliste: Restock-Hinweis",
+              any("WIEDER DA" in str(getattr(w, "text", ""))
+                  for card in cards for w in card.walk()), True)
         check("Trefferliste: Zeilen gestapelt",
               all(c.size_hint_y is None and c.height <= main.dp(80) for c in cards), True)
         check("Trefferliste: kein horizontaler Rest", self.ui.results_scroll.do_scroll_x, False)

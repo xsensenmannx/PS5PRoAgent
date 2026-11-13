@@ -37,7 +37,7 @@ from kivy.utils import get_color_from_hex, platform
 from scan_core import (
     HAENDLER, MAX_PREIS, BG_STATUS_FILE, format_preis, classify,
     _safe_scan, _res, WORKER, History, Settings, data_dir, Health, health, reset_health,
-    alarm_erlaubt, ist_gebraucht, install_crash_hook, read_crash_log,
+    alarm_erlaubt, alarm_ereignis, ist_gebraucht, install_crash_hook, read_crash_log,
     lade_shop_config, aktualisiere_shop_config, flush_http_cache,
 )
 
@@ -71,7 +71,6 @@ C_ORANGE    = get_color_from_hex("#ff9f43")
 C_RED       = get_color_from_hex("#ee5253")
 C_GRAY      = get_color_from_hex("#576574")
 C_WHITE     = get_color_from_hex("#e8fff0")
-C_DARK_TEXT = get_color_from_hex("#04080a")
 
 # ── PS1 Palette ─────────────────────────────────────────────────────
 PS1_INK      = get_color_from_hex("#08090b")
@@ -115,24 +114,6 @@ RADAR_DIM   = get_color_from_hex("#122b45")
 RADAR_TICK  = get_color_from_hex("#2f6fa8")
 RADAR_SWEEP = get_color_from_hex("#5aa8ff")
 RADAR_TXT   = get_color_from_hex("#4f86b8")
-
-BRAND_COLORS = {
-    "ps direct":(0.00,0.44,0.82,1),"mediamarkt":(0.89,0.00,0.10,1),
-    "saturn":(0.90,0.00,0.00,1),"amazon":(1.00,0.60,0.00,1),
-    "otto":(0.90,0.00,0.10,1),"alternate":(1.00,0.40,0.00,1),
-    "cyberport":(0.00,0.62,0.89,1),"euronics":(0.00,0.36,0.66,1),
-    "expert":(0.89,0.02,0.07,1),"notebooksbilliger":(1.00,0.40,0.00,1),
-    "coolblue":(0.00,0.34,0.72,1),"conrad":(0.00,0.20,0.63,1),
-    "kaufland":(0.88,0.04,0.08,1),"gamestop":(0.90,0.00,0.07,1),
-    "libro":(0.83,0.00,0.00,1),"alza":(0.78,0.06,0.18,1),
-    "hartlauer":(0.90,0.00,0.49,1),"electronic4you":(0.89,0.00,0.10,1),
-    "quelle":(0.90,0.00,0.49,1),"universal":(0.83,0.00,0.00,1),
-    "mueller":(0.89,0.02,0.07,1),"proshop":(0.00,0.44,0.72,1),
-    "computeruniverse":(0.00,0.55,0.85,1),"galaxus":(0.00,0.70,0.55,1),
-    "gameware":(0.85,0.15,0.15,1),"geizhals":(0.00,0.60,0.80,1),
-    "spielekauf":(0.80,0.20,0.40,1),"shoepping":(0.00,0.52,0.80,1),
-    "aetka":(0.60,0.20,0.60,1),"computerexpert":(0.00,0.40,0.60,1),
-}
 
 # ── Helfer ──────────────────────────────────────────────────────────
 def open_url(u):
@@ -350,54 +331,6 @@ def bg_service_stop():
         autoclass(BG_SERVICE).stop(PA.mActivity)
     except Exception as e:
         print("[BG] Stop:",e)
-
-SPECIAL_INITIALS = {"ps direct":"PS","mediamarkt":"MM","amazon":"AM",
-    "notebooksbilliger":"NB","electronic4you":"E4","computeruniverse":"CU",
-    "galaxus":"GX","geizhals":"GH","spielekauf":"SK","computerexpert":"CX"}
-
-def initials_for(name):
-    base=re.sub(r"\s+(DE|AT)$","",name).strip()
-    key=base.lower()
-    if key in SPECIAL_INITIALS: return SPECIAL_INITIALS[key]
-    parts=base.split()
-    if len(parts)>=2: return (parts[0][0]+parts[1][0]).upper()
-    return base[:2].upper() if len(base)>=2 else base[:1].upper()
-
-def brand_color(name):
-    base=re.sub(r"\s+(DE|AT)$","",name).strip().lower()
-    if base in BRAND_COLORS: return BRAND_COLORS[base]
-    h=int(hashlib.md5(name.encode()).hexdigest()[:6],16)
-    pal=["#e60019","#c9661b","#003d8c","#007a3d","#3d7fbf","#a57d10","#c94b8c",
-         "#1a8a35","#c74d4d","#2e8c85","#6f6ad4","#b89915","#a94f3a","#4a7fb8","#00a37f"]
-    return get_color_from_hex(pal[h%len(pal)])
-
-def text_on(c):
-    lum=0.299*c[0]+0.587*c[1]+0.114*c[2]
-    return C_DARK_TEXT if lum>0.62 else (1,1,1,1)
-# ══════════ HORIZONTAL SCROLLVIEW ══════════
-class HScrollView(ScrollView):
-    """Horizontal list that also responds to touch drags (mobile) and wheel."""
-    def __init__(self, **kw):
-        kw.setdefault('do_scroll_x', True)
-        kw.setdefault('do_scroll_y', False)
-        kw.setdefault('scroll_type', ['bars', 'content'])
-        kw.setdefault('scroll_timeout', 50)
-        kw.setdefault('scroll_distance', dp(10))
-        kw.setdefault('bar_width', dp(3))
-        kw.setdefault('bar_color', PS1_SILVER)
-        kw.setdefault('bar_inactive_color', (0.28, 0.29, 0.33, 0.55))
-        kw.setdefault('bar_margin', dp(1))
-        super().__init__(**kw)
-    def on_touch_down(self, touch):
-        if touch.is_mouse_scrolling and self.collide_point(*touch.pos):
-            if self.do_scroll_y and touch.button in ('scrollup', 'scrolldown'):
-                step=-0.12 if touch.button=='scrollup' else 0.12
-                self.scroll_y = min(1.0, max(0.0, self.scroll_y + step)); return True
-            if touch.button in ('scrollup', 'scrollleft'):
-                self.scroll_x = max(0.0, self.scroll_x - 0.12); return True
-            elif touch.button in ('scrolldown', 'scrollright'):
-                self.scroll_x = min(1.0, self.scroll_x + 0.12); return True
-        return super().on_touch_down(touch)
 
 # ══════════ PLAYSTATION SYMBOLS ══════════
 class PSShapesWidget(Widget):
@@ -722,56 +655,6 @@ class Dot(Widget):
             Color(*self._c); Rectangle(pos=self.pos,size=self.size)
             Color(1,1,1,0.25); Line(points=[self.x,self.top-dp(1),self.right-dp(1),self.top-dp(1)],width=dp(1))
 
-class Tag(Widget):
-    def __init__(self,text,bg,fg=(0,0,0,1),**kw):
-        super().__init__(**kw)
-        self.size_hint=(None,None); self.size=(dp(30),dp(14))
-        self._bg=bg
-        self._lbl=Label(text=text,bold=True,color=fg,font_size=sp(8),
-                        font_name=SST_FONT,halign="center",valign="middle")
-        self.add_widget(self._lbl)
-        self.bind(pos=self._redraw,size=self._redraw)
-        Clock.schedule_once(self._redraw,0)
-    def _redraw(self,*_):
-        self.canvas.before.clear()
-        if self.width<=0 or self.height<=0: return
-        with self.canvas.before:
-            Color(*self._bg); Rectangle(pos=self.pos,size=self.size)
-            Color(1,1,1,0.3); Line(points=[self.x,self.top-dp(1),self.right,self.top-dp(1)],width=dp(1))
-            Color(0,0,0,0.4); Line(points=[self.x,self.y,self.right,self.y],width=dp(1))
-        self._lbl.pos=self.pos; self._lbl.size=self.size
-        self._lbl.text_size=self.size
-
-class BrandTile(Widget):
-    """Square retailer tile, PS1 memory-card style."""
-    def __init__(self,name,**kw):
-        super().__init__(**kw)
-        self._color=brand_color(name)
-        self._lbl=Label(text=f"[b]{initials_for(name)}[/b]",markup=True,
-                        color=text_on(self._color),font_size=sp(11),
-                        font_name=SST_FONT,halign="center",valign="middle")
-        self.add_widget(self._lbl)
-        self.bind(pos=self._redraw,size=self._redraw)
-        Clock.schedule_once(self._redraw,0)
-    def _redraw(self,*_):
-        self.canvas.before.clear()
-        s=min(self.width,self.height)
-        if s<=0: return
-        x=self.x+(self.width-s)/2; y=self.y+(self.height-s)/2
-        with self.canvas.before:
-            Color(0,0,0,0.9); Rectangle(pos=(x-dp(1),y-dp(1)),
-                                       size=(s+dp(2),s+dp(2)))
-            Color(*self._color); Rectangle(pos=(x,y),size=(s,s))
-            Color(1,1,1,0.28)
-            Line(points=[x+dp(1),y+s-dp(1),x+s-dp(1),y+s-dp(1)],width=dp(1))
-            Color(1,1,1,0.12)
-            Line(points=[x+dp(1),y+dp(1),x+dp(1),y+s-dp(1)],width=dp(1))
-            Color(0,0,0,0.45)
-            Line(points=[x+dp(1),y+dp(1),x+s-dp(1),y+dp(1)],width=dp(1))
-        self._lbl.font_size=max(dp(9),s*0.36)
-        self._lbl.pos=(x,y); self._lbl.size=(s,s)
-        self._lbl.text_size=(s,s)
-
 class PSMark(Widget):
     """Silver PS monogram badge."""
     def __init__(self,**kw):
@@ -878,7 +761,7 @@ class LogoWidget(FloatLayout):
         a=0.35+0.55*(0.5+0.5*math.sin(self._t*2.0))
         self._c_led.rgba=(PS1_BLUE[0],PS1_BLUE[1],PS1_BLUE[2],a)
 
-# ══════════ RESULT CARD (PS1 style, horizontal) ══════════
+# ══════════ RESULT ROW (PS1 style, compact) ══════════
 
 def tief_30(serie):
     """Niedrigster Preis der letzten 30 Tage aus [[iso_ts, preis], ...]."""
@@ -925,11 +808,12 @@ class ResultCard(ButtonBehavior, BoxLayout):
         self._serie=serie or []
         self._down=None; self._moved=False
         self._detail_cb=detail_cb; self._long_event=None; self._long_done=False
-        self.orientation="vertical"
+        challenge=result.get("klass")=="challenge"
+        self.orientation="vertical" if challenge else "horizontal"
         self.size_hint=(1,None)
-        self.height=dp(68) if result.get("klass")=="challenge" else dp(52)
+        self.height=dp(69) if challenge else dp(52)
         self.padding=(dp(9),dp(6))
-        self.spacing=dp(2)
+        self.spacing=dp(2 if challenge else 7)
         self._build()
         self.bind(pos=self._redraw,size=self._redraw,state=self._redraw)
         if is_new:
@@ -968,15 +852,16 @@ class ResultCard(ButtonBehavior, BoxLayout):
         r=self.result
         co=CARD_STATUS.get(r["klass"],PS1_GREY)
 
-        # Kompakte Zeile: Marke, Haendler/Meta, Preis/Status. Die alte
+        # Kompakte Zeile: Haendler/Meta, Preis/Status. Die alte
         # 156-dp-Karte zeigte auf dem Telefon nur einen Treffer pro Wisch.
-        content=BoxLayout(orientation="horizontal",spacing=dp(7))
-        content.add_widget(BrandTile(r["haendler"],size_hint=(None,1),width=dp(28)))
+        # Nur BOT-SCHUTZ braucht einen eigenen Container fuer die zweite Zeile.
+        challenge=r["klass"]=="challenge"
+        holder=BoxLayout(orientation="horizontal",spacing=dp(7)) if challenge else self
 
         info=BoxLayout(orientation="vertical",spacing=dp(0))
         name_str=re.sub(r"\s+(DE|AT)$","",r["haendler"]).strip()
         n=Label(text=f"[b]{name_str}[/b]",markup=True,color=PS1_TEXT,
-                font_size=sp(12),font_name=SST_FONT,
+                font_size=sp(12.5),font_name=SST_FONT,
                 halign="left",valign="middle",
                 size_hint_y=None,height=dp(17),
                 shorten=True,shorten_from="right")
@@ -984,17 +869,18 @@ class ResultCard(ButtonBehavior, BoxLayout):
         info.add_widget(n)
 
         meta_txt=f"{r['land']} · {r['zeit']}"
-        if self._is_new: meta_txt="NEU · "+meta_txt
+        if r.get("_restock"): meta_txt="WIEDER DA · "+meta_txt
+        elif self._is_new: meta_txt="NEU · "+meta_txt
         elif ist_gebraucht(r.get("condition")): meta_txt="GEBRAUCHT · "+meta_txt
         elif r.get("sofort") is False: meta_txt="VORBEST. · "+meta_txt
-        m=Label(text=meta_txt,color=PS1_GREY,font_size=sp(8.2),font_name=SST_FONT,
+        m=Label(text=meta_txt,color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
                 halign="left",valign="middle",
                 size_hint_y=None,height=dp(12),
                 shorten=True,shorten_from="right")
         m.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         info.add_widget(m)
 
-        content.add_widget(info)
+        holder.add_widget(info)
 
         right=BoxLayout(orientation="vertical",size_hint_x=None,
                         width=dp(126),spacing=dp(0))
@@ -1015,7 +901,7 @@ class ResultCard(ButtonBehavior, BoxLayout):
         srow=BoxLayout(orientation="horizontal",size_hint_y=None,
                        height=dp(14),spacing=dp(2))
         s=Label(text=f"[b]{st}[/b]",markup=True,color=co,
-                font_size=sp(8.2),font_name=SST_FONT,
+                font_size=sp(8.5),font_name=SST_FONT,
                 halign="left",valign="middle",
                 shorten=True,shorten_from="right")
         s.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
@@ -1037,19 +923,19 @@ class ResultCard(ButtonBehavior, BoxLayout):
             d.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             srow.add_widget(d)
         right.add_widget(srow)
-        content.add_widget(right)
-        self.add_widget(content)
+        holder.add_widget(right)
 
         # BOT-SCHUTZ ist kein Fehler der App: Der Shop verlangt eine
         # Challenge. Die App umgeht sie bewusst nicht. Der Hinweis bekommt
         # eine eigene Zeile, damit er auch auf schmalen Displays nicht
         # abgeschnitten wird und die Preisspalte unberuehrt bleibt.
-        if r["klass"]=="challenge":
+        if challenge:
+            self.add_widget(holder)
             hint=Label(text="SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT",
-                       color=PS1_YELLOW,font_size=sp(7.8),font_name=SST_FONT,
+                       color=PS1_YELLOW,font_size=sp(8.2),font_name=SST_FONT,
                        halign="left",valign="middle",
                        shorten=True,shorten_from="right",
-                       size_hint=(1,None),height=dp(14))
+                       size_hint_y=None,height=dp(15))
             hint.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             self.add_widget(hint)
 
@@ -1284,20 +1170,16 @@ class MainUI(FloatLayout):
         self.results_count.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         self.results_header.add_widget(self.results_count)
 
-        self.prev_btn=PS1Button(text="<",accent=PS1_BLUE,font_size=sp(11),
-                                size_hint=(None,1),width=dp(24))
-        self.prev_btn.bind(on_release=lambda *_:self._scroll_step(-1))
-        self.results_header.add_widget(self.prev_btn)
-        self.next_btn=PS1Button(text=">",accent=PS1_BLUE,font_size=sp(11),
-                                size_hint=(None,1),width=dp(24))
-        self.next_btn.bind(on_release=lambda *_:self._scroll_step(1))
-        self.results_header.add_widget(self.next_btn)
         self.results_panel.add_widget(self.results_header)
 
-        # Horizontal hit list
-        self.results_scroll=HScrollView()
-        self.results_row=BoxLayout(orientation="horizontal",
-                                   size_hint=(None,1),
+        # Vertikale Trefferliste
+        self.results_scroll=ScrollView(do_scroll_x=False,do_scroll_y=True,
+                                       scroll_type=["bars","content"],
+                                       bar_width=dp(3),bar_color=PS1_SILVER,
+                                       bar_inactive_color=(0.28,0.29,0.33,0.55),
+                                       bar_margin=dp(1))
+        self.results_row=BoxLayout(orientation="vertical",
+                                   size_hint=(1,None),
                                    spacing=dp(4),padding=(dp(8),dp(5)))
         self.results_row.bind(minimum_height=self._sync_row_height)
         self.results_scroll.add_widget(self.results_row)
@@ -1435,9 +1317,6 @@ class MainUI(FloatLayout):
         self.results_row.orientation="vertical"
         self.results_row.size_hint=(1,None)
         self.results_row.width=max(dp(1),self.results_panel.width)
-        self.prev_btn.opacity=0; self.next_btn.opacity=0
-        self.prev_btn.disabled=True; self.next_btn.disabled=True
-        self.prev_btn.width=0; self.next_btn.width=0
         self._clear_results(); self._last_sig=None
         if self.scanning:
             self._show_placeholder("SCANNE...","TIPPE STOP ZUM ABBRECHEN")
@@ -1476,15 +1355,6 @@ class MainUI(FloatLayout):
         except Exception as e: print(f"[Sizes] {e}")
 
     # ── Bedienung ───────────────────────────────────────────────────
-    def _scroll_step(self,direction):
-        row_w=self.results_row.width; view_w=self.results_scroll.width
-        span=row_w-view_w
-        if span<=dp(2): return
-        cur=self.results_scroll.scroll_x*span
-        target=min(max(0.0,cur+direction*max(dp(120),view_w*0.8)),span)
-        Animation.cancel_all(self.results_scroll,"scroll_x")
-        Animation(scroll_x=target/span,d=0.18,transition="out_quad").start(self.results_scroll)
-
     def _set_filter(self,m):
         self.filter_mode=m
         self.chip_verf.state=("down" if m=="verfuegbar" else "normal")
@@ -1557,21 +1427,24 @@ class MainUI(FloatLayout):
         self.settings.set("notify",self.notify_enabled)
     def _maybe_notify(self,r):
         if not self.notify_enabled: return
+        if not (r.get("_is_new") or r.get("_restock")): return
         name=r.get("haendler","?"); preis=r.get("preis")
         if preis is None: return
         # Dieselbe Regel wie im Hintergrund: keine Vorbestellung, keine
         # Gebrauchtware, keine stummgeschalteten Shops, ggf. Ruhezeit.
         if not alarm_erlaubt(r,self.history.get_tief(name),self.settings): return
-        key=(name,round(preis,2))
+        key=(name,round(preis,2),bool(r.get("_restock")))
         if key in self._known_hits: return
         self._known_hits.add(key)
         if len(self._known_hits)>200:
             self._known_hits=set(list(self._known_hits)[-100:])
         msg=f"{name}: {format_preis(preis)}"
+        title=("PS5 PRO 2TB WIEDER VERFÜGBAR" if r.get("_restock")
+               else "PS5 PRO 2TB VERFÜGBAR")
         # notify() kann auf Android Systemzeit kosten; das darf den Radar nicht
         # mitten im Treffer einfrieren. Der Fallback-Toast laeuft im UI-Thread.
         def send():
-            try: ok=notify("PS5 PRO 2TB VERFÜGBAR",msg,url=r.get("url"))
+            try: ok=notify(title,msg,url=r.get("url"))
             except Exception: ok=False
             if not ok:
                 try:
@@ -2011,7 +1884,8 @@ class MainUI(FloatLayout):
             namen.sort(key=lambda n:self.scanned[n]["zeit"],reverse=True)
 
         sig=tuple((n,self.scanned[n]["klass"],self.scanned[n]["preis"],
-                   self.scanned[n].get("_is_new"),len(self.history.get_serie(n)),
+                   self.scanned[n].get("_is_new"),self.scanned[n].get("_restock"),
+                   len(self.history.get_serie(n)),
                    self.scanned[n].get("condition"),self.scanned[n].get("sofort"))
                   for n in namen)
         if sig==self._last_sig and self._placeholder is None:
@@ -2121,10 +1995,12 @@ class MainUI(FloatLayout):
         try:
             if r["klass"] not in ("error","challenge","unavail"):
                 r["klass"]=classify(True,r["preis"],self.max_preis)
-            prev=self.history.get_last(name); r["_prev"]=prev
-            r["_is_new"]=(r["klass"]=="hit" and r["preis"] is not None
-                         and not ist_gebraucht(r.get("condition"))
-                         and (prev is None or r["preis"]<prev-0.01))
+            prev=self.history.get_last(name)
+            vorher_av=self.history.get_verfuegbar(name)
+            ereignis=alarm_ereignis(r,prev,vorher_av)
+            r["_prev"]=prev
+            r["_is_new"]=ereignis=="new"
+            r["_restock"]=ereignis=="restock"
             self.scanned[name]=r
             self._update_blip(name,r["klass"])
             hits=sum(1 for x in self.scanned.values() if x["klass"]=="hit"
@@ -2132,7 +2008,7 @@ class MainUI(FloatLayout):
             self.results_status.text=scan_fortschritt(
                 self._scan_done,self._scan_total,hits,time.time()-self._scan_t0)
             self.results_count.text=f"{hits}/{self._scan_done}" if self.filter_mode=="verfuegbar" else f"{self._scan_done}/{self._scan_total}"
-            if r["klass"]=="hit" and r["preis"] is not None:
+            if ereignis:
                 self._maybe_notify(r)
             self._rerender_throttled()
         except Exception as e:
@@ -2152,6 +2028,7 @@ class MainUI(FloatLayout):
         hits=[x for x in self.scanned.values() if x["klass"]=="hit"
               and not ist_gebraucht(x.get("condition"))]
         new=sum(1 for x in self.scanned.values() if x.get("_is_new"))
+        back=sum(1 for x in self.scanned.values() if x.get("_restock"))
         try: health().save()
         except Exception: pass
         self.history.update(self.scanned.values())
@@ -2168,6 +2045,7 @@ class MainUI(FloatLayout):
             self.results_status.text=f"{len(hits)} TREFFER · {d:.0f}s · {ts}"
             haptic(0.12)
             if new>0: self._toast(f"{new} NEUE TREFFER",color=PS1_YELLOW)
+            elif back>0: self._toast(f"{back} WIEDER VERFÜGBAR",color=CARD_STATUS["hit"])
             else: self._toast(f"{len(hits)} TREFFER",color=CARD_STATUS["hit"])
         else:
             self.results_status.text=f"KEINE TREFFER · {d:.0f}s · {ts}"

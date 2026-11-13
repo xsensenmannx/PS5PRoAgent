@@ -1010,6 +1010,18 @@ def ist_neuer_treffer(preis, letzter):
     """True, wenn es noch keinen Preis gab oder der neue niedriger ist."""
     return letzter is None or preis < letzter - 0.01
 
+def alarm_ereignis(r, letzter, vorher_verfuegbar):
+    """Gemeinsames Alarm-Ereignis fuer App und Hintergrunddienst.
+
+    ``restock`` hat Vorrang: ein wieder verfuegbarer Treffer ist auch dann
+    meldenswert, wenn der Preis nicht unter dem letzten Preis liegt.
+    """
+    if not isinstance(r,dict) or r.get("klass")!="hit" or r.get("preis") is None:
+        return None
+    if vorher_verfuegbar is False: return "restock"
+    if ist_neuer_treffer(r["preis"],letzter): return "new"
+    return None
+
 def bg_intervall(sekunden, minimum=900):
     """Akku-freundlich: im Hintergrund nie oefter als alle 15 Minuten."""
     try: s = int(sekunden)
@@ -1033,6 +1045,12 @@ class History:
                 except (TypeError,ValueError): serie=[]
             e["serie"]=serie
     def get_last(self,n): return self.data.get(n,{}).get("preis")
+    def get_verfuegbar(self,n):
+        """Letzter bekannter Verfuegbarkeitszustand: True, False oder None."""
+        e=self.data.get(n)
+        if not isinstance(e,dict) or "verfuegbar" not in e: return None
+        v=e.get("verfuegbar")
+        return v if isinstance(v,bool) else None
     def get_serie(self,n):
         e=self.data.get(n)
         return self._saubere_serie(e.get("serie")) if isinstance(e,dict) else []
@@ -1054,19 +1072,29 @@ class History:
     def update(self,results):
         now=datetime.now().isoformat(timespec="seconds")
         for r in results:
-            if r["klass"]=="hit" and r["preis"] is not None:
-                alt=self.data.get(r["haendler"]) or {}
-                serie=self._saubere_serie(alt.get("serie"))
+            if not isinstance(r,dict) or not r.get("haendler"): continue
+            name=r["haendler"]
+            alt=dict(self.data.get(name) or {})
+            serie=self._saubere_serie(alt.get("serie"))
+            # Verfuegbarkeit auch ohne Preis festhalten: nur so laesst sich
+            # ein spaeterer Restock von einem gewoehnlichen Scan unterscheiden.
+            av=True if r.get("klass") in ("hit","expensive") else (
+                False if r.get("klass")=="unavail" else None)
+            if av is not None:
+                alt["verfuegbar"]=av; alt["verfuegbar_zeit"]=now
+            if r.get("preis") is not None:
                 try: preis=float(r["preis"])
-                except (TypeError,ValueError): continue
-                # Nur echte Aenderungen anhaengen, sonst wird die Serie bei
-                # jedem 15-Minuten-Scan mit identischen Preisen geflutet.
-                if not serie or abs(serie[-1][1]-preis)>0.005:
-                    serie.append([now,preis])
-                else:
-                    serie[-1][0]=now
-                self.data[r["haendler"]]={"preis":preis,"zeit":now,
-                                           "serie":serie[-MAX_SERIE_PUNKTE:]}
+                except (TypeError,ValueError): preis=None
+                if preis is not None:
+                    # Nur echte Aenderungen anhaengen, sonst wird die Serie bei
+                    # jedem 15-Minuten-Scan mit identischen Preisen geflutet.
+                    if not serie or abs(serie[-1][1]-preis)>0.005:
+                        serie.append([now,preis])
+                    else:
+                        serie[-1][0]=now
+                    alt["preis"]=preis; alt["zeit"]=now
+                    alt["serie"]=serie[-MAX_SERIE_PUNKTE:]
+            if alt: self.data[name]=alt
         try:
             tmp=self.path+".tmp"
             with open(tmp,"w",encoding="utf-8") as f:
@@ -1120,7 +1148,11 @@ def alarm_erlaubt(r,tief,settings,jetzt=None):
         except (TypeError,ValueError): pass
     if _setting(settings,"notify_low_only",False) and tief is not None:
         try:
-            if float(r["preis"])>=float(tief)-0.005: return False
+            preis=float(r["preis"]); grenze=float(tief)
+            # Ein Restock auf dem bisherigen Tief ist kein neuer Tiefstpreis,
+            # aber trotzdem die wichtigste Meldung des Tages.
+            if not (r.get("_restock") and preis<=grenze+0.005) and preis>=grenze-0.005:
+                return False
         except (TypeError,ValueError): pass
     return True
 

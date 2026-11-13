@@ -142,8 +142,9 @@ def _benachrichtige_summary(neu):
             style = autoclass("android.app.Notification$InboxStyle")()
             style.setBigContentTitle(titel)
             for r in neu[:5]:
-                style.addLine("%s - %s" % (r.get("haendler", "?"),
-                                           core.format_preis(r.get("preis"))))
+                zusatz = " (wieder da)" if r.get("_restock") else ""
+                style.addLine("%s - %s%s" % (r.get("haendler", "?"),
+                                              core.format_preis(r.get("preis")), zusatz))
             b.setStyle(style)
         except Exception:
             pass
@@ -220,12 +221,15 @@ def main():
                 # Flags mitgeben: die App zeigt daraus "NEU" und den Preisunterschied.
                 letzter = hist.get_last(r["haendler"])
                 tief = hist.get_tief(r["haendler"])
+                vorher_av = hist.get_verfuegbar(r["haendler"])
+                ereignis = core.alarm_ereignis(r, letzter, vorher_av)
                 r["_prev"] = letzter
-                r["_is_new"] = core.ist_neuer_treffer(r["preis"], letzter)
+                r["_is_new"] = ereignis == "new"
+                r["_restock"] = ereignis == "restock"
                 # Ein neuer Treffer ist nicht automatisch ein guter Alarm:
                 # Quiet Hours, stummgeschaltete Shops, Vorbestellungen und
                 # Gebrauchtware filtert die gemeinsame Regel.
-                if r["_is_new"] and core.alarm_erlaubt(r, tief, settings):
+                if ereignis and core.alarm_erlaubt(r, tief, settings):
                     neu.append(r)
             hist.update(ergebnisse)
             _status_schreiben(ergebnisse, neu, intervall=intervall)
@@ -233,9 +237,13 @@ def main():
                 # Bei einem Ausverkauf koennen viele Shops gleichzeitig melden -
                 # fuenf Meldungen reichen, der Rest steht in der App.
                 for r in neu[:5]:
-                    _benachrichtige(
-                        "PS5 Pro 2 TB: " + core.format_preis(r["preis"]),
-                        r["haendler"] + " - jetzt verfuegbar", r.get("url"))
+                    titel = ("PS5 Pro 2 TB: wieder verfuegbar"
+                             if r.get("_restock") else
+                             "PS5 Pro 2 TB: " + core.format_preis(r["preis"]))
+                    text = (r["haendler"] + " - wieder verfuegbar"
+                            if r.get("_restock") else
+                            r["haendler"] + " - jetzt verfuegbar")
+                    _benachrichtige(titel, text, r.get("url"))
                 _benachrichtige_summary(neu[:5])
             print("[BG] %s geprueft, %s Treffer, %s neu"
                   % (len(ergebnisse), len(core.treffer_aus(ergebnisse)), len(neu)))
