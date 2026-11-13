@@ -22,11 +22,15 @@ jobs:
     steps:
       - name: Beta-Releases als Pre-release markieren
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+          TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::GitHub-Token ist leer"
+            exit 1
+          fi
           tags=()
           if [ "$EVENT_NAME" = "workflow_run" ]; then
             case "$RUN_TAG" in
@@ -37,10 +41,16 @@ jobs:
           fi
           for tag in "${tags[@]}"; do
             echo "Markiere $tag als Pre-release"
-            curl --fail --silent --show-error -X PATCH \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            code=$(curl --silent --show-error -o /tmp/release.json -w '%{http_code}' \
+              -X PATCH \
+              -H "Authorization: Bearer ${TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
-              --data '{"prerelease":true}' >/dev/null
+              --data '{"prerelease":true}')
+            if [ "$code" != "200" ]; then
+              echo "::error::Release $tag: HTTP $code"
+              cat /tmp/release.json
+              exit 1
+            fi
           done
