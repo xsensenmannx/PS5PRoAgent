@@ -86,6 +86,17 @@ class SmokeApp(App):
 
     def on_start(self):
         self.ui = self.root_layout.main_ui
+        # Grosse Schrift auf kleinem Querformat: Die Karten wachsen mit der
+        # Skalierung, duerfen aber nicht aus der Liste laufen.
+        try:
+            scale = float(os.environ.get("PS5PRO_SMOKE_FONT_SCALE", "1.0"))
+        except ValueError:
+            scale = 1.0
+        if scale not in main.FONT_SCALES:
+            raise SystemExit(f"unbekannte Schriftgroesse: {scale}")
+        # Erst in der Trefferliste anwenden: Die Setup-Pruefung testet das
+        # Durchschalten der Schriftgroessen ab 100 %.
+        self.test_font_scale = scale
         Clock.schedule_once(self.run_checks, 0.2)
 
     def pump(self, frames=12):
@@ -459,6 +470,8 @@ class SmokeApp(App):
             "Shop B": {"haendler": "Shop B", "preis": 799.0,
                        "klass": "hit", "_is_new": False, "_restock": True, **basis},
         }
+        if self.test_font_scale > 1.0:
+            self.ui.font_scale = self.test_font_scale
         self.ui._rerender()
         self.pump()
         cards = [w for w in self.ui.results_row.children
@@ -475,10 +488,21 @@ class SmokeApp(App):
               any("WIEDER DA" in str(getattr(w, "text", ""))
                   for card in cards for w in card.walk()), True)
         check("Trefferliste: Zeilen gestapelt",
-              all(c.size_hint_y is None and c.height <= main.dp(80) for c in cards), True)
+              all(c.size_hint_y is None and c.height <= main.dp(80) * self.ui.font_scale
+                  for c in cards), True)
         check("Trefferliste: kein horizontaler Rest", self.ui.results_scroll.do_scroll_x, False)
+        if self.ui.font_scale > 1.0:
+            check("Trefferliste: Kartenhoehe folgt der Schrift",
+                  round(cards[0].height), round(main.dp(56) * self.ui.font_scale))
+            preis_txt = main.format_preis(799.0)
+            preis = next(w for card in cards for w in card.walk()
+                         if isinstance(w, main.Label) and preis_txt in str(w.text))
+            check("Trefferliste: Preis passt bei grosser Schrift", fits(preis), True)
+            check("Trefferliste: Karte bleibt in der Leiste",
+                  cards[0].height <= main.dp(80) * self.ui.font_scale, True)
         self.ui.scanned = {}
         self.ui._clear_results()
+        self.ui.font_scale = 1.0
 
     # ── Detailansicht ───────────────────────────────────────────────────
     def detail(self):

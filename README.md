@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.1 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.1/ps5prosearchagent-1.1-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.2 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.2/ps5prosearchagent-1.2-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -23,7 +23,8 @@ einmalig eine Deinstallation nötig.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.1** | Die aktuelle Version (versionCode 10100). Diese APK installieren. |
+| **v1.2** | Die aktuelle Version (versionCode 10200). Diese APK installieren. |
+| **v1.1** | Vorherige Version; bleibt als Archiv-Release erhalten. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
 Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
@@ -31,16 +32,18 @@ aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
 > **Eine Nummer für alles:** App, `main`-Branch, Release und Download heißen
-> **v1.1**. Der Button oben führt immer zur aktuellen APK.
+> **v1.2**. Der Button oben führt immer zur aktuellen APK.
 >
-> **Zur Zählung:** v1.1 ist die Fortsetzung der bisherigen 5.x-Stände. Die
-> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0 Archiv, v1.1 aktuell).
+> **Zur Zählung:** v1.2 ist die Fortsetzung der bisherigen 5.x-Stände. Die
+> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0 und v1.1 Archiv, v1.2 aktuell).
 
 ## Eindruck
 
 | Hochformat | Querformat |
 |---|---|
 | <img src="docs/screenshots/hochformat.png" width="250" alt="Radar und Trefferliste im Hochformat"> | <img src="docs/screenshots/querformat.png" width="480" alt="Radar links, Trefferliste rechts im Querformat"> |
+| **Kompakt quer (620×380)** – Radar links über die volle Höhe, Trefferliste rechts. So bleibt beides auch auf flachen Fenstern sichtbar. | |
+| <img src="docs/screenshots/querformat-kompakt.png" width="480" alt="Kompaktes Querformat: Radar links, Trefferliste rechts"> | |
 
 **Detailansicht** – langes Tippen auf eine Trefferkarte zeigt Zustand, Verkäufer,
 Signal, Preistiefs und den Preisverlauf:
@@ -169,11 +172,14 @@ python3 tools/validate_shop_config.py
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
-responsive Layout-Geometrie und Boot-Manifest — 660 Zusicherungen, ohne Kivy
+responsive Layout-Geometrie und Boot-Manifest — 699 Zusicherungen, ohne Kivy
 und ohne Android. Der CI-Workflow führt sie bei jedem Push und Pull Request
 aus, der Release-Workflow zusätzlich vor jedem Release. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät; er läuft in
-der CI in vier Fenstergrößen (360×780, 420×820, 720×480, 884×700).
+der CI in fünf Fenstergrößen (360×780, 420×820, 620×380, 720×480, 884×700),
+wobei 620×380 zusätzlich mit 120 % Schrift geprüft wird. Auf einem
+echten Gerät prüft `tools/adb_layout_check.sh` dieselben Größen; die Bilder in
+`docs/screenshots` erzeugt `tools/screenshots.py`.
 `tools/validate_shop_config.py` prüft die echte `shop_config.json` mit genau
 derselben Validierung wie die App und läuft im Release-Workflow vor
 den Logiktests.
@@ -219,7 +225,11 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.1** – Die aktuelle Version (versionCode 10100): Radar und Trefferliste sind
+* **v1.2** – Die aktuelle Version (versionCode 10200): flaches Querformat bleibt
+  zweispaltig, Radar und Trefferliste sind auch bei 620×380 sichtbar (inklusive
+  Status- und Navigationsleisten). Dazu Geräteprüfung über ADB, ein
+  reproduzierbares Screenshot-Werkzeug und `RELEASING.md`.
+* **v1.1** – Vorherige Version (versionCode 10100): Radar und Trefferliste sind
   in Hoch- und Querformat fest getrennt, die Treffer-Marken bleiben innerhalb
   des Radarrings, die Gradzahlen werden nicht mehr angeschnitten. Dazu kommen
   die frei skalierbare Schrift (SETUP), Parserfehler getrennt von echter
@@ -256,6 +266,26 @@ sind zwei Repository-Secrets nötig (Settings → Secrets and variables → Acti
 
 Keystore und Passwort zusätzlich offline sichern: Gehen sie verloren, lassen
 sich keine Updates mehr über bestehende Installationen legen.
+
+## Displays und Datenschutz
+
+Die Aufteilung hängt an der Fensterfläche in dp, nicht an der Pixelzahl:
+
+| Fläche | Aufteilung |
+|---|---|
+| ab 600 dp Breite und 300 dp Höhe | Radar links, Trefferliste rechts – auch flach (z. B. 620×380) |
+| schmaler oder flacher | Radar oben, Trefferliste unten |
+
+Abgesichert ist das in `tools/selftest.py` (inklusive Status- und
+Navigationsleisten) und im Kivy-Smoke-Test bei 360×780, 420×820, 620×380,
+720×480 und 884×700 dp. Auf einem echten Gerät prüft
+`tools/adb_layout_check.sh` dieselben Größen über ADB, liest die berechnete
+Radarfläche aus dem Log und legt Screenshots ab.
+
+**Netzwerk:** Die App ruft nur die Shop-Adressen aus `shop_config.json` und die
+Konfigurationsdatei im Repository ab. Keine Konten, keine Werbe- oder
+Analyse-SDKs, keine Telemetrie; Treffer, Verlauf und Einstellungen bleiben
+lokal auf dem Gerät.
 
 ## Grenzen
 

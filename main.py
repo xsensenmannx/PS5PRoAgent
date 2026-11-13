@@ -1204,12 +1204,14 @@ def layout_geometrie(w,h,top_in=0.0,bottom_in=0.0,left_in=0.0,right_in=0.0):
     # flache Fenster (Landscape-Handy, z. B. 620x380): Im Hochformat bliebe
     # unter Logo, Trefferleiste und Bedienung keine Hoehe fuer die Scheibe.
     # Kompakt heisst hier: Radar links ueber die volle Hoehe, Liste rechts.
+    # Die 180 dp sind bewusst niedriger als die reine Panelhoehe: Auf dem
+    # Geraet ziehen Status- und Navigationsleiste noch einmal 24-48 dp ab.
     if (usable_w>=dp(600) and h>=dp(300) and usable_w>h*1.15):
         kandidat=min(dp(460),max(dp(320),usable_w*0.42))
         kandidat_x=w-right-kandidat
         kandidat_logo=kandidat_x-left
         kandidat_h=h-top-lh-bottom-ch
-        if kandidat_logo>=dp(240) and kandidat_h>=dp(200):
+        if kandidat_logo>=dp(240) and kandidat_h>=dp(180):
             wide=True; panel_w=kandidat; panel_x=kandidat_x
             results_h=kandidat_h; logo_w=kandidat_logo
 
@@ -1217,7 +1219,9 @@ def layout_geometrie(w,h,top_in=0.0,bottom_in=0.0,left_in=0.0,right_in=0.0):
     # im Hochformat unter dem Radar, im Querformat zwischen Radar und der
     # Liste am rechten Rand. Ohne den Puffer lag der Rand der Scheibe auf der
     # Panelkante und die Trefferleiste schnitt den Radar an.
-    radar_bottom=ch+bottom if wide else ch+results_h+bottom+RADAR_PANEL_GAP
+    # Im Querformat braucht das HUD (17 dp) eine eigene Zeile ueber der
+    # Bedienleiste; sonst laeuft der untere Radarring durch die Schrift.
+    radar_bottom=(ch+bottom+dp(21)) if wide else ch+results_h+bottom+RADAR_PANEL_GAP
     radar_w=max(dp(200),panel_x-RADAR_PANEL_GAP) if wide else w
     return {
         "wide":wide,"logo_h":lh,"logo_w":logo_w,"controls_h":ch,
@@ -1564,6 +1568,16 @@ class MainUI(FloatLayout):
             self.radar.reserve_top=g["radar_top"]
             self._set_results_mode(g["wide"])
             self.results_row.width=max(dp(1),g["panel_w"])
+            # Eine Zeile pro Resize: Damit prueft tools/adb_layout_check.sh
+            # auf einem echten Geraet, ob die Radarflaeche wirklich existiert.
+            try:
+                fl=radar_flaeche(g["radar_w"] if g["wide"] else w,h,
+                                 g["radar_bottom"],g["radar_top"])
+                mr=0 if fl is None else fl["mr"]
+                print(f"[Layout] {w:.0f}x{h:.0f} "
+                      f"insets={top_in:.0f}/{bot_in:.0f}/{left_in:.0f}/{right_in:.0f} "
+                      f"wide={1 if g['wide'] else 0} radar={mr:.0f}")
+            except Exception: pass
         except Exception as e: print(f"[Sizes] {e}")
 
     # ── Bedienung ───────────────────────────────────────────────────

@@ -1058,6 +1058,21 @@ def adaptive_boot_tests():
                   fl["cx"] + fl["mr"] + main.dp(11) + main.dp(12) <=
                   bg["panel_x"] + 0.5, True)
 
+    # Auf dem Geraet kosten Status- und Navigationsleiste zusaetzlich Hoehe.
+    # Auch damit muss das flache Querformat zweispaltig bleiben und die
+    # Radarflaeche gross genug sein.
+    for lw, lh, ti, bi in ((620, 380, 24, 24), (640, 360, 32, 32),
+                           (800, 360, 24, 24)):
+        name = f"{lw}x{lh}+{ti}/{bi}"
+        bg = main.layout_geometrie(lw, lh, top_in=ti, bottom_in=bi)
+        check(f"Layout {name}: zwei Spalten", bg["wide"], True)
+        check(f"Layout {name}: Liste im Fenster",
+              bg["panel_y"] + bg["results_h"] <= lh + 0.5, True)
+        fl = main.radar_flaeche(bg["radar_w"], lh, bg["radar_bottom"], bg["radar_top"])
+        check(f"Layout {name}: Radar sichtbar", fl is not None, True)
+        if fl is not None:
+            check(f"Layout {name}: Radar-Radius", fl["mr"] >= main.dp(60), True)
+
     # Kleine Displays und Querformat: Panel, Logo, Bedienleiste und Radar
     # duerfen sich nicht ueberlagern; im Hochformat bleibt der Radar-Puffer
     # auch bei der kuerzesten unterstuetzten Hoehe erhalten.

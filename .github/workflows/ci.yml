@@ -71,6 +71,10 @@ jobs:
           - name: "Querformat flach 620x380"
             width: 620
             height: 380
+          - name: "Querformat flach 620x380, Schrift 120 %"
+            width: 620
+            height: 380
+            font_scale: 1.2
           - name: "Tablet 884x700"
             width: 884
             height: 700
@@ -93,6 +97,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
           PS5PRO_SMOKE_WIDTH: ${{ matrix.width }}
           PS5PRO_SMOKE_HEIGHT: ${{ matrix.height }}
+          PS5PRO_SMOKE_FONT_SCALE: ${{ matrix.font_scale || '1.0' }}
         run: |
           set -o pipefail
           echo "Fenster: ${PS5PRO_SMOKE_WIDTH}x${PS5PRO_SMOKE_HEIGHT}"
