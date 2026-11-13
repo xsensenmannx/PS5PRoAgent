@@ -339,9 +339,12 @@ android.accept_sdk_license = True
 android.archs = arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
-# Google Play verlangt fuer JEDEN Upload einen hoeheren versionCode. Vor dem
-# naechsten Play-Upload hier +1 (die Anzeige-Version oben bleibt davon unabhaengig).
-android.numeric_version = 19
+# Wird im Release aus dem Tag abgeleitet (tools/set_version_from_tag.sh):
+# vMAJOR.MINOR[.PATCH] -> MAJOR*10000 + MINOR*100 + PATCH.
+# v1.1 ergibt also 10100. Der Wert muss bei jedem Update steigen; aus dem Tag
+# abgeleitet kann er nicht mehr vergessen werden. 10100 ist nur der lokale
+# Standard, der Workflow ueberschreibt ihn vor dem Build.
+android.numeric_version = 10100
 
 
 # (bool) enables Android auto backup feature (Android API >=23)
@@ -361,6 +364,11 @@ android.allow_backup = True
 
 # (str) The format used to package the app for debug mode (apk or aar).
 # android.debug_artifact = apk
+
+# (str) The format used to package the app for release mode (apk or aab).
+# Ohne diese Zeile nimmt buildozer fuer `android release` ein AAB an; der
+# Release-Workflow laedt aber eine APK hoch.
+android.release_artifact = apk
 
 # (str) A display cutout is an area on some devices that extends into the display surface.
 # It allows for an edge-to-edge experience while providing space for important sensors on the front of the device.

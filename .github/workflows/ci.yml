@@ -38,6 +38,18 @@ jobs:
       - name: Logiktests
         run: python tools/selftest.py
 
+      - name: Versionsableitung pruefen
+        run: |
+          set -euo pipefail
+          cp buildozer.spec "$RUNNER_TEMP/spec"
+          bash tools/set_version_from_tag.sh v9.8.7 "$RUNNER_TEMP/spec"
+          grep -qx 'version = 9.8.7' "$RUNNER_TEMP/spec"
+          grep -qx 'android.numeric_version = 90807' "$RUNNER_TEMP/spec"
+          if bash tools/set_version_from_tag.sh v1.2-beta "$RUNNER_TEMP/spec"; then
+            echo "::error::ungueltiger Tag wurde akzeptiert"
+            exit 1
+          fi
+
   layout:
     name: Kivy-Smoke ${{ matrix.name }}
     runs-on: ubuntu-24.04

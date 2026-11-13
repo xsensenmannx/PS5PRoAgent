@@ -99,6 +99,12 @@ jobs:
           test -f /tmp/kivy-smoke.log && tail -80 /tmp/kivy-smoke.log
           test -f /tmp/kivy-smoke.log && echo "::error::$(tail -1 /tmp/kivy-smoke.log)"
 
+      - name: Version aus Tag ableiten
+        run: |
+          set -euo pipefail
+          bash tools/set_version_from_tag.sh "${GITHUB_REF_NAME}"
+          grep -E '^(version|android\.numeric_version)' buildozer.spec
+
       - name: Build-Cache
         uses: actions/cache@v5
         with:
@@ -145,6 +151,16 @@ jobs:
           }
           KEYSTORE_FILE="$RUNNER_TEMP/release.p12" bash tools/ci_sign_apk.sh
 
+      - name: APK benennen
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version[[:space:]]*=[[:space:]]*//p' buildozer.spec \
+            | head -n 1 | tr -d '\r')
+          APK=$(ls -1 bin/*.apk | head -n 1)
+          ZIEL="bin/ps5prosearchagent-${VERSION}-arm64-v8a.apk"
+          mv "$APK" "$ZIEL"
+          echo "Release-APK: $ZIEL"
+
       - name: Release-Notes erzeugen
         run: |
           set -euo pipefail
@@ -163,3 +179,22 @@ jobs:
           # mit "asset already exists" abzubrechen.
           overwrite_files: true
           fail_on_unmatched_files: true
+
+      - name: Veraltete Assets entfernen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API: https://api.github.com/repos/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ZIEL=$(basename "$(ls -1 bin/*.apk | head -n 1)")
+          REL=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+            "$API/releases/tags/${GITHUB_REF_NAME}")
+          printf '%s' "$REL" \
+            | python3 -c 'import json,sys; [print(a["id"], a["name"]) for a in json.load(sys.stdin).get("assets", [])]' \
+            | while read -r AID NAME; do
+            if [ -n "$AID" ] && [ "$NAME" != "$ZIEL" ]; then
+              CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+                -H "Authorization: Bearer $GH_TOKEN" "$API/releases/assets/$AID")
+              echo "entfernt: $NAME (HTTP $CODE)"
+            fi
+          done

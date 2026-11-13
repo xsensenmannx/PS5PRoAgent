@@ -131,7 +131,7 @@ export PATH="$PWD/.venv/bin:$PATH"
 
 say "APK bauen"
 set +e
-.venv/bin/buildozer -v android debug 2>&1 | tee buildozer.log
+.venv/bin/buildozer -v android release 2>&1 | tee buildozer.log
 rc=${PIPESTATUS[0]}
 set -e
 

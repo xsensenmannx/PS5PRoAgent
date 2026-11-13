@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.1 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.1/ps5prosearchagent-1.1-arm64-v8a-debug.apk)**
+**[PS5 Pro Search Agent v1.1 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.1/ps5prosearchagent-1.1-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -23,7 +23,7 @@ einmalig eine Deinstallation nötig.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.1** | Die aktuelle Version (versionCode 19). Diese APK installieren. |
+| **v1.1** | Die aktuelle Version (versionCode 10100). Diese APK installieren. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
 Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
@@ -120,8 +120,8 @@ Der einzige GitHub-Build-Weg ist der Release-Workflow
 [`.github/workflows/release.yml`](.github/workflows/release.yml). Er läuft bei
 einem Tag `v*`, prüft die Shop-Konfiguration und die Logiktests und hängt die
 fertige APK an das GitHub-Release. Lokal auf Linux/WSL baut
-`bash tools/ci_build.sh` dieselbe Debug-APK. Der Workflow signiert die fertige
-APK danach mit dem Release-Schlüssel (`tools/ci_sign_apk.sh`) und prüft den
+`bash tools/ci_build.sh` dieselbe Release-APK; sie ist unsigniert. Der Workflow
+signiert sie mit dem Release-Schlüssel (`tools/ci_sign_apk.sh`) und prüft den
 Zertifikat-Fingerprint, bevor sie hochgeladen wird.
 
 ## Projektstruktur
@@ -219,7 +219,7 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.1** – Die aktuelle Version (versionCode 19): Radar und Trefferliste sind
+* **v1.1** – Die aktuelle Version (versionCode 10100): Radar und Trefferliste sind
   in Hoch- und Querformat fest getrennt, die Treffer-Marken bleiben innerhalb
   des Radarrings, die Gradzahlen werden nicht mehr angeschnitten. Dazu kommen
   die frei skalierbare Schrift (SETUP), Parserfehler getrennt von echter
@@ -235,6 +235,10 @@ Aktueller Stand und Archiv:
 Die Release-APK wird im Workflow mit einem **festen Schlüssel** signiert
 (PKCS#12, Alias `ps5pro`). Dadurch installiert Android eine neue Version über
 die bestehende Installation, ohne dass die App deinstalliert werden muss.
+
+`versionName` und `versionCode` kommen aus dem Tag: `v1.2` wird zu `1.2` und
+`10200` (`MAJOR*10000 + MINOR*100 + PATCH`), siehe
+`tools/set_version_from_tag.sh`.
 
 Zertifikat (öffentlich; im Workflow als Sollwert hinterlegt):
 
@@ -308,7 +312,7 @@ verworfen, damit ein 304 nicht den alten Preis konserviert.
 
 App und Hintergrund-Service laden höchstens einmal pro Tag und nutzen ETag/304.
 Der Button **SHOPS → REMOTE-CONFIG AKTUALISIEREN** erzwingt einen Abruf.
-* Die veröffentlichte APK ist eine Debug-APK zum Sideloading.
+* Die veröffentlichte APK ist eine Release-APK zum Sideloading; ein Play-Store-Upload ist nicht eingerichtet.
 
 ## Autor
 

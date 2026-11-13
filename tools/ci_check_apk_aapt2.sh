@@ -4,7 +4,7 @@
 # buildozer.spec, damit ein Release nicht versehentlich mit alten Werten
 # veroeffentlicht wird.
 #
-# Aufruf: bash tools/ci_check_apk_aapt2.sh bin/ps5prosearchagent-1.1-arm64-v8a-debug.apk
+# Aufruf: bash tools/ci_check_apk_aapt2.sh bin/ps5prosearchagent-1.1-arm64-v8a.apk
 # Optional: SPEC=/pfad/buildozer.spec AAPT2=/pfad/zu/aapt2 ...
 set -euo pipefail
 
@@ -132,6 +132,13 @@ vergleiche() {
 vergleiche "versionCode" "$VERSION_CODE" "$EXPECTED_VERSION_CODE"
 vergleiche "versionName" "$VERSION_NAME" "$EXPECTED_VERSION_NAME"
 vergleiche "targetSdkVersion" "$TARGET_SDK" "$EXPECTED_TARGET_SDK"
+
+# Ein Release-Build darf nicht debuggable sein. Steht das Flag im Manifest,
+# wurde versehentlich `android debug` gebaut.
+if grep -q "application-debuggable" "$BADGING"; then
+    echo "::error::APK ist debuggable - Release-Build erwartet"
+    FEHLER=1
+fi
 
 # Der Service muss im kompilierten Manifest vorhanden sein. aapt2 gibt den
 # foregroundServiceType als Integer-Bitmaske aus, z. B. specialUse als
