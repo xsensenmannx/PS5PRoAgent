@@ -34,7 +34,7 @@ aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
 > **Eine Nummer für alles:** App, Release und Download heißen **v1.4.0**
-> (App-Version 1.4, versionCode 10400). Der Button oben führt immer zur
+> (App-Version 1.4.0, versionCode 10400). Der Button oben führt immer zur
 > aktuellen APK.
 >
 > **Zur Zählung:** v1.4.0 ist die Fortsetzung der bisherigen 5.x-Stände. Die

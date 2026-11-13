@@ -34,7 +34,7 @@ source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .ven
 source.exclude_patterns = ps5pro_settings.json, ps5pro_history.json, *.md, *.log
 
 # (str) Application versioning (method 1)
-version = 1.4
+version = 1.4.0
 
 # (str) Application versioning (method 2)
 # version.regex = __version__ = ['"](.*)['"]
