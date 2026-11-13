@@ -4,6 +4,10 @@ Android-App (Kivy/Python), die 42 Elektronikhändler in Deutschland und Österre
 gleichzeitig nach der **PlayStation 5 Pro 2 TB** abfragt: Preis, Verfügbarkeit,
 Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
+**Von sensenmann ([@xsensenmannx](https://github.com/xsensenmannx)) — Code, Build und Dokumentation.**
+
+![Version](https://img.shields.io/github/v/release/xsensenmannx/PS5PRoAgent?label=Version&color=3f8cff) ![Lizenz](https://img.shields.io/github/license/xsensenmannx/PS5PRoAgent?label=Lizenz) ![Letzter Commit](https://img.shields.io/github/last-commit/xsensenmannx/PS5PRoAgent?label=Letzter%20Commit)
+
 ![Icon](icon.png)
 
 ## Direkt herunterladen
@@ -250,6 +254,14 @@ verworfen, damit ein 304 nicht den alten Preis konserviert.
 App und Hintergrund-Service laden höchstens einmal pro Tag und nutzen ETag/304.
 Der Button **SHOPS → REMOTE-CONFIG AKTUALISIEREN** erzwingt einen Abruf.
 * Die veröffentlichte APK ist eine Debug-APK zum Sideloading.
+
+## Autor
+
+**sensenmann** — Code, Build-Skripte, App-Icon und Dokumentation dieses Projekts.
+
+* GitHub: [@xsensenmannx](https://github.com/xsensenmannx)
+* Fehler und Wünsche: [Issues](https://github.com/xsensenmannx/PS5PRoAgent/issues)
+* Alle Stände: [Releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)
 
 ## Lizenz
 
