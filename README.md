@@ -123,6 +123,8 @@ tools/ci_check_apk.sh         prüft die fertige APK (Größe, Python-Version)
 tools/ci_check_apk_aapt2.sh   prüft versionCode, versionName und targetSdk
 tools/ci_licenses.sh          akzeptiert die Android-SDK-Lizenzen
 tools/ci_fix_cache.sh         räumt halb geladene SDK/NDK-Bäume auf
+tools/p4a_hook.py             ergänzt den specialUse-Subtyp im Android-Manifest
+tools/ci_log_failure.sh       zeigt bei einem CI-Fehler den Buildozer-Log
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
 LICENSE                       MIT-Lizenz
 THIRD_PARTY_NOTICES.md        Lizenzen der gebündelten Bibliotheken
