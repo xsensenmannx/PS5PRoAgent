@@ -1,0 +1,80 @@
+# Baut auf Knopfdruck ein signiertes Android App Bundle (AAB) fuer Google Play.
+# Bewusst getrennt vom Release-Workflow: Die GitHub-APK bleibt unveraendert,
+# das AAB ist ein eigenes Artefakt und wird nicht automatisch veroeffentlicht.
+name: Play AAB
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 210
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Python 3.11.9
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11.9"
+
+      - name: Upload-Key bereitstellen
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          EXPECTED_CERT_SHA256: "63:E5:1D:83:8B:FE:14:38:C6:D6:14:3D:F9:7D:46:D5:73:55:BC:D3:83:3A:BB:44:A2:31:BE:CF:D5:C5:70:DD"
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "::error::Secrets ANDROID_KEYSTORE_BASE64 und ANDROID_KEYSTORE_PASSWORD fehlen"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          timeout 60 keytool -list -v -keystore "$RUNNER_TEMP/release.p12" \
+            -storetype PKCS12 -storepass:env KEYSTORE_PASSWORD \
+            -alias ps5pro > "$RUNNER_TEMP/keytool.txt" 2>&1
+          ACTUAL=$(grep -i 'SHA256:' "$RUNNER_TEMP/keytool.txt" | head -n 1 \
+            | sed 's/.*SHA256:[[:space:]]*//' | tr -d ':\r ' | tr 'A-F' 'a-f')
+          EXPECTED=$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
+          [ "$ACTUAL" = "$EXPECTED" ] || {
+            echo "::error::Upload-Key weicht ab: $ACTUAL"
+            exit 1
+          }
+
+      - name: Build-Cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-v5-ubuntu2404-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-v5-ubuntu2404-
+
+      - name: AAB bauen und signieren
+        env:
+          ARTIFACT: aab
+          KEYSTORE_FILE: ${{ runner.temp }}/release.p12
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ps5pro
+        run: bash tools/ci_build.sh
+
+      - name: AAB und Protokoll sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps5pro-aab
+          path: |
+            bin/*.aab
+            aab.sha256
+            buildozer.log
+          if-no-files-found: warn
+          retention-days: 14

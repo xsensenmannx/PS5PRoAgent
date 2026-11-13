@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datenschutz — Konsolen-Radar</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px;
+         font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         color: #1b1f24; background: #f7f8fa; }
+  h1 { font-size: 1.8rem; margin: 0 0 .2em; letter-spacing: -.02em; }
+  h2 { font-size: 1.15rem; margin: 2em 0 .4em; }
+  .sub { color: #5b6573; margin: 0 0 1.6em; }
+  .card { background: #fff; border: 1px solid #e3e7ee; border-radius: 14px;
+          padding: 22px 24px; margin: 0 0 18px; }
+  code { background: #eef1f6; padding: .1em .35em; border-radius: 4px; }
+  a { color: #0b62d6; }
+  hr { border: 0; border-top: 1px solid #e3e7ee; margin: 2.4em 0; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6e9ef; background: #0d1117; }
+    .card { background: #151b23; border-color: #263041; }
+    .sub { color: #9aa6b6; }
+    code { background: #1d2633; }
+    a { color: #6cb2ff; }
+    hr { border-color: #263041; }
+  }
+</style>
+</head>
+<body>
+<h1>Datenschutz</h1>
+<p class="sub">Konsolen-Radar / PS5 Pro Search Agent · Stand: 13. November 2026</p>
+
+<div class="card">
+  <p><strong>Kurzfassung:</strong> Die App erhebt keine personenbezogenen Daten und
+  sendet nichts an den Entwickler. Keine Konten, keine Werbung, keine Analyse,
+  kein Tracking. Einstellungen, Preisverläufe und Belege bleiben auf dem Gerät.</p>
+</div>
+
+<h2>1. Verantwortlicher</h2>
+<p>Betreiber des Open-Source-Projekts „Konsolen-Radar" / „PS5 Pro Search Agent".
+Kontakt: <a href="https://github.com/xsensenmannx/PS5PRoAgent/issues">github.com/xsensenmannx/PS5PRoAgent/issues</a>.
+Vor der Play-Store-Einreichung werden hier Name und E-Mail-Adresse ergänzt.</p>
+
+<h2>2. Welche Daten verarbeitet werden</h2>
+<p><strong>Lokal auf dem Gerät:</strong> Einstellungen (Händler, Preisgrenze,
+Alarmregeln, Schriftgröße, optional eine Webhook-URL), Preisverlauf,
+Verfügbarkeitsstatus, Shop-Gesundheit, Absturzprotokoll und optional kurze
+Beleg-Ausschnitte zu Treffern.</p>
+<p><strong>Beim Scan:</strong> Die App ruft öffentliche Produktseiten der Shops ab.
+Dabei gehen technisch notwendige Verbindungsdaten (IP-Adresse, User-Agent) an den
+jeweiligen Shop — wie bei jedem Browseraufruf. Es gilt die Datenschutzerklärung
+des Shops.</p>
+<p><strong>Webhook (optional):</strong> Trägt der Nutzer eine URL ein (ntfy,
+Telegram, Discord oder eigener HTTPS-Endpunkt), sendet die App bei einem Treffer
+Händler, Preis, Produkt-URL und Zeitstempel an dieses Ziel. Empfänger ist der vom
+Nutzer gewählte Dienst; der Entwickler hat keinen Zugriff. Eine URL mit Token wird
+in der App maskiert und nie protokolliert.</p>
+
+<h2>3. Berechtigungen</h2>
+<ul>
+  <li><strong>Internet</strong> — Shop-Abruf und optionaler Webhook.</li>
+  <li><strong>Benachrichtigungen</strong> — Treffer-Alarm und Scan-Status.</li>
+  <li><strong>Foreground-Service</strong> — Scan bei geschlossener App, mit sichtbarer Dauerbenachrichtigung.</li>
+  <li><strong>Neustart</strong> — Dienst nach Geräteneustart, nur wenn AUTO aktiv ist.</li>
+  <li><strong>Vibration</strong> — kurzes Feedback bei Treffern.</li>
+</ul>
+<p>Kein Standort, keine Kontakte, keine Fotos, kein Mikrofon, kein Barrierefreiheitszugriff.</p>
+
+<h2>4. Keine Weitergabe, keine Werbung</h2>
+<p>Keine Werbenetzwerke, keine Analyse-, Crash- oder Attribution-SDKs. Der
+Entwickler erhält keine Nutzungsdaten. Es werden keine Daten verkauft.</p>
+
+<h2>5. Speicherdauer und Löschung</h2>
+<p>Daten bleiben lokal, bis der Nutzer sie löscht oder die App deinstalliert. Die
+Deinstallation entfernt die app-privaten Daten. Export erfolgt nur auf
+ausdrückliche Aktion.</p>
+
+<h2>6. Kinder</h2>
+<p>Die App richtet sich nicht an Kinder und ist nicht für die Familienfreigabe bestimmt.</p>
+
+<h2>7. Hosting dieser Seite</h2>
+<p>Diese Seite wird über GitHub Pages bereitgestellt. Beim Aufruf verarbeitet
+GitHub technische Verbindungsdaten nach seiner eigenen Datenschutzerklärung. Die
+App kontaktiert diese Seite nicht.</p>
+
+<h2>8. Änderungen und Kontakt</h2>
+<p>Änderungen werden im Repository veröffentlicht und mit Datum versehen.
+Kontakt: <a href="https://github.com/xsensenmannx/PS5PRoAgent/issues">Issue im Repository</a>
+oder die im Play-Store-Eintrag genannte Adresse.</p>
+
+<hr>
+
+<h1 id="en">Privacy Policy</h1>
+<p class="sub">Last updated: 13 November 2026</p>
+<div class="card">
+  <p>The app collects <strong>no personal data</strong> and sends nothing to the
+  developer. No accounts, ads, analytics or tracking. Settings, price history and
+  evidence stay on the device.</p>
+</div>
+<p>When scanning, the app requests public retailer product pages; the retailer
+receives technically required connection data (IP address, user agent) under its
+own policy. If a webhook is configured, the app sends shop name, price, product
+URL and timestamp to the endpoint chosen by the user. The developer has no access.
+A URL containing a token is masked in the app and never logged.</p>
+<p>Permissions are used only for internet access, notifications, the foreground
+scan service, restart after boot (only when AUTO is on) and vibration. No location,
+contacts, photos, microphone or accessibility access is requested. Data stays on
+the device until deleted or the app is uninstalled. The app is not directed at
+children.</p>
+<p>Contact: <a href="https://github.com/xsensenmannx/PS5PRoAgent/issues">repository issues</a>.</p>
+</body>
+</html>

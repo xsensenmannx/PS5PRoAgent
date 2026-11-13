@@ -11,6 +11,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 say() { printf '\n=== %s ===\n' "$1"; }
 
+# apk = Sideload-Release (unveraendert), aab = Play-Upload.
+ARTIFACT="${ARTIFACT:-apk}"
+case "$ARTIFACT" in
+    apk|aab) ;;
+    *) echo "::error::ARTIFACT muss apk oder aab sein (ist: $ARTIFACT)"; exit 2 ;;
+esac
+
 # UTF-8 erzwingen: buildozer liest buildozer.spec mit der Locale-Kodierung. Auf
 # Systemen mit LANG=C (ASCII) endet das bei Umlauten in Kommentaren mit einem
 # UnicodeDecodeError, bevor der Build startet.
@@ -129,7 +136,19 @@ fi
 export VIRTUAL_ENV="$PWD/.venv"
 export PATH="$PWD/.venv/bin:$PATH"
 
-say "APK bauen"
+if [ "$ARTIFACT" = "aab" ]; then
+    say "AAB-Modus: release_artifact umstellen"
+    cp buildozer.spec buildozer.spec.artifact.bak
+    # Auch bei Abbruch die APK-Spec wiederherstellen.
+    trap 'mv -f buildozer.spec.artifact.bak buildozer.spec' EXIT
+    sed -i 's/^android.release_artifact = apk/android.release_artifact = aab/' buildozer.spec
+    if ! grep -q '^android.release_artifact = aab' buildozer.spec; then
+        echo "::error::release_artifact konnte nicht auf aab gesetzt werden"
+        exit 1
+    fi
+fi
+
+say "$ARTIFACT bauen"
 set +e
 .venv/bin/buildozer -v android release 2>&1 | tee buildozer.log
 rc=${PIPESTATUS[0]}
@@ -145,6 +164,29 @@ if [ "$rc" -ne 0 ]; then
         echo "p4a-Checkout verwerfen: rm -rf .buildozer/android/platform/python-for-android"
     fi
     exit "$rc"
+fi
+
+if [ "$ARTIFACT" = "aab" ]; then
+    say "Ergebnis (AAB)"
+    ls -lh bin/*.aab
+    AAB=$(ls -1 bin/*.aab 2>/dev/null | head -n 1 || true)
+    if [ -z "$AAB" ]; then
+        echo "::error::buildozer hat kein AAB erzeugt"
+        exit 1
+    fi
+    if [ -n "${KEYSTORE_FILE:-}" ]; then
+        : "${KEYSTORE_PASSWORD:?KEYSTORE_PASSWORD fehlt}"
+        jarsigner -keystore "$KEYSTORE_FILE" -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD \
+            -sigalg SHA256withRSA -digestalg SHA-256 \
+            "$AAB" "${KEY_ALIAS:-ps5pro}"
+        jarsigner -verify "$AAB"
+        echo "AAB signiert und mit jarsigner verifiziert"
+    else
+        echo "AAB ist unsigniert (KEYSTORE_FILE nicht gesetzt)"
+    fi
+    sha256sum "$AAB" | tee aab.sha256
+    exit 0
 fi
 
 say "Ergebnis"
