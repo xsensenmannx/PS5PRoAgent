@@ -94,6 +94,25 @@ jobs:
           APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
           bash tools/ci_check_apk_aapt2.sh "$APK"
 
+      - name: APK mit festem Schluessel signieren
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ps5pro
+          # Oeffentlicher Fingerprint des Release-Zertifikats. Weicht die
+          # Signatur ab, bricht der Job ab, statt eine APK zu veroeffentlichen,
+          # die sich nicht ueber eine Installation legen laesst.
+          EXPECTED_CERT_SHA256: "63:E5:1D:83:8B:FE:14:38:C6:D6:14:3D:F9:7D:46:D5:73:55:BC:D3:83:3A:BB:44:A2:31:BE:CF:D5:C5:70:DD"
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "::error::Secrets ANDROID_KEYSTORE_BASE64 und ANDROID_KEYSTORE_PASSWORD fehlen"
+            echo "Ohne festen Schluessel laesst sich keine Version ueber eine Installation legen."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          KEYSTORE_FILE="$RUNNER_TEMP/release.p12" bash tools/ci_sign_apk.sh
+
       - name: Release-Notes erzeugen
         run: |
           set -euo pipefail

@@ -17,6 +17,10 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
 
+Die Release-APK ist mit einem festen Schlüssel signiert: Ein Update legt sich
+über die bestehende Installation. Nur beim Wechsel aus der alten 5.x-Reihe ist
+einmalig eine Deinstallation nötig.
+
 | Stand | Bedeutung |
 |---|---|
 | **v1.1** | Die aktuelle Version (versionCode 19). Diese APK installieren. |
@@ -101,7 +105,9 @@ Der einzige GitHub-Build-Weg ist der Release-Workflow
 [`.github/workflows/release.yml`](.github/workflows/release.yml). Er läuft bei
 einem Tag `v*`, prüft die Shop-Konfiguration und die Logiktests und hängt die
 fertige APK an das GitHub-Release. Lokal auf Linux/WSL baut
-`bash tools/ci_build.sh` dieselbe Debug-APK.
+`bash tools/ci_build.sh` dieselbe Debug-APK. Der Workflow signiert die fertige
+APK danach mit dem Release-Schlüssel (`tools/ci_sign_apk.sh`) und prüft den
+Zertifikat-Fingerprint, bevor sie hochgeladen wird.
 
 ## Projektstruktur
 
@@ -128,6 +134,7 @@ tools/ci_licenses.sh          akzeptiert die Android-SDK-Lizenzen
 tools/ci_fix_cache.sh         räumt halb geladene SDK/NDK-Bäume auf
 tools/p4a_hook.py             ergänzt den specialUse-Subtyp im Android-Manifest
 tools/release_notes.sh        Release-Beschreibung (Änderungen, Installation, SHA-256)
+tools/ci_sign_apk.sh          signiert die APK mit dem festen Release-Schlüssel
 tools/ci_log_failure.sh       zeigt bei einem CI-Fehler den Buildozer-Log
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
 LICENSE                       MIT-Lizenz
@@ -203,6 +210,29 @@ Aktueller Stand und Archiv:
   Hintergrunddienste.
 * **v1.0** – Der erste fertige Stand (targetSdk 36). Bleibt als Archiv-Release
   erhalten.
+
+## Signatur und Updates
+
+Die Release-APK wird im Workflow mit einem **festen Schlüssel** signiert
+(PKCS#12, Alias `ps5pro`). Dadurch installiert Android eine neue Version über
+die bestehende Installation, ohne dass die App deinstalliert werden muss.
+
+Zertifikat (öffentlich; im Workflow als Sollwert hinterlegt):
+
+```
+SHA-256  63:E5:1D:83:8B:FE:14:38:C6:D6:14:3D:F9:7D:46:D5:73:55:BC:D3:83:3A:BB:44:A2:31:BE:CF:D5:C5:70:DD
+```
+
+Der private Schlüssel liegt **nicht** im Repository. Für den Release-Workflow
+sind zwei Repository-Secrets nötig (Settings → Secrets and variables → Actions):
+
+| Secret | Inhalt |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | Base64 der PKCS#12-Datei `release.p12` |
+| `ANDROID_KEYSTORE_PASSWORD` | Passwort des Keystores |
+
+Keystore und Passwort zusätzlich offline sichern: Gehen sie verloren, lassen
+sich keine Updates mehr über bestehende Installationen legen.
 
 ## Grenzen
 

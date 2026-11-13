@@ -58,7 +58,7 @@ fi
     echo "- Android 8.0 oder neuer, **arm64-v8a**"
     echo "- Debug-APK, **$SIZE_MB MB** (\`$NAME\`)"
     echo "- Unbekannte Quellen für Browser bzw. Dateimanager erlauben"
-    echo "- Ist bereits eine Version mit anderem Schlüssel installiert, diese vorher deinstallieren"
+    echo "- Ein Update legt sich über die bestehende Installation; nur beim Wechsel aus der alten 5.x-Reihe vorher deinstallieren"
     echo
     echo "## Prüfsumme"
     echo
