@@ -45,7 +45,11 @@ jobs:
           bash tools/set_version_from_tag.sh v9.8.7 "$RUNNER_TEMP/spec"
           grep -qx 'version = 9.8.7' "$RUNNER_TEMP/spec"
           grep -qx 'android.numeric_version = 90807' "$RUNNER_TEMP/spec"
-          if bash tools/set_version_from_tag.sh v1.2-beta "$RUNNER_TEMP/spec"; then
+          # Erwarteter Fehler: Ausgabe unterdruecken, sonst macht die
+          # ::error::-Zeile des Skripts aus dem gruenen Job eine rote
+          # Annotation im Actions-Log.
+          if bash tools/set_version_from_tag.sh v1.2-beta "$RUNNER_TEMP/spec" \
+              >/dev/null 2>&1; then
             echo "::error::ungueltiger Tag wurde akzeptiert"
             exit 1
           fi
