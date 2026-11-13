@@ -1553,7 +1553,9 @@ class MainUI(FloatLayout):
             self.results_panel.pos=(g["panel_x"],g["panel_y"])
             self.results_panel.size=(g["panel_w"],g["results_h"])
             if g["wide"]:
-                self.radar_hud.pos=(left_in+dp(8),g["panel_y"]+dp(2))
+                # 10 dp Abstand zur Bedienleiste: bei 2 dp schnitt die
+                # Leiste die Unterlaengen der HUD-Schrift ab.
+                self.radar_hud.pos=(left_in+dp(8),g["panel_y"]+dp(10))
                 self.radar_hud.size=(max(dp(80),g["panel_x"]-dp(16)),dp(17))
             else:
                 self.radar_hud.pos=(left_in+dp(8),g["panel_y"]+g["results_h"])
