@@ -17,8 +17,8 @@ concurrency:
 
 jobs:
   release:
-    # Gleicher Runner wie im Build-Workflow: reproduzierbar, kein Wechsel auf
-    # Ubuntu 26 durch das bewegliche ubuntu-latest-Label.
+    # Fester Runner: reproduzierbar, kein Wechsel auf Ubuntu 26 durch das
+    # bewegliche ubuntu-latest-Label.
     runs-on: ubuntu-24.04
     # Erster Lauf inkl. SDK/NDK realistisch 60-100 Minuten, GitHub kappt bei 360.
     timeout-minutes: 210
