@@ -84,7 +84,7 @@ Test-Releases wurden entfernt. Alle Downloads:
 
 Für die normale Nutzung ist kein Build nötig: Die fertige APK steht oben.
 
-Der einzige Build-Weg ist der Release-Workflow
+Der einzige GitHub-Build-Weg ist der Release-Workflow
 [`.github/workflows/release.yml`](.github/workflows/release.yml). Er läuft bei
 einem Tag `v*`, prüft die Shop-Konfiguration und die Logiktests und hängt die
 fertige APK an das GitHub-Release. Lokal auf Linux/WSL baut
@@ -239,7 +239,7 @@ verworfen, damit ein 304 nicht den alten Preis konserviert.
 
 App und Hintergrund-Service laden höchstens einmal pro Tag und nutzen ETag/304.
 Der Button **SHOPS → REMOTE-CONFIG AKTUALISIEREN** erzwingt einen Abruf.
-* Debug-APK zum Sideloading; für den Play Store ist ein signierter AAB-Build nötig.
+* Die veröffentlichte APK ist eine Debug-APK zum Sideloading.
 
 ## Lizenz
 
