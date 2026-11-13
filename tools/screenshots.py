@@ -115,14 +115,75 @@ def client_box():
 
 
 def grab(path):
-    from PIL import ImageGrab
+    from PIL import Image, ImageGrab
     hwnd, box = client_box()
-    img = ImageGrab.grab(bbox=box)
+    # PrintWindow nimmt das Fenster selbst auf, auch wenn ein Browser davor
+    # liegt. ImageGrab bleibt als Fallback fuer aeltere Windows-Versionen.
+    try:
+        img = _print_window(hwnd)
+    except Exception:
+        img = ImageGrab.grab(bbox=box)
     USER32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     img.save(path)
     print("SHOT", path, img.size)
+
+
+def _print_window(hwnd):
+    """Fensterinhalt per GDI aufnehmen (keine Desktop-Aufnahme)."""
+    from PIL import Image
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    rect = wintypes.RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        raise RuntimeError("GetClientRect fehlgeschlagen")
+    w, h = int(rect.right), int(rect.bottom)
+    if w <= 0 or h <= 0:
+        raise RuntimeError("Fenster hat keine Flaeche")
+    hdc = user32.GetDC(hwnd)
+    mem = gdi32.CreateCompatibleDC(hdc)
+    bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    old = gdi32.SelectObject(mem, bmp)
+    try:
+        # PW_RENDERFULLCONTENT: auch DirectX-/OpenGL-Fenster.
+        if not user32.PrintWindow(hwnd, mem, 2):
+            raise RuntimeError("PrintWindow fehlgeschlagen")
+
+        class BMIH(ctypes.Structure):
+            _fields_ = [("biSize", wintypes.DWORD),
+                        ("biWidth", wintypes.LONG),
+                        ("biHeight", wintypes.LONG),
+                        ("biPlanes", wintypes.WORD),
+                        ("biBitCount", wintypes.WORD),
+                        ("biCompression", wintypes.DWORD),
+                        ("biSizeImage", wintypes.DWORD),
+                        ("biXPelsPerMeter", wintypes.LONG),
+                        ("biYPelsPerMeter", wintypes.LONG),
+                        ("biClrUsed", wintypes.DWORD),
+                        ("biClrImportant", wintypes.DWORD)]
+
+        class BMI(ctypes.Structure):
+            _fields_ = [("bmiHeader", BMIH), ("bmiColors", wintypes.DWORD * 3)]
+
+        bi = BMI()
+        bi.bmiHeader.biSize = ctypes.sizeof(BMIH)
+        bi.bmiHeader.biWidth = w
+        bi.bmiHeader.biHeight = -h  # top-down
+        bi.bmiHeader.biPlanes = 1
+        bi.bmiHeader.biBitCount = 32
+        bi.bmiHeader.biCompression = 0
+        buf = ctypes.create_string_buffer(w * h * 4)
+        if not gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bi), 0):
+            raise RuntimeError("GetDIBits fehlgeschlagen")
+        # GetDIBits liefert trotz negativer Hoehe je nach Treiber bottom-up.
+        return (Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, -1)
+                .convert("RGB").transpose(Image.FLIP_TOP_BOTTOM))
+    finally:
+        gdi32.SelectObject(mem, old)
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(mem)
+        user32.ReleaseDC(hwnd, hdc)
 
 
 def frames_to_gif(frames, out):

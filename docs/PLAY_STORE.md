@@ -4,10 +4,11 @@
 **Ziel:** Die App als eigenständiges, policy-konformes Produkt im Google Play Store
 veröffentlichen — ohne die bestehende Sideload-Version zu beschädigen.
 
-> **Kurzfassung:** Technisch ist der Weg frei (AAB ist eine Zeile). Der größte Blocker
-> ist die Marke: Titel und Icon nutzen PlayStation-Trade-Dress. Ohne Rebrand gibt es
-> kein Play-Release. Danach braucht es 12 Tester für 14 Tage (persönliches Konto)
-> und eine saubere Foreground-Service-Deklaration.
+> **Kurzfassung:** Der Play-Rebrand ist umgesetzt: neutraler Titel
+> „Konsolen-Radar – Preisalarm“, Package `de.konsolenradar.app`, ein eigenes
+> Radar-Icon und fertige Store-Assets. `tools/play_readiness.py` meldet für
+> `buildozer.play.spec` **0 Blocker**. Es fehlen nur noch der neue AAB-Build
+> (Hinweis, kein Blocker), die FGS-Demo und die 12er-Testphase.
 
 ---
 
@@ -15,70 +16,72 @@ veröffentlichen — ohne die bestehende Sideload-Version zu beschädigen.
 
 | Bereich | Ampel | Was fehlt |
 |---|---|---|
-| AAB & Signatur | 🟡 | `android.release_artifact = aab`, Signieren mit Upload-Key, Test mit bundletool |
-| Marke/IP | 🔴 | Neutraler Name, neues Icon ohne PlayStation-Symbole, neuer Package-Name |
+| AAB & Signatur | 🟡 | Neuer Play-AAB aus `buildozer.play.spec`; Pipeline und Upload-Key sind vorbereitet. |
+| Marke/IP | 🟢 | Erledigt: neutraler Titel, Package und Icon ohne PlayStation-Formen. |
 | Foreground-Service | 🟡 | Play-Declaration mit Beschreibung, Nutzerauswirkung und Demo-Video |
 | Datenschutz | 🟢 | Seite ist vorbereitet (`docs/privacy.html`), URL veröffentlichen |
-| Store-Assets | 🟡 | Icon 512, Feature-Grafik 1024×500, 4–8 Screenshots 1080×1920 |
+| Store-Assets | 🟢 | Icon 512, Feature-Grafik 1024×500, zwei gültige Screenshots 1080×1920 |
 | Testphase | 🟡 | 12 Tester, 14 Tage durchgehend (persönliches Konto) |
 | Rechtliches | 🟡 | Keine Sony-Verbindung suggerieren, keine Kaufzusage, faire Last |
 
 **Geschätzte Dauer:** 6–8 Wochen ab Entscheidung, davon 3 Wochen Google-Testphase
-und Review. Ohne Rebrand: nicht launchbar.
+und Review. Der technische Rebrand ist abgeschlossen; der AAB-Build ist der nächste
+Schritt.
 
 ---
 
-## 2. Die drei echten Blocker
+## 2. Blocker-Status
 
-### 2.1 Marke und IP — der wichtigste Punkt
+### 2.1 Marke und IP — umgesetzt
 
 Google Play verbietet die Nutzung fremder Marken, wenn Verwechslung möglich ist
 ([IP-Policy](https://support.google.com/googleplay/android-developer/answer/9888072)).
-Die aktuelle App heißt „PS5 Pro Search Agent" und nutzt die PlayStation-Symbole
-(Dreieck, Kreis, Kreuz, Quadrat) als Gestaltung. Das ist Trade Dress von Sony.
+Die Sideload-App heißt weiterhin „PS5 Pro Search Agent“ und behält ihre Optik. Die
+Play-Linie ist davon getrennt und nutzt keine PlayStation-Formen mehr.
 
-**Risiko:** Ablehnung wegen Trademark/Impersonation, im schlechtesten Fall
-Sperrung des Entwicklerkontos. Ein Disclaimer im Text heilt das nicht.
-
-**Empfehlung: Rebrand vor dem ersten Upload.**
-
-| Element | Sideload (bleibt) | Play (neu) |
+| Element | Sideload (unverändert) | Play (neu) |
 |---|---|---|
 | Titel | PS5 Pro Search Agent | **Konsolen-Radar – Preisalarm** |
 | Icon | PS-Symbole | Radar/Suchmarke, keine PlayStation-Formen |
-| Package | `de.ps5pro.ps5prosearchagent` | `de.konsolenradar.app` (neu, vor dem ersten Upload) |
-| Beschreibung | — | „für die PlayStation 5 Pro 2 TB" als beschreibende Nennung, mit Disclaimer |
+| Package | `de.ps5pro.ps5prosearchagent` | `de.konsolenradar.app` |
+| Build | `buildozer.spec`, APK | `buildozer.play.spec`, AAB |
 
-Der Produktname „PlayStation", „PS5" und „PS5 Pro" darf **beschreibend** genannt
-werden („kompatibel mit …"), nicht als Absender oder im Titel. Zusätzlich in die
+Umgesetzt sind:
+
+* `branding.py` schaltet Titel, Notification-Texte und UI-Motive anhand des
+  tatsächlichen Package-Namens um; `KONSOLEN_RADAR_BRAND=play` erzwingt die
+  Play-Optik für Screenshots und Tests.
+* Neutrale Icons in `assets/play/`: 512er Store-Icon, adaptives Foreground/Background
+  und Notification-Icon. Das Motiv ist ein Radar mit Preis-Pfeil, ohne Sony-Formen.
+* `store/assets/icon-512.png` und `store/assets/feature-1024x500.png` sind fertig;
+  die Telefon-Screenshots liegen als echte App-Aufnahmen in 1080×1920 vor.
+* `tools/p4a_hook.py` liest Package und Service-Klasse dynamisch aus dem gerenderten
+  Manifest. Der Play-BootReceiver liegt unter `android_src_play/`.
+
+Der Produktname „PlayStation“, „PS5“ und „PS5 Pro“ darf **beschreibend** genannt
+werden („kompatibel mit …“), nicht als Absender oder im Titel. Zusätzlich in die
 Beschreibung: „Nicht mit Sony Interactive Entertainment verbunden. Alle Marken
-gehören ihren jeweiligen Inhabern." Vorher eine kurze Markenrecherche (DPMA/EUIPO)
-für „Konsolen-Radar" machen.
-
-**Package-Name:** Da die App noch nicht im Play Store ist, ist der Wechsel jetzt
-kostenlos. Später geht er nicht mehr. Wenn der Package-Name `ps5pro` bleibt, ist er
-zwar nicht sichtbar, aber in der Store-URL und im APK — ein zusätzliches Angriffsziel
-für Beschwerden. Empfehlung: neuer Package-Name für die Play-Linie; die Sideload-Linie
-behält ihren Namen, bis v2.0 beide zusammenführt.
+gehören ihren jeweiligen Inhabern.“ Eine Markenrecherche (DPMA/EUIPO) für
+„Konsolen-Radar“ bleibt empfehlenswert, ist aber kein technischer Blocker.
 
 ### 2.2 AAB und Signatur
 
 Play akzeptiert seit August 2021 für neue Apps nur noch Android App Bundles.
-python-for-android und Buildozer können AAB; im Repo ist es bewusst abgeschaltet:
+python-for-android und Buildozer können AAB. Die Sideload-Spec bleibt bewusst bei APK;
+Play nutzt eine eigene Spec:
 
 ```ini
-# buildozer.spec
-android.release_artifact = apk
+# buildozer.play.spec
+android.release_artifact = aab
 ```
 
-Für den Play-Build:
+Für den Play-Build wird die Play-Spec im CI-Lauf als `buildozer.spec` aktiviert
+(`cp buildozer.play.spec buildozer.spec`). Danach läuft der bestehende Buildpfad:
 
 ```bash
-# 1. AAB statt APK bauen (in einer Kopie der Spec, damit der APK-Release intakt bleibt)
-cp buildozer.spec buildozer.spec.bak
-sed -i 's/^android.release_artifact = apk/android.release_artifact = aab/' buildozer.spec
-.venv/bin/buildozer -v android release
-mv buildozer.spec.bak buildozer.spec
+# 1. AAB aus der Play-Spec bauen (Sideload-APK bleibt unberührt)
+cp buildozer.play.spec buildozer.spec
+ARTIFACT=aab bash tools/ci_build.sh
 
 # 2. Mit dem Upload-Key signieren (PKCS#12, Alias ps5pro)
 jarsigner -keystore release.p12 -storetype PKCS12 \
@@ -103,9 +106,10 @@ und 21-MB-Universal-APK (SHA-256 `f399f91c…4312`). Geprüft: `bundletool
 validate` erfolgreich, Universal-APK mit Upload-Key signiert (Zertifikat
 `63:E5:1D:…:70:DD`), Package `de.ps5pro.ps5prosearchagent`,
 `versionCode 10400`, `versionName 1.4.0`, minSdk 24, targetSdk 36,
-`FOREGROUND_SERVICE_SPECIAL_USE`, `specialUse`-Subtyp und BootReceiver. Der
-Build nutzt noch den aktuellen Package-Namen; vor dem ersten Play-Upload muss
-der Rebrand erfolgen.
+`FOREGROUND_SERVICE_SPECIAL_USE`, `specialUse`-Subtyp und BootReceiver. Dieser
+Lauf dokumentiert den alten Package-Namen der v1.4.0. Für den Play-Upload muss
+derselbe Workflow mit `buildozer.play.spec` laufen; erwartet werden Package
+`de.konsolenradar.app` und Titel `Konsolen-Radar – Preisalarm`.
 
 Wichtig:
 
@@ -151,15 +155,17 @@ dem ersten Review treffen, nicht vorher.
 
 ## 3. Technische Checkliste
 
-- [ ] Neuer Package-Name und neue App-ID für die Play-Linie
-- [ ] `android.release_artifact = aab` im Play-Build, APK-Release unverändert
-- [x] AAB signiert (`jarsigner -verify`), mit bundletool validiert und als Universal-APK gebaut/getestet (macht der Workflow automatisch)
+- [x] Neuer Package-Name und neue App-ID für die Play-Linie (`de.konsolenradar.app`)
+- [x] `android.release_artifact = aab` im Play-Build, APK-Release unverändert
+- [x] Play-AAB-Pfad auf `buildozer.play.spec` und `android_src_play` umgestellt
+- [ ] Neuen Play-AAB bauen, signieren und mit bundletool testen
+- [x] AAB-Pipeline signiert (`jarsigner -verify`), validiert mit bundletool und baut eine Universal-APK (macht der Workflow automatisch)
 - [ ] Play App Signing aktiviert, Upload-Key sicher verwahrt
 - [ ] `versionCode` monoton, `versionName` = Tag
 - [ ] targetSdk 36, minSdk 24, arm64-v8a
 - [ ] Manifest: keine unnötigen Permissions; `FOREGROUND_SERVICE_SPECIAL_USE` mit Subtyp
 - [ ] Datenschutz-URL öffentlich (GitHub Pages aus `docs/`)
-- [ ] Store-Assets vollständig (siehe Abschnitt 4)
+- [x] Store-Assets für die Mindestanforderung vollständig (Icon, Feature, 2 Screenshots)
 - [ ] FGS-Demo-Video gedreht und verlinkt
 - [ ] Interne Testspur mit echtem Gerät (Android 14 und 15)
 - [ ] Pre-Launch-Report aktiviert und geprüft
@@ -172,7 +178,7 @@ dem ersten Review treffen, nicht vorher.
 |---|---|---|
 | App-Icon | 512×512, 32-bit PNG mit Alpha, ≤ 1 MB | Radar-/Suchmotiv, **keine** PlayStation-Formen |
 | Feature-Grafik | 1024×500, JPEG/24-bit PNG ohne Alpha | Radar + Trefferliste, dunkler PS1-Look, kein Text im Randbereich |
-| Telefon-Screenshots | 4–8, 1080×1920 (9:16), JPEG/PNG ohne Alpha | Radar, Treffer mit `BESTÄTIGT`, Detail mit Preisverlauf, Webhook-Setup (Token maskiert!), Schnellscan |
+| Telefon-Screenshots | mind. 2, 1080×1920 (9:16), JPEG/PNG ohne Alpha | Radar und Trefferliste sowie Detail mit Preisverlauf; weitere Motive optional |
 | Tablet-Screenshots | optional 4, 9:16 oder 16:9, 1080–7680 px | Querformat mit Radar links, Liste rechts |
 | Preview-Video | optional, YouTube | 30 s: Scan → Treffer → Detail → Alarm |
 
@@ -180,9 +186,11 @@ Regeln: echte App-Screens, keine erfundenen Funktionen, keine Ranglisten-/Preis-
 keine Wörter wie „beste", „Nr. 1", „garantiert". Screenshots ohne personenbezogene
 Daten und ohne sichtbare Webhook-URL.
 
-Die vorhandenen README-Bilder sind 510×1020 (1:2) und damit für Play zu klein und im
-falschen Verhältnis. Für den Store neu bei 1080×1920 aufnehmen; `tools/screenshots.py`
-kann die Szenen liefern, das Seitenverhältnis muss beim Aufnehmen gepolstert werden.
+Die Store-Screenshots liegen als echte Aufnahmen in `store/assets/phone/`:
+`01-radar.png` und `02-detail.png`, jeweils 1080×1920. `tools/screenshots.py` nimmt
+das App-Fenster per GDI/PrintWindow auf und skaliert anschließend auf 1080×1920.
+Weitere Motive (z. B. Webhook-Setup mit maskiertem Token) können ergänzt werden,
+sind für die Mindestanforderung aber nicht nötig.
 
 ---
 
@@ -255,12 +263,12 @@ Organisationskonten sind ausgenommen. Danach Produktionszugang beantragen
 
 | Risiko | Wahrscheinlichkeit | Antwort |
 |---|---|---|
-| IP/Trademark-Ablehnung | hoch ohne Rebrand | neutraler Titel/Icon, Disclaimer, keine Sony-Formen |
+| IP/Trademark-Ablehnung | niedrig nach Rebrand | neutraler Titel/Icon, Disclaimer, keine Sony-Formen |
 | FGS-`specialUse` abgelehnt | mittel | Erklärung + Video; Fallback WorkManager |
 | „Scraping"-Beschwerde eines Shops | niedrig–mittel | faire Last, keine Umgehung, keine Datenweitergabe, keine Werbung mit Shop-Inhalten |
 | Data-Safety-Widerspruch | niedrig | konservative Angabe, Privacy-Seite konsistent |
 | „Minimum functionality"/Spam | niedrig | echte Funktion, 42 Shops, Historie, Verifikation |
-| Impersonation | hoch ohne Rebrand | siehe oben; kein „offiziell", keine Sony-Logos |
+| Impersonation | niedrig nach Rebrand | kein „offiziell“, keine Sony-Logos, neutraler Absender |
 
 ---
 
@@ -281,7 +289,7 @@ Organisationskonten sind ausgenommen. Danach Produktionszugang beantragen
 | Woche | Aufgabe |
 |---|---|
 | 0 | Rebrand-Entscheidung, Package-Name, Markenrecherche |
-| 1 | Icon/Feature-Grafik/Screenshots, AAB-Pipeline, interner Test |
+| 1 | Icon/Feature-Grafik/Screenshots ✅, AAB-Pipeline ✅, interner Test |
 | 2 | Privacy-URL, Formulare, FGS-Video, Closed-Track vorbereiten |
 | 3 | Closed Test startet (12 Tester) |
 | 4–5 | Feedback, Fixes, 14-Tage-Fenster halten |
@@ -295,12 +303,13 @@ Der zeitliche Aufwand liegt realistisch bei 30–50 Stunden Arbeit plus 3 Wochen
 
 ## 11. Checkliste vor dem Upload
 
-- [ ] Titel/Icon/Beschreibung ohne Sony-Marke, Disclaimer vorhanden
-- [ ] Package-Name final, `versionCode` neu
+- [x] Titel/Icon/Beschreibung ohne Sony-Marke, Disclaimer vorhanden
+- [x] Package-Name final (`de.konsolenradar.app`), `versionCode` 10400
+- [ ] Play-AAB aus `buildozer.play.spec` bauen und `versionCode` für den Upload prüfen
 - [ ] AAB signiert und mit bundletool getestet
 - [ ] Privacy-URL erreichbar (HTTP 200), Data-Safety-Antworten konsistent
 - [ ] FGS-Declaration-Text + Video hinterlegt
-- [ ] 4+ Screenshots 1080×1920, Icon 512, Feature-Grafik 1024×500
+- [x] 2+ Screenshots 1080×1920, Icon 512, Feature-Grafik 1024×500
 - [ ] Interne Tests auf Android 14/15, Akku-Optimierung, Boot-Start
 - [ ] Keine Tokens/URLs in Screenshots oder Store-Texten
 - [ ] 12 Tester organisiert, 14-Tage-Fenster eingeplant

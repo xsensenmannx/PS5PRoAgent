@@ -186,7 +186,7 @@ docs/PLAY_STORE.md            Launchplan, Policy-Risiken und Play-Checkliste
 docs/privacy.html             Datenschutzseite fuer GitHub Pages / Play
 docs/PRIVACY.md               Datenschutzerklaerung als Markdown
 store/                        Listing-Texte, Data-Safety- und Rating-Antworten
-tools/play_readiness.py       beratender Play-Store-Readiness-Check
+tools/play_readiness.py       Play-Store-Readiness (Standard: buildozer.play.spec)
 .github/workflows/ci.yml      Push/PR -> Shop-Config, Logiktests, Kivy-Smoke (4 Groessen)
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
 .github/workflows/play-aab.yml manuell -> signiertes AAB + Universal-APK fuer Google Play
@@ -205,7 +205,7 @@ python3 tools/validate_shop_config.py
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
-responsive Layout-Geometrie und Boot-Manifest — 785 Zusicherungen, ohne Kivy
+responsive Layout-Geometrie und Boot-Manifest — 798 Zusicherungen, ohne Kivy
 und ohne Android. Der CI-Workflow führt sie bei jedem Push und Pull Request
 aus, der Release-Workflow zusätzlich vor jedem Release. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät; er läuft in
@@ -267,7 +267,7 @@ Aktueller Stand und Archiv:
 * **Review-Fixes (unveröffentlicht, main)** – `OnlineOnly` und
   `LimitedAvailability` zählen wie `InStock`, `Discontinued` wie `SoldOut`;
   Vorbestellungen laufen wieder über den v1.3-Pfad „NUR SOFORT"; nur belegte
-  Konfidenzsignale, kürzere Belege und besser lesbare UI-Labels. Dazu 785
+  Konfidenzsignale, kürzere Belege und besser lesbare UI-Labels. Dazu 798
   Logiktests.
 * **v1.3** – Vorherige Version (versionCode 10300): Webhook-Alarme für ntfy,
   Telegram und Discord, Treffer-Verifikation mit Bestätigungskennzeichnung und

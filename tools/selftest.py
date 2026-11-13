@@ -1382,6 +1382,50 @@ def v14_tests():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def play_rebrand_tests():
+    """Play-Kanal getrennt vom Sideload-Kanal pruefen."""
+    import branding
+
+    sid = configparser.ConfigParser(interpolation=None)
+    sid.read(os.path.join(ROOT, "buildozer.spec"), encoding="utf-8")
+    play = configparser.ConfigParser(interpolation=None)
+    play.read(os.path.join(ROOT, "buildozer.play.spec"), encoding="utf-8")
+
+    check("Sideload-Titel unveraendert", sid.get("app", "title"),
+          "PS5 Pro Search Agent")
+    check("Sideload-Package unveraendert",
+          sid.get("app", "package.domain") + "." + sid.get("app", "package.name"),
+          "de.ps5pro.ps5prosearchagent")
+    check("Play-Titel neutral", play.get("app", "title"),
+          "Konsolen-Radar – Preisalarm")
+    check("Play-Package neutral",
+          play.get("app", "package.domain") + "." + play.get("app", "package.name"),
+          "de.konsolenradar.app")
+    check("Play-AAB aktiv", play.get("app", "android.release_artifact"), "aab")
+    check("Play-BootReceiver", os.path.isfile(os.path.join(
+        ROOT, "android_src_play", "de", "konsolenradar", "app",
+        "BootReceiver.java")), True)
+    check("Play-Branding-Paket", branding.PLAY_PACKAGE, "de.konsolenradar.app")
+    check("Play-Branding-Titel", branding.PLAY_TITLE, "Konsolen-Radar – Preisalarm")
+    check("Sideload-Service bleibt alt",
+          branding.labels("sideload")["channel_id"], "ps5pro_hits")
+    check("Play-Service neutral",
+          branding.labels("play")["channel_id"], "console_radar_hits")
+
+    from struct import unpack
+
+    def size(rel):
+        with open(os.path.join(ROOT, rel), "rb") as f:
+            kopf = f.read(24)
+        return unpack(">II", kopf[16:24])
+
+    check("Store-Icon 512", size("store/assets/icon-512.png"), (512, 512))
+    check("Feature-Grafik", size("store/assets/feature-1024x500.png"), (1024, 500))
+    shots = sorted(os.listdir(os.path.join(ROOT, "store", "assets", "phone")))
+    shots = [n for n in shots if n.lower().endswith(".png")]
+    check("Store-Screenshots", len(shots) >= 2, True)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -1397,6 +1441,7 @@ if __name__ == "__main__":
         v13_tests()
         v14_tests()
         spec_tests()
+        play_rebrand_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.
         try:
