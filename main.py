@@ -1,4 +1,4 @@
-"""PS5 Pro Search Agent v27 - PS1 Edition"""
+"""PS5 Pro Search Agent v5.1 - PS1 Edition"""
 import os, sys, json, re, time, math, random, queue, threading, hashlib
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -444,6 +444,42 @@ def scan_fortschritt(done, total, treffer, sekunden):
     return text
 
 
+def radar_flaeche(breite, hoehe, reserve_bottom, reserve_top):
+    """Mittelpunkt und Radius der sichtbaren Radar-Scheibe.
+
+    Gibt ``None`` zurueck, wenn der freie Bereich zu klein ist. Die Scheibe
+    bleibt zwischen ``reserve_bottom`` und ``reserve_top``, liegt also nicht
+    unter der Trefferliste.
+    """
+    uh = hoehe - reserve_bottom - reserve_top
+    if uh < dp(40) or breite < dp(40):
+        return None
+    mr = min(breite/2.0, uh/2.0) - dp(16)
+    if mr < dp(40):
+        return None
+    return {"cx": breite/2.0, "cy": reserve_bottom + uh/2.0, "mr": mr}
+
+
+def radar_treffer_radius(mr):
+    """Groesste Ausdehnung einer Treffer-Marke (Pulsring) in dp."""
+    return min(dp(20), mr*0.11)
+
+
+def radar_treffer_xy(blip, cx, cy, mr):
+    """Position einer Treffer-Marke im Radar, immer innerhalb des Aussenrings.
+
+    Pulsring und Zielmarke eines Treffers brauchen Platz. Ohne Begrenzung
+    liegen Treffer am Rand auf dem Aussenring und den Gradzahlen; deshalb wird
+    der Abstand auf ``mr - Marke - 2dp`` gekappt. Die Richtung bleibt gleich.
+    """
+    dx = blip["x"]*mr; dy = blip["y"]*mr
+    d = math.hypot(dx, dy)
+    grenze = max(0.0, mr - radar_treffer_radius(mr) - dp(2))
+    if d > grenze and d > 0:
+        k = grenze/d; dx *= k; dy *= k
+    return cx + dx, cy + dy
+
+
 def radar_frame_step(acc, dt, scanning, paused):
     """Reine Entscheidung, ob dieser Tick gezeichnet wird (testbar ohne Kivy).
 
@@ -537,17 +573,13 @@ class RadarWidget(Widget):
     def _redraw(self):
         self.canvas.clear()
         if self.width<=0 or self.height<=0: return
-        uh=self.height-self.reserve_bottom-self.reserve_top
-        if uh<dp(40) or self.width<dp(40):
+        flaeche=radar_flaeche(self.width,self.height,
+                              self.reserve_bottom,self.reserve_top)
+        if flaeche is None:
             for _,l in self._bls: l.opacity=0
             self._hud_l.opacity=self._hud_r.opacity=0
             return
-        cx=self.width/2; cy=self.reserve_bottom+uh/2
-        mr=min(self.width/2,uh/2)-dp(16)
-        if mr<dp(40):
-            for _,l in self._bls: l.opacity=0
-            self._hud_l.opacity=self._hud_r.opacity=0
-            return
+        cx=flaeche["cx"]; cy=flaeche["cy"]; mr=flaeche["mr"]
         now=time.time()
         with self.canvas:
             Color(*RADAR_BG); Rectangle(pos=(0,0),size=(self.width,self.height))
@@ -603,22 +635,27 @@ class RadarWidget(Widget):
                     sz=mr*(f["size"]*1.4); c=f["color"]
                     self._sym(f["type"],fx,fy,sz,(c[0],c[1],c[2],f["alpha"]))
             for b in self.blips:
-                bx=cx+b["x"]*mr; by=cy+b["y"]*mr
+                # Treffer bleiben innerhalb des Aussenrings: frueher lagen
+                # Pulsring und Zielmarke am Rand auf Ring und Gradzahlen.
+                bx,by=radar_treffer_xy(b,cx,cy,mr)
                 co=STATUS_COLORS.get(b["klass"],C_FG_DIM)
                 if b["klass"]=="hit":
+                    # Groesse folgt der Scheibe, damit auch ein kleiner Radar
+                    # keine Marken zeigt, die groesser als der Ring sind.
+                    deco=radar_treffer_radius(mr)
                     pu=0.5+0.5*math.sin(now*4)
                     Color(co[0],co[1],co[2],0.30*pu)
-                    Line(circle=(bx,by,dp(12)+pu*dp(8)),width=dp(1.4))
+                    Line(circle=(bx,by,deco*(0.6+0.4*pu)),width=dp(1.4))
                     Color(co[0],co[1],co[2],0.18)
-                    Ellipse(pos=(bx-dp(10),by-dp(10)),size=(dp(20),dp(20)))
+                    Ellipse(pos=(bx-deco/2,by-deco/2),size=(deco,deco))
                     # Zielmarke: vier kurze Winkel um den Treffer.
-                    d=dp(11); arm=dp(4)
+                    d=deco*0.55; arm=deco*0.2
                     for sx,sy in ((1,1),(-1,1),(1,-1),(-1,-1)):
                         Color(co[0],co[1],co[2],0.75)
                         Line(points=[bx+sx*d,by+sy*d,bx+sx*(d-arm),by+sy*d],width=dp(1.1))
                         Line(points=[bx+sx*d,by+sy*d,bx+sx*d,by+sy*(d-arm)],width=dp(1.1))
-                    r=dp(6)
-                else: r=dp(4)
+                    r=deco*0.3
+                else: r=min(dp(4),mr*0.022)
                 Color(co[0],co[1],co[2],b.get("intensity",1.0))
                 Ellipse(pos=(bx-r,by-r),size=(r*2,r*2))
             for sym,col,deg in [("triangle",PS_TRIANGLE,0),("circle",PS_CIRCLE,90),
@@ -638,8 +675,15 @@ class RadarWidget(Widget):
                              cx+sx*dp(9),cy+sy*dp(9)],width=dp(1.0))
         for deg,l in self._bls:
             a=math.radians(90-deg)
-            l.pos=(cx+(mr+dp(11))*math.cos(a)-l.width/2,
-                    cy+(mr+dp(11))*math.sin(a)-l.height/2); l.opacity=1
+            lx=cx+(mr+dp(11))*math.cos(a)-l.width/2
+            ly=cy+(mr+dp(11))*math.sin(a)-l.height/2
+            # Gradzahlen bleiben im Radar: sonst werden "90" und "270" am
+            # Fensterrand abgeschnitten oder liegen auf der Trefferliste.
+            lx=max(dp(1),min(lx,self.width-l.width-dp(1)))
+            lo=self.reserve_bottom+dp(1)
+            hi=self.height-self.reserve_top-l.height-dp(1)
+            if hi>=lo: ly=max(lo,min(ly,hi))
+            l.pos=(lx,ly); l.opacity=1
         self._hud_l.text=(f"SCANNING · {len(self.blips)}/{len(HAENDLER)}"
                           if self.scanning else f"{len(HAENDLER)} HÄNDLER · DE + AT")
         self._hud_l.pos=(self.x+dp(14), self.reserve_bottom+dp(8))
@@ -813,6 +857,16 @@ class LogoWidget(FloatLayout):
         th=max(dp(34),h-dp(16))
         self.textbox.pos=(tx,self.y+(h-th)/2); self.textbox.size=(tw,th)
         self.sub.size_hint_y=None; self.sub.height=dp(13)
+        # Der volle Schriftzug braucht auf schmalen Geraeten mehr Platz als der
+        # Textkasten bietet. Dann bleibt "PS5 PRO" als kurze, vollstaendig
+        # lesbare Marke stehen, statt den Schriftzug mit "..." abzuschneiden.
+        compact = tw < dp(460)
+        title_text = "[b]PS5 PRO[/b]" if compact else \
+            "[b]PLAYSTATION[/b] [color=3f8cff][b]5 PRO[/b][/color]"
+        sub_text = "SEARCH AGENT  ·  2 TB" if compact else \
+            "S E A R C H   A G E N T   ·   2 T B"
+        if self.title.text != title_text: self.title.text = title_text
+        if self.sub.text != sub_text: self.sub.text = sub_text
         fs=max(sp(12),min(sp(19),tw*0.062))
         self.title.font_size=fs
         self.sub.font_size=max(sp(7),min(sp(10),fs*0.50))
@@ -928,7 +982,7 @@ class ResultCard(ButtonBehavior, BoxLayout):
         s=self._font_scale
         fs=lambda base: sp(base*s)
 
-        # Kompakte Zeile: Haendler/Meta, Preis/Status. Die alte
+        # Kompakte Zeile: Haendler/Meta/Status links, Preis rechts. Die alte
         # 156-dp-Karte zeigte auf dem Telefon nur einen Treffer pro Wisch.
         # Nur BOT-SCHUTZ braucht einen eigenen Container fuer die zweite Zeile.
         challenge=r["klass"]=="challenge"
@@ -960,6 +1014,21 @@ class ResultCard(ButtonBehavior, BoxLayout):
         meta_row.add_widget(m)
         info.add_widget(meta_row)
 
+        # Status gehoert in die linke, breite Spalte. Rechts teilen sich
+        # Preis und Delta/BEST den Platz; so bleibt "NICHT VERFÜGBAR" auch
+        # auf 320 dp und bei 120 % Schrift vollständig lesbar.
+        st_map={"hit":"VERFÜGBAR","expensive":"ZU TEUER","unknown":"PREIS OFFEN",
+                "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ",
+                "parser":"PARSER-FEHLER"}
+        st=st_map.get(r["klass"],"?")
+        st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
+                     font_size=fs(8.5),font_name=SST_FONT,
+                     halign="left",valign="middle",
+                     size_hint_y=None,height=dp(14)*s,
+                     shorten=True,shorten_from="right")
+        st_lbl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        info.add_widget(st_lbl)
+
         holder.add_widget(info)
 
         right=BoxLayout(orientation="vertical",size_hint_x=None,
@@ -975,18 +1044,8 @@ class ResultCard(ButtonBehavior, BoxLayout):
         p.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         right.add_widget(p)
 
-        st_map={"hit":"VERFÜGBAR","expensive":"ZU TEUER","unknown":"PREIS OFFEN",
-                "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ",
-                "parser":"PARSER-FEHLER"}
-        st=st_map.get(r["klass"],"?")
         srow=BoxLayout(orientation="horizontal",size_hint_y=None,
                        height=dp(14)*s,spacing=dp(2))
-        st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
-                     font_size=fs(8.5),font_name=SST_FONT,
-                     halign="left",valign="middle",
-                     shorten=True,shorten_from="right")
-        st_lbl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-        srow.add_widget(st_lbl)
         if self._best:
             b=Label(text="BEST",color=PS1_CYAN,font_size=fs(7.5),bold=True,
                     font_name=SST_FONT,halign="right",valign="middle",
@@ -1009,7 +1068,8 @@ class ResultCard(ButtonBehavior, BoxLayout):
                     size_hint_x=None,width=dp(44)*s)
             d.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             srow.add_widget(d)
-        right.add_widget(srow)
+        # Eine leere Zeile wuerde die Preisspalte unnoetig aufblaehen.
+        if len(srow.children): right.add_widget(srow)
         holder.add_widget(right)
 
         # BOT-SCHUTZ ist kein Fehler der App: Der Shop verlangt eine
@@ -1148,15 +1208,17 @@ def layout_geometrie(w,h,top_in=0.0,bottom_in=0.0,left_in=0.0,right_in=0.0):
             wide=True; panel_w=kandidat; panel_x=kandidat_x
             results_h=kandidat_h; logo_w=kandidat_logo
 
-    # Nur im Hochformat liegt die Trefferleiste unter dem Radar. Der kleine
-    # Puffer haelt Gradzahlen und Aussenring frei von der Panelkante; im
-    # Querformat steht die Liste rechts und der Radar nutzt die volle Hoehe.
+    # Der Puffer haelt Gradzahlen und Aussenring frei von der Trefferliste:
+    # im Hochformat unter dem Radar, im Querformat zwischen Radar und der
+    # Liste am rechten Rand. Ohne den Puffer lag der Rand der Scheibe auf der
+    # Panelkante und die Trefferleiste schnitt den Radar an.
     radar_bottom=ch+bottom if wide else ch+results_h+bottom+RADAR_PANEL_GAP
+    radar_w=max(dp(200),panel_x-RADAR_PANEL_GAP) if wide else w
     return {
         "wide":wide,"logo_h":lh,"logo_w":logo_w,"controls_h":ch,
         "results_h":results_h,"panel_w":panel_w,"panel_x":panel_x,
         "panel_y":panel_y,"usable_w":usable_w,
-        "radar_w":panel_x if wide else w,
+        "radar_w":radar_w,
         "radar_bottom":radar_bottom,
         "radar_top":lh+top,
     }
@@ -1636,11 +1698,22 @@ class MainUI(FloatLayout):
                 font_name=SST_FONT,halign="left",valign="top")
         m.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); box.add_widget(m)
         row=BoxLayout(size_hint_y=None,height=dp(38),spacing=dp(6))
-        start=PS1Button(text="SCAN STARTEN",accent=PS1_GREEN,font_size=sp(9.5))
-        rules=PS1Button(text="ALARM EINRICHTEN",accent=PS1_PINK,font_size=sp(9.5))
-        later=PS1Button(text="SPÄTER",accent=PS1_SILVER,font_size=sp(9.5))
-        p=Popup(title="",content=box,size_hint=(None,None),
-                width=min(dp(520),Window.width*0.93),height=dp(330),
+        # Drei Buttons nebeneinander: Auf sehr schmalen Displays braucht
+        # "ALARM EINRICHTEN" eine kleinere Schrift, sonst wird das Label
+        # abgeschnitten. Ab 360 dp bleibt die groessere Schrift erhalten.
+        btn_fs=sp(8.2) if Window.width < dp(360) else sp(9.5)
+        start=PS1Button(text="SCAN STARTEN",accent=PS1_GREEN,font_size=btn_fs)
+        rules=PS1Button(text="ALARM EINRICHTEN",accent=PS1_PINK,font_size=btn_fs)
+        later=PS1Button(text="SPÄTER",accent=PS1_SILVER,font_size=btn_fs)
+        # Auch im kurzen Querformat darf der Dialog nicht ueber den Bildschirm
+        # hinauswachsen. Der Inhalt wird dann scrollbar statt unten zu fehlen.
+        box.size_hint=(1,None)
+        box.bind(minimum_height=box.setter("height"))
+        sv=ScrollView(bar_width=dp(4),do_scroll_x=False)
+        sv.add_widget(box)
+        p=Popup(title="",content=sv,size_hint=(None,None),
+                width=min(dp(520),Window.width*0.93),
+                height=min(dp(330),Window.height*0.9),
                 background_color=(0.045,0.05,0.062,0.99),separator_height=0)
         def go(start_scan=False,open_rules=False):
             p.dismiss()
@@ -1831,12 +1904,32 @@ class MainUI(FloatLayout):
             except (TypeError,ValueError): p_streak=0
             if p_streak>0: parser_fehler.append((h["name"],p_streak))
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(8))
-        titel=f"SHOP-HEALTH · {len(HAENDLER)} SHOPS · {len(fehler)} AUFFAELLIG"
+        kopf=Label(text="[b]SHOP-HEALTH[/b]",markup=True,color=PS1_SILVER,
+                   font_size=sp(12),font_name=SST_FONT,
+                   size_hint_y=None,height=dp(22),
+                   halign="left",valign="middle")
+        kopf.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        box.add_widget(kopf)
+        # Zaehler und Fehlerzahl in einer eigenen Zeile: Auch bei vielen
+        # auffaelligen Shops bleibt der Kopf dadurch vollstaendig lesbar.
+        summary=Label(text=f"{len(HAENDLER)} SHOPS · {len(fehler)} AUFFAELLIG",
+                      color=PS1_CYAN,font_size=sp(9),font_name=SST_FONT,
+                      size_hint_y=None,height=dp(14),
+                      halign="left",valign="middle",shorten=True,
+                      shorten_from="right")
+        summary.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        box.add_widget(summary)
         if parser_fehler:
-            titel+=f" · PARSER-SERIE {max(n for _,n in parser_fehler)}"
-        box.add_widget(Label(text=f"[b]{titel}[/b]",markup=True,color=PS1_SILVER,
-                             font_size=sp(12),font_name=SST_FONT,
-                             size_hint_y=None,height=dp(26)))
+            # Die Parser-Serie ist eine Zusatzinformation. Sie bekommt eine
+            # eigene Zeile, damit der Titel auch auf 320 dp nicht abgeschnitten
+            # wird; der Inhalt bleibt vollständig sichtbar.
+            pser=Label(text=f"PARSER-SERIE {max(n for _,n in parser_fehler)}",
+                       color=PS1_YELLOW,font_size=sp(8.5),font_name=SST_FONT,
+                       size_hint_y=None,height=dp(14),
+                       halign="left",valign="middle",shorten=True,
+                       shorten_from="right")
+            pser.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            box.add_widget(pser)
         sv=ScrollView(bar_width=dp(4))
         inner=BoxLayout(orientation="vertical",size_hint_y=None,spacing=dp(2))
         inner.bind(minimum_height=inner.setter("height"))

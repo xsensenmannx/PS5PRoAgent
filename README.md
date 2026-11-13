@@ -8,23 +8,22 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v5.0 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v5.0/ps5prosearchagent-5.0-arm64-v8a-debug.apk)**
+**[PS5 Pro Search Agent v5.1 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v5.1/ps5prosearchagent-5.1-arm64-v8a-debug.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
 
 | Stand | Bedeutung |
 |---|---|
-| **v5.0 Final** | Die aktuelle **veröffentlichte** Version. Für Installation und Updates nehmen. |
+| **v5.1** | Die aktuelle Version (versionCode 18). Diese APK installieren. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
-Es gibt nur noch diese zwei **veröffentlichten** Releases. Alle Zwischenstände,
-Beta-Versionen und Test-Releases wurden entfernt. Alle Downloads:
+Es gibt nur diese zwei Releases. Alle Zwischenstände, Beta-Versionen und
+Test-Releases wurden entfernt. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
-> **Projektstand:** Der `main`-Branch enthält den **v5.1-Code** (Radar-Abstand,
-> Schrift-Skalierung und Parser-Status). v5.1 ist noch **nicht veröffentlicht**;
-> die Downloads oben sind **v5.0 Final** und **v1.0**.
+> **Eine Nummer für alles:** App, `main`-Branch und Download heißen **v5.1**.
+> Eine eigene v5.0-Datei wird nicht mehr angeboten.
 
 ## Was die App kann
 
@@ -40,8 +39,8 @@ Beta-Versionen und Test-Releases wurden entfernt. Alle Downloads:
 * **Fairer Bot-Schutz:** 403/CAPTCHA wird erkannt und nicht wiederholt; 429
   respektiert `Retry-After` und wird höchstens einmal erneut versucht. Kein
   Captcha-Solver, keine Proxy-Rotation, kein JavaScript-Challenge-Bypass.
-* **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`),
-  Sparkline und 30-Tage-Tief auf jeder Trefferkarte.
+* **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`);
+  Sparkline und 30-Tage-Tief stehen in der Detailansicht einer Trefferkarte.
 * **Trefferqualität**: erkennt Zustand (neu/gebraucht), Verkäufer, Vorbestellung
   und Bot-Schutz. Gebrauchtware und Vorbestellungen lösen standardmäßig keinen
   Alarm aus; Details stehen beim langen Tippen auf einer Karte.
@@ -67,9 +66,12 @@ Beta-Versionen und Test-Releases wurden entfernt. Alle Downloads:
   nach einem Neustart oder App-Update automatisch wieder. Der Boot-Receiver
   prüft zuerst die lokale Einstellung und startet nur dann.
 * **Kompakte Trefferliste**: Treffer erscheinen in allen Ansichten als vertikale
-  Zeilen mit Preis und Status rechts; mehrere Treffer sind gleichzeitig sichtbar.
+  Zeilen mit Händler/Status links und Preis rechts; mehrere Treffer sind gleichzeitig sichtbar.
   Im Querformat ab 600 dp wandert die Liste an den rechten Rand, das Radar bleibt
-  links. Dialoge sind in der Breite begrenzt; System-Insets werden berücksichtigt.
+  links. Radar und Trefferliste sind in **beiden** Ausrichtungen durch einen festen
+  Abstand getrennt; die Treffer-Marken bleiben innerhalb des Radarrings und
+  überdecken weder Gradzahlen noch Liste. Dialoge sind in der Breite begrenzt;
+  System-Insets werden berücksichtigt.
 * **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**. STOP und
   App-Pause setzen ein Abbruchsignal; laufende Requests laufen höchstens noch
   bis zum Timeout, danach starten keine Retries oder weiteren Shops mehr.
@@ -133,16 +135,17 @@ python3 tools/validate_shop_config.py
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
-responsive Layout-Geometrie und Boot-Manifest — 584 Zusicherungen, ohne Kivy
+responsive Layout-Geometrie und Boot-Manifest — 660 Zusicherungen, ohne Kivy
 und ohne Android. Der Release-Workflow führt sie vor jedem Release aus. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät.
 `tools/validate_shop_config.py` prüft die echte `shop_config.json` mit genau
 derselben Validierung wie die App und läuft im Release-Workflow vor
 den Logiktests.
 
-`tools/kivy_smoke.py` öffnet die Popups **Alarm-Regeln**, **Shop-Health** und
-**Detailansicht** mit echtem Kivy, prüft Inhalt und Größe und klickt die
-wichtigsten Schaltflächen durch. Er nutzt ein temporäres Datenverzeichnis und
+`tools/kivy_smoke.py` öffnet die Popups **Alarm-Regeln**, **Shop-Health**,
+**System Config**, **Detailansicht** und **Onboarding** mit echtem Kivy, prüft
+Inhalt, Größe und ob die Beschriftungen vollständig in ihre Widgets passen, und
+klickt die wichtigsten Schaltflächen durch. Er nutzt ein temporäres Datenverzeichnis und
 ersetzt alle Netzwerk-, Benachrichtigungs- und Browser-Aufrufe. Auf Linux ohne
 Display läuft er über Xvfb:
 
@@ -180,10 +183,13 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Es bleiben nur diese zwei Releases:
 
-* **v5.0 Final** – Die fertige Version (versionCode 17): Radar-HUD mit
-  Scan-Fortschritt und Zielmarken, Bestpreis-Markierung, Metall-Verlauf der
-  Trefferliste und zentrale `SETUP`-Systemkonfiguration. Enthält den
-  nachgebauten Preis-Layout-Fix und alle älteren Parser-, Alarm- und
+* **v5.1** – Die aktuelle Version (versionCode 18): Radar und Trefferliste sind
+  in Hoch- und Querformat fest getrennt, die Treffer-Marken bleiben innerhalb
+  des Radarrings, die Gradzahlen werden nicht mehr angeschnitten. Dazu kommen
+  die frei skalierbare Schrift (SETUP), Parserfehler getrennt von echter
+  Nicht-Verfügbarkeit, Radar-HUD mit Scan-Fortschritt und Zielmarken,
+  Bestpreis-Markierung, der Metall-Verlauf der Trefferliste und die zentrale
+  `SETUP`-Systemkonfiguration. Enthält alle älteren Parser-, Alarm- und
   Hintergrunddienste.
 * **v1.0** – Der erste fertige Stand (targetSdk 36). Bleibt als Archiv-Release
   erhalten.

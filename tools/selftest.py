@@ -5,11 +5,12 @@ Verfuegbarkeit, Bot-Schutz, Klassifizierung, Haendlerdaten.
 
     python3 tools/selftest.py
 
-Exit-Code 0 = alles gruen. Wird in .github/workflows/build-apk.yml als Gate
-vor dem APK-Build ausgefuehrt, damit ein kaputtes Parsing nie in die APK geht.
+Exit-Code 0 = alles gruen. Wird im Release-Workflow als Gate vor dem
+APK-Build ausgefuehrt, damit ein kaputtes Parsing nie in die APK geht.
 """
 import configparser
 import json
+import math
 import os
 import re
 import shutil
@@ -600,7 +601,6 @@ def spec_tests():
     check("spec kivy nicht 2.3.0", "kivy==2.3.0" in req, False)
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
-    check("spec release aab", c.get("app", "android.release_artifact"), "aab")
     check("spec version", c.get("app", "version"), "5.1")
     check("spec versionCode", c.get("app", "android.numeric_version"), "18")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
@@ -999,11 +999,65 @@ def adaptive_boot_tests():
     check("Layout Tablet Panel gedeckelt", g["panel_w"] <= 460, True)
     check("Layout Tablet Trefferflaeche", g["results_h"] >= 240, True)
 
+    # Im Querformat muss zwischen Radar und Trefferliste derselbe Puffer
+    # liegen wie im Hochformat; sonst schneidet die Liste den Radar an.
+    check("Layout Tablet Radar-Abstand zur Liste",
+          g["panel_x"] - g["radar_w"], main.RADAR_PANEL_GAP)
+    fl = main.radar_flaeche(g["radar_w"], 800, g["radar_bottom"], g["radar_top"])
+    check("Layout Tablet Radar-Scheibe", fl is not None, True)
+    if fl is not None:
+        # Aussenring, Gradzahl (11 dp Abstand) und halbe Labelbreite (12 dp)
+        # bleiben links von der Trefferliste.
+        check("Layout Tablet Radar frei von der Liste",
+              fl["cx"] + fl["mr"] + main.dp(11) + main.dp(12) <=
+              g["panel_x"] + 0.5, True)
+
+    # Treffer-Marken bleiben im Radar: Pulsring und Zielmarke duerfen den
+    # Aussenring und die Gradzahlen nicht beruehren.
+    for mr in (main.dp(46), main.dp(90), main.dp(180), main.dp(320)):
+        marke = main.radar_treffer_radius(mr)
+        for bx0, by0 in ((0.0, 0.0), (0.84, 0.0), (0.6, 0.6),
+                         (-0.84, 0.0), (0.0, -0.84), (0.3, -0.7)):
+            bx, by = main.radar_treffer_xy({"x": bx0, "y": by0}, 0.0, 0.0, mr)
+            abstand = math.hypot(bx, by)
+            check(f"Radar-Treffer {int(mr)}dp ({bx0}/{by0}) im Ring",
+                  abstand <= mr - marke - main.dp(2) + 0.01, True)
+            if abstand > 0.5:
+                check(f"Radar-Treffer {int(mr)}dp ({bx0}/{by0}) Richtung",
+                      round(math.degrees(math.atan2(by, bx)), 6),
+                      round(math.degrees(math.atan2(by0, bx0)), 6))
+
     check("Layout Foldable quer", main.layout_geometrie(884, 700)["wide"], True)
     check("Layout Handy quer bleibt kompakt",
           main.layout_geometrie(800, 360)["wide"], False)
     check("Layout Tablet hoch bleibt einspaltig",
           main.layout_geometrie(800, 1280)["wide"], False)
+
+    # Kleine Displays und Querformat: Panel, Logo, Bedienleiste und Radar
+    # duerfen sich nicht ueberlagern; im Hochformat bleibt der Radar-Puffer
+    # auch bei der kuerzesten unterstuetzten Hoehe erhalten.
+    for lw, lh in ((320, 240), (320, 480), (360, 640), (420, 480),
+                    (480, 320), (640, 360), (720, 360), (800, 360),
+                    (420, 820), (884, 700)):
+        bg = main.layout_geometrie(lw, lh)
+        name = f"{lw}x{lh}"
+        rechts = bg["panel_x"] + bg["panel_w"]
+        oben = bg["panel_y"] + bg["results_h"]
+        check(f"Layout {name}: Panel im Fenster",
+              bg["panel_x"] >= 0 and rechts <= lw + 0.5 and
+              bg["panel_y"] >= bg["controls_h"] - 0.5 and oben <= lh + 0.5,
+              True)
+        if bg["wide"]:
+            logo_frei = bg["panel_x"] >= bg["logo_w"] - 0.5
+        else:
+            logo_frei = oben <= lh - bg["logo_h"] + 0.5
+        check(f"Layout {name}: Panel ueberlappt Logo nicht", logo_frei, True)
+        if not bg["wide"]:
+            check(f"Layout {name}: Radar-Abstand",
+                  bg["radar_bottom"] - oben, main.RADAR_PANEL_GAP)
+        else:
+            check(f"Layout {name}: Radar-Abstand zur Liste",
+                  bg["panel_x"] - bg["radar_w"], main.RADAR_PANEL_GAP)
 
     g = main.layout_geometrie(1280, 800, top_in=40, bottom_in=20,
                               left_in=30, right_in=50)

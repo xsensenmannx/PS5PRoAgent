@@ -31,7 +31,7 @@ source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .ven
 
 # (list) List of exclusions using pattern matching
 # Do not prefix with './'
-source.exclude_patterns = ps5pro.zip, ps5pro_settings.json, ps5pro_history.json, *.ipynb, *.md, *.log
+source.exclude_patterns = ps5pro_settings.json, ps5pro_history.json, *.md, *.log
 
 # (str) Application versioning (method 1)
 version = 5.1
@@ -153,7 +153,7 @@ android.add_resources = assets/notify_icon.png:drawable/notify_icon.png
 # pyjnius und verschiebt Titel/Buttons entsprechend (main.py, android_insets).
 android.api = 36
 
-# (int) Minimum API your APK / AAB will support.
+# (int) Minimum API your APK will support.
 android.minapi = 24
 
 # (int) Android SDK version to use
@@ -343,10 +343,6 @@ android.archs = arm64-v8a
 # naechsten Play-Upload hier +1 (die Anzeige-Version oben bleibt davon unabhaengig).
 android.numeric_version = 18
 
-# (str) The format used to package the app for release mode (aab or apk or aar).
-# Play nimmt nur AABs an; die Debug-APK fuer Sideloading bleibt wie gehabt.
-android.release_artifact = aab
-
 
 # (bool) enables Android auto backup feature (Android API >=23)
 android.allow_backup = True
@@ -362,9 +358,6 @@ android.allow_backup = True
 
 # (bool) Skip byte compile for .py files
 # android.no-byte-compile-python = False
-
-# (str) The format used to package the app for release mode (aab or apk or aar).
-# android.release_artifact = aab
 
 # (str) The format used to package the app for debug mode (apk or aar).
 # android.debug_artifact = apk
@@ -498,7 +491,7 @@ warn_on_root = 1
 # (str) Path to build artifact storage, absolute or relative to spec file
 # build_dir = ./.buildozer
 
-# (str) Path to build output (i.e. .apk, .aab, .ipa) storage
+# (str) Path to build output (i.e. .apk, .ipa) storage
 # bin_dir = ./bin
 
 #-----------------------------------------------------------------------------

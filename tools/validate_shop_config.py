@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prueft die echte shop_config.json vor einem APK-/AAB-Build.
+"""Prueft die echte shop_config.json vor einem APK-Build.
 
 Die App verwirft bei einem einzigen Fehler die komplette Remote-Konfiguration.
 Genau diese Pruefung laeuft hier in der CI, damit ein kaputtes JSON, ein

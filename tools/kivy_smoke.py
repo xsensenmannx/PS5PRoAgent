@@ -28,8 +28,11 @@ os.environ["KIVY_NO_ARGS"] = "1"
 from kivy.config import Config  # noqa: E402
 
 # Realistische Telefonmasse. Die Popups berechnen ihre Breite aus Window.width.
-Config.set("graphics", "width", "420")
-Config.set("graphics", "height", "820")
+# Fuer die Layout-Matrix kann die Groesse per Umgebung ueberschrieben werden.
+SMOKE_WIDTH = int(os.environ.get("PS5PRO_SMOKE_WIDTH", "420"))
+SMOKE_HEIGHT = int(os.environ.get("PS5PRO_SMOKE_HEIGHT", "820"))
+Config.set("graphics", "width", str(SMOKE_WIDTH))
+Config.set("graphics", "height", str(SMOKE_HEIGHT))
 Config.set("graphics", "resizable", "0")
 
 from kivy.app import App  # noqa: E402
@@ -45,6 +48,26 @@ import main  # noqa: E402
 import scan_core  # noqa: E402
 
 FAILS = []
+
+
+def natural_size(label):
+    """Textbreite/-hoehe unabhaengig von der aktuell zugewiesenen Box."""
+    c = CoreLabel(text=getattr(label, "text", ""),
+                  font_name=getattr(label, "font_name", None),
+                  font_size=getattr(label, "font_size", None),
+                  bold=getattr(label, "bold", False),
+                  markup=getattr(label, "markup", False))
+    c.refresh()
+    return c.texture.size
+
+
+def fits(label, tolerance=1.0):
+    """Passt der Text ohne Abschneiden in die Widget-Box?"""
+    try:
+        nw, nh = natural_size(label)
+    except Exception:
+        return False
+    return label.width + tolerance >= nw and label.height + tolerance >= nh
 
 
 def check(name, got, want=True):
@@ -115,11 +138,13 @@ class SmokeApp(App):
 
     def run_checks(self, _dt):
         try:
+            self.main_layout()
             self.alarm_rules()
             self.shop_health()
             self.challenge_hint()
             self.result_list()
             self.setup_center()
+            self.onboarding()
             self.detail()
             self.no_popup()
         except Exception:
@@ -127,6 +152,109 @@ class SmokeApp(App):
             check("Smoke-Test ohne Ausnahme", False, True)
         finally:
             Clock.schedule_once(lambda _dt: self.stop(), 0)
+
+    def main_layout(self):
+        self.pump()
+        ui = self.ui
+        g = main.layout_geometrie(Window.width, Window.height)
+        tol = 1.5
+        check("Layout: Panel im Fenster",
+              ui.results_panel.x >= -tol and
+              ui.results_panel.right <= Window.width + tol and
+              ui.results_panel.y >= -tol and
+              ui.results_panel.top <= Window.height + tol, True)
+        check("Layout: Controls unter dem Panel",
+              ui.results_panel.y >= ui.controls.top - tol, True)
+        # Radar-Scheibe, Gradzahlen und HUD duerfen die Trefferliste weder
+        # beruehren noch am Fensterrand abgeschnitten werden.
+        fl = main.radar_flaeche(ui.radar.width, ui.radar.height,
+                                ui.radar.reserve_bottom, ui.radar.reserve_top)
+        check("Layout: Radar-Scheibe sichtbar", fl is not None, True)
+        panel = ui.results_panel
+
+        def ueberlappt(w):
+            return (w.right > panel.x + tol and w.x < panel.right - tol and
+                    w.top > panel.y + tol and w.y < panel.top - tol)
+
+        for deg, lab in ui.radar._bls:
+            if lab.opacity <= 0:
+                continue
+            check(f"Layout: Gradzahl {deg} im Fenster",
+                  lab.x >= -tol and lab.right <= Window.width + tol and
+                  lab.y >= -tol and lab.top <= Window.height + tol, True)
+            check(f"Layout: Gradzahl {deg} frei von der Trefferliste",
+                  ueberlappt(lab), False)
+        for seite, lab in (("links", ui.radar._hud_l), ("rechts", ui.radar._hud_r)):
+            check(f"Layout: Radar-HUD {seite} frei von der Trefferliste",
+                  ueberlappt(lab), False)
+        if fl is not None:
+            check("Layout: Radar-Scheibe frei von der Trefferliste",
+                  (fl["cx"] + fl["mr"] > panel.x + tol and
+                   fl["cx"] - fl["mr"] < panel.right - tol and
+                   fl["cy"] + fl["mr"] > panel.y + tol and
+                   fl["cy"] - fl["mr"] < panel.top - tol), False)
+        if g["wide"]:
+            check("Layout: Panel rechts vom Logo",
+                  ui.results_panel.x >= ui.logo.right - tol, True)
+        else:
+            check("Layout: Panel unter dem Logo",
+                  ui.results_panel.top <= ui.logo.y + tol, True)
+            check("Layout: Radar-Abstand",
+                  ui.radar.reserve_bottom - ui.results_panel.top >=
+                  main.RADAR_PANEL_GAP - tol, True)
+
+        # Kopfzeile, HUD und Bedienleiste muessen ihre Beschriftung vollstaendig
+        # aufnehmen. Der laengste echte Scan-Status wird dabei mitgeprueft.
+        for name, widget in (
+                ("Logo-Titel", ui.logo.title), ("Logo-Unterzeile", ui.logo.sub),
+                ("HUD links", ui.radar_hud_left), ("HUD rechts", ui.radar_hud_right),
+                ("Trefferstatus", ui.results_status), ("Trefferzaehler", ui.results_count),
+                ("Scan-Button", ui.scan_btn), ("Setup-Button", ui.setup_btn),
+                ("Haendler-Button", ui.haendler_btn)):
+            check(f"Layout: {name} passt", fits(widget), True)
+        for name, widget in (
+                ("Treffer-Filter", ui.chip_verf), ("Alle-Filter", ui.chip_all),
+                ("Auto-Chip", ui.auto_chip), ("Intervall-Chip", ui.interval_chip),
+                ("Alarm-Chip", ui.notify_chip), ("Regeln-Chip", ui.rules_chip),
+                ("Health-Chip", ui.health_chip), ("Maxpreis-Chip", ui.max_preis_chip),
+                ("Sortier-Chip", ui.sort_chip)):
+            check(f"Layout: {name} passt", fits(widget), True)
+
+        alt = ui.results_status.text
+        ui.results_status.text = main.scan_fortschritt(42, 42, 9, 70)
+        self.pump(3)
+        check("Layout: langer Scan-Status passt", fits(ui.results_status), True)
+        ui.results_status.text = alt
+
+        # Eine echte Ergebniszeile mit allen konkurrierenden Elementen:
+        # Preis, BEST, Delta und dem langen Status "NICHT VERFÜGBAR".
+        result = {
+            "haendler": "Computeruniverse", "land": "DE", "zeit": "12:00",
+            "preis": 1299.99, "klass": "unavail", "condition": "used",
+            "seller": "Computeruniverse GmbH", "sofort": False,
+            "url": "https://example.invalid/layout",
+        }
+        for scale in (1.0, 1.2):
+            card = main.ResultCard(result, False, 1399.0, best=True,
+                                   font_scale=scale)
+            card.size_hint = (None, None)
+            card.width = max(main.dp(246), ui.results_panel.width - main.dp(16))
+            card.height = main.dp(56) * scale
+            card.do_layout()
+            for layout in [w for w in card.walk() if isinstance(w, Layout)]:
+                layout.do_layout()
+            labels = [w for w in card.walk() if isinstance(w, main.Label)]
+            status = next(w for w in labels if "NICHT VERF" in str(w.text))
+            price = next(w for w in labels if "1.299" in str(w.text))
+            check(f"Layout: Kartenstatus bei {int(scale*100)}% passt",
+                  fits(status), True)
+            check(f"Layout: Kartenpreis bei {int(scale*100)}% passt",
+                  fits(price), True)
+            if scale == 1.0:
+                name = next(w for w in labels if "Computeruniverse" in str(w.text))
+                check("Layout: Kartenname bei 100% passt", fits(name), True)
+            check(f"Layout: Karte bei {int(scale*100)}% hoch genug",
+                  card.height >= main.dp(56) * scale - tol, True)
 
     # ── Alarm-Regeln ────────────────────────────────────────────────────
     def alarm_rules(self):
@@ -208,6 +336,16 @@ class SmokeApp(App):
                   {h["name"] for h in scan_core.HAENDLER}]
         check("Health: alle Shop-Zeilen", len(labels), len(scan_core.HAENDLER))
         check("Health: Fehlerzeile", fehler_name in text, True)
+        kopf = next(w for w in p.content.walk()
+                    if isinstance(w, main.Label) and "SHOP-HEALTH" in str(w.text))
+        check("Health: Titel passt", fits(kopf), True)
+        summary = next(w for w in p.content.walk()
+                       if isinstance(w, main.Label) and "SHOPS" in str(w.text)
+                       and "AUFFAELLIG" in str(w.text))
+        check("Health: Zaehler passt", fits(summary), True)
+        parser_zeile = next(w for w in p.content.walk()
+                            if isinstance(w, main.Label) and "PARSER-SERIE" in str(w.text))
+        check("Health: Parser-Serie passt", fits(parser_zeile), True)
 
         # Der Retry darf keinen Scan starten (sonst waere der Smoke-Test online).
         calls = []
@@ -301,6 +439,16 @@ class SmokeApp(App):
         check("Setup: Schrift-Skalierung", "SCHRIFT" in text and "100 %" in text, True)
         check("Setup: System-Aktionen", "SHOP-HEALTH" in text and "ALARM-REGELN" in text, True)
         self.close(p, "SCHLIESSEN")
+
+    def onboarding(self):
+        # Die drei Buttons stehen auf schmalen Displays nebeneinander. Gerade
+        # "ALARM EINRICHTEN" darf dabei nicht in der Mitte abgeschnitten werden.
+        self.ui._show_onboarding()
+        p = self.popup("Onboarding")
+        for beschriftung in ("SCAN STARTEN", "ALARM EINRICHTEN", "SPÄTER"):
+            b = self.button(p, beschriftung)
+            check(f"Onboarding: {beschriftung} passt", fits(b), True)
+        self.close(p, "SPÄTER")
 
     def result_list(self):
         basis = {"land": "DE", "zeit": "12:00", "condition": "new",

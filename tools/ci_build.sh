@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Baut die Android-APK auf einem Linux-Rechner (GitHub-Runner, WSL, VM).
-# Genau dieses Skript ruft .github/workflows/build-apk.yml auf - lokal ist es
-# derselbe Weg:   bash tools/ci_build.sh
+# Der Release-Workflow .github/workflows/release.yml ruft dieses Skript auf;
+# lokal ist es derselbe Weg: bash tools/ci_build.sh
 #
 # Umgebungsvariablen (optional):
 #   SKIP_APT=1   Systempakete nicht anfassen (wenn schon installiert)
@@ -24,7 +24,7 @@ missing=0
 for f in main.py scan_core.py service.py shop_config.json buildozer.spec icon.png \
          assets/icon_fg.png assets/icon_bg.png assets/notify_icon.png tools/selftest.py \
          tools/kivy_smoke.py tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
-         tools/ci_check_apk_aapt2.sh tools/ci_check_aab.sh \
+         tools/ci_check_apk_aapt2.sh \
          tools/validate_shop_config.py \
          tools/p4a_hook.py tools/ci_log_failure.sh \
          android_src/de/ps5pro/ps5prosearchagent/BootReceiver.java; do
@@ -34,7 +34,7 @@ for f in main.py scan_core.py service.py shop_config.json buildozer.spec icon.pn
     fi
 done
 if [ "$missing" -ne 0 ]; then
-    echo "Bitte die genannten Dateien ins Repository legen (GITHUB_ANLEITUNG.md, Schritt 2)."
+    echo "Bitte die genannten Dateien ins Repository legen."
     exit 1
 fi
 echo "alle vorhanden"
@@ -124,42 +124,16 @@ else
     echo "den Lizenz-Prompt selbst (android.accept_sdk_license = True)"
 fi
 
-# ARTIFACT=aab signiert ein App Bundle fuer Google Play, sonst Debug-APK.
-ARTIFACT="${ARTIFACT:-apk}"
 # Ohne VIRTUAL_ENV ruft buildozer intern `pip install --user` auf, was in einem
 # venv mit "Can not perform a '--user' install" abbricht.
 export VIRTUAL_ENV="$PWD/.venv"
 export PATH="$PWD/.venv/bin:$PATH"
 
-if [ "$ARTIFACT" = "aab" ]; then
-    say "AAB bauen (signiert)"
-    missing=0
-    for v in P4A_RELEASE_KEYSTORE P4A_RELEASE_KEYSTORE_PASSWD \
-             P4A_RELEASE_KEYALIAS P4A_RELEASE_KEYALIAS_PASSWD; do
-        if [ -z "${!v:-}" ]; then
-            echo "::error::$v fehlt - AAB waere unsigniert und fuer Play unbrauchbar."
-            missing=1
-        fi
-    done
-    if [ "$missing" -ne 0 ]; then
-        echo "Secrets siehe PLAY_STORE.md (GitHub -> Settings -> Secrets and variables -> Actions)."
-        exit 1
-    fi
-    if [ ! -f "$P4A_RELEASE_KEYSTORE" ]; then
-        echo "::error::Keystore nicht gefunden: $P4A_RELEASE_KEYSTORE"
-        exit 1
-    fi
-    set +e
-    .venv/bin/buildozer -v android release 2>&1 | tee buildozer.log
-    rc=${PIPESTATUS[0]}
-    set -e
-else
-    say "APK bauen"
-    set +e
-    .venv/bin/buildozer -v android debug 2>&1 | tee buildozer.log
-    rc=${PIPESTATUS[0]}
-    set -e
-fi
+say "APK bauen"
+set +e
+.venv/bin/buildozer -v android debug 2>&1 | tee buildozer.log
+rc=${PIPESTATUS[0]}
+set -e
 
 if [ "$rc" -ne 0 ]; then
     echo "::error::buildozer ist mit Code $rc gescheitert - Details in buildozer.log"
@@ -174,14 +148,8 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 say "Ergebnis"
-if [ "$ARTIFACT" = "aab" ]; then
-    ls -lh bin/*.aab
-    AAB=$(ls -1 bin/*.aab 2>/dev/null | head -n 1 || true)
-    bash tools/ci_check_aab.sh "$AAB" "$PYPIN"
-else
-    ls -lh bin/*.apk
-    # "Build erfolgreich" heisst noch nicht, dass die richtige Python-Version
-    # in der APK steckt. Genau das hat hier 40 Minuten gekostet.
-    APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
-    bash tools/ci_check_apk.sh "$APK" "$PYPIN"
-fi
+ls -lh bin/*.apk
+# "Build erfolgreich" heisst noch nicht, dass die richtige Python-Version
+# in der APK steckt. Genau das hat hier 40 Minuten gekostet.
+APK=$(ls -1 bin/*.apk 2>/dev/null | head -n 1 || true)
+bash tools/ci_check_apk.sh "$APK" "$PYPIN"
