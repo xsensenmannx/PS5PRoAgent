@@ -15,12 +15,11 @@ die Datei antippen und die Installation aus dieser Quelle erlauben.
 
 | Stand | Bedeutung |
 |---|---|
-| **v5.0** | Aktueller Release. Für die normale Installation und Updates nehmen. |
-| **v3.3.2** | Älterer 3.x-Fallback mit dem Preis-Layout-Fix. |
-| **v1.0** | Archiv-Release; bleibt wegen des ursprünglichen App-Bildes erhalten. |
+| **v5.0 Final** | Die aktuelle, fertige Version. Für Installation und Updates nehmen. |
+| **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
-Es gibt nur noch diese drei Releases. Die älteren Versionen und Test-Releases
-wurden entfernt, damit die Download-Seite übersichtlich bleibt. Alle Releases:
+Es gibt nur noch diese zwei Releases. Alle Zwischenstände, Beta-Versionen und
+Test-Releases wurden entfernt. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
 ## Was die App kann
@@ -83,17 +82,13 @@ wurden entfernt, damit die Download-Seite übersichtlich bleibt. Alle Releases:
 
 ## APK bauen
 
-Der Build läuft auf Linux — zwei Wege ohne eigenen Linux-Rechner:
+Für die normale Nutzung ist kein Build nötig: Die fertige APK steht oben.
 
-* **Google Colab:** [`PS5Pro_APK_Colab.ipynb`](PS5Pro_APK_Colab.ipynb) hochladen,
-  `ps5pro.zip` einlesen, Zellen 1–6 ausführen.
-* **GitHub Actions:** [`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)
-  baut bei jedem Push und legt die APK als Artifact ab. Schritt für Schritt:
-  [GITHUB_ANLEITUNG.md](GITHUB_ANLEITUNG.md).
-
-Die vollständige Anleitung inklusive Installation, Bedienung und Fehlerbehebung
-steht in **[BUILD_ANDROID.md](BUILD_ANDROID.md)**. Für Google Play (targetSdk 36,
-signiertes AAB, Keystore und Secrets) siehe **[PLAY_STORE.md](PLAY_STORE.md)**.
+Der einzige Build-Weg ist der Release-Workflow
+[`.github/workflows/release.yml`](.github/workflows/release.yml). Er läuft bei
+einem Tag `v*`, prüft die Shop-Konfiguration und die Logiktests und hängt die
+fertige APK an das GitHub-Release. Lokal auf Linux/WSL baut
+`bash tools/ci_build.sh` dieselbe Debug-APK.
 
 ## Projektstruktur
 
@@ -108,25 +103,19 @@ icon.png                      App-Icon (512×512)
 assets/icon_fg.png            Adaptive-Icon Vordergrund (Android 8+)
 assets/icon_bg.png            Adaptive-Icon Hintergrund
 assets/notify_icon.png        Statusleisten-Icon des Hintergrund-Service
-tools/selftest.py             Logiktests ohne Kivy (CI-Gate)
-tools/kivy_smoke.py           echte Kivy-Popup-Smoke-Tests (CI-Gate)
+tools/selftest.py             Logiktests ohne Kivy (Release-Gate)
+tools/kivy_smoke.py           Kivy-Popup-Smoke-Tests (Release-Gate)
+tools/validate_shop_config.py prüft shop_config.json vor dem Release
 tools/fixtures/               47 minimale Parser-Fixtures (42 Shops + Randfaelle)
 tools/capture_fixture.py      Fixture aus einer echten Shop-Seite aufnehmen
-tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal, APK oder AAB)
+tools/ci_build.sh             kompletter Build-Ablauf (CI und lokal)
 tools/ci_check_apk.sh         prüft die fertige APK (Größe, Python-Version)
-tools/ci_check_apk_aapt2.sh   prüft versionCode, versionName, targetSdk und foregroundServiceType
-tools/ci_check_aab.sh         prüft das AAB (Struktur, Signatur, Python-Version)
-PLAY_STORE.md                 Play-Release: Keystore, Secrets, AAB, Play Console
+tools/ci_check_apk_aapt2.sh   prüft versionCode, versionName und targetSdk
 tools/ci_licenses.sh          akzeptiert die Android-SDK-Lizenzen
 tools/ci_fix_cache.sh         räumt halb geladene SDK/NDK-Bäume auf
-PS5Pro_APK_Colab.ipynb        Build-Notebook für Colab
-GITHUB_ANLEITUNG.md           Build über GitHub Actions (Web-Upload und CLI)
-.github/workflows/build-apk.yml   CI-Build
-.github/workflows/release.yml     Tag v* -> APK als Release-Asset
-.github/workflows/diagnose.yml    manueller Diagnose-Lauf
+.github/workflows/release.yml Tag v* -> APK als Release-Asset
 LICENSE                       MIT-Lizenz
 THIRD_PARTY_NOTICES.md        Lizenzen der gebündelten Bibliotheken
-ps5pro.zip                    Upload-Paket für Colab
 ```
 
 ## Tests
@@ -141,10 +130,10 @@ Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
 responsive Layout-Geometrie und Boot-Manifest — 572 Zusicherungen, ohne Kivy
-und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test
+und ohne Android. Der Release-Workflow führt sie vor jedem Release aus. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät.
 `tools/validate_shop_config.py` prüft die echte `shop_config.json` mit genau
-derselben Validierung wie die App und läuft in Build- und Release-Workflow vor
+derselben Validierung wie die App und läuft im Release-Workflow vor
 den Logiktests.
 
 `tools/kivy_smoke.py` öffnet die Popups **Alarm-Regeln**, **Shop-Health** und
@@ -185,17 +174,15 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionshistorie
 
-Es bleiben nur diese drei Releases:
+Es bleiben nur diese zwei Releases:
 
-* **v5.0** – Aktueller Release (versionCode 17): Radar-HUD mit Scan-Fortschritt
-  und Zielmarken, Bestpreis-Markierung, Metall-Verlauf der Trefferliste und
-  zentrale `SETUP`-Systemkonfiguration. Enthält den nachgebauten v3.3.2-Layout-Fix
-  und alle älteren Parser-, Alarm- und Hintergrunddienste.
-* **v3.3.2** – Letzter 3.x-Hotfix (versionCode 16): 134 dp breite Preisspalte
-  und 16,5 sp Preis-Schrift, damit `1.299,00 €` auch mit Linux-Schriftmetriken
-  vollständig sichtbar bleibt. Nur als Fallback für die alte 3.x-Oberfläche.
-* **v1.0** – Erster Play-vorbereiteter Build (targetSdk 36, signierbares AAB).
-  Bleibt wegen des ursprünglichen App-Bildes als Archiv-Release erhalten.
+* **v5.0 Final** – Die fertige Version (versionCode 17): Radar-HUD mit
+  Scan-Fortschritt und Zielmarken, Bestpreis-Markierung, Metall-Verlauf der
+  Trefferliste und zentrale `SETUP`-Systemkonfiguration. Enthält den
+  nachgebauten Preis-Layout-Fix und alle älteren Parser-, Alarm- und
+  Hintergrunddienste.
+* **v1.0** – Der erste fertige Stand (targetSdk 36). Bleibt als Archiv-Release
+  erhalten.
 
 ## Grenzen
 
