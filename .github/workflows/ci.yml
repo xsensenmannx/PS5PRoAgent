@@ -68,6 +68,9 @@ jobs:
           - name: "Querformat 720x480"
             width: 720
             height: 480
+          - name: "Querformat flach 620x380"
+            width: 620
+            height: 380
           - name: "Tablet 884x700"
             width: 884
             height: 700

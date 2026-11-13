@@ -1200,14 +1200,16 @@ def layout_geometrie(w,h,top_in=0.0,bottom_in=0.0,left_in=0.0,right_in=0.0):
     panel_w=usable_w; panel_x=left; panel_y=bottom+ch
     results_h=rh; logo_w=usable_w; wide=False
 
-    # Ab 600 dp Breite ist genug Platz fuer zwei Spalten. Die Hoehe muss
-    # ebenfalls reichen, damit ein Landscape-Handy nicht zur engen Liste wird.
-    if (usable_w>=dp(600) and h>=dp(480) and usable_w>h*1.15):
+    # Ab 600 dp Breite ist genug Platz fuer zwei Spalten. Das gilt auch fuer
+    # flache Fenster (Landscape-Handy, z. B. 620x380): Im Hochformat bliebe
+    # unter Logo, Trefferleiste und Bedienung keine Hoehe fuer die Scheibe.
+    # Kompakt heisst hier: Radar links ueber die volle Hoehe, Liste rechts.
+    if (usable_w>=dp(600) and h>=dp(300) and usable_w>h*1.15):
         kandidat=min(dp(460),max(dp(320),usable_w*0.42))
         kandidat_x=w-right-kandidat
         kandidat_logo=kandidat_x-left
         kandidat_h=h-top-lh-bottom-ch
-        if kandidat_logo>=dp(260) and kandidat_h>=dp(240):
+        if kandidat_logo>=dp(240) and kandidat_h>=dp(200):
             wide=True; panel_w=kandidat; panel_x=kandidat_x
             results_h=kandidat_h; logo_w=kandidat_logo
 

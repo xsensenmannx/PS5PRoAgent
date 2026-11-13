@@ -1039,16 +1039,30 @@ def adaptive_boot_tests():
                       round(math.degrees(math.atan2(by0, bx0)), 6))
 
     check("Layout Foldable quer", main.layout_geometrie(884, 700)["wide"], True)
-    check("Layout Handy quer bleibt kompakt",
-          main.layout_geometrie(800, 360)["wide"], False)
     check("Layout Tablet hoch bleibt einspaltig",
           main.layout_geometrie(800, 1280)["wide"], False)
+
+    # Flaches Querformat unter 480 dp Hoehe (z. B. 620x380): Radar und
+    # Trefferliste muessen beide sichtbar bleiben. Vorher lag die Scheibe
+    # unter Logo und Leiste und verschwand komplett.
+    for lw, lh in ((620, 380), (640, 360), (720, 360), (800, 360), (720, 480)):
+        name = f"{lw}x{lh}"
+        bg = main.layout_geometrie(lw, lh)
+        check(f"Layout {name}: zwei Spalten", bg["wide"], True)
+        check(f"Layout {name}: Liste hoch genug", bg["results_h"] >= main.dp(200), True)
+        fl = main.radar_flaeche(bg["radar_w"], lh, bg["radar_bottom"], bg["radar_top"])
+        check(f"Layout {name}: Radar sichtbar", fl is not None, True)
+        if fl is not None:
+            check(f"Layout {name}: Radar-Radius", fl["mr"] >= main.dp(60), True)
+            check(f"Layout {name}: Radar frei von der Liste",
+                  fl["cx"] + fl["mr"] + main.dp(11) + main.dp(12) <=
+                  bg["panel_x"] + 0.5, True)
 
     # Kleine Displays und Querformat: Panel, Logo, Bedienleiste und Radar
     # duerfen sich nicht ueberlagern; im Hochformat bleibt der Radar-Puffer
     # auch bei der kuerzesten unterstuetzten Hoehe erhalten.
     for lw, lh in ((320, 240), (320, 480), (360, 640), (420, 480),
-                    (480, 320), (640, 360), (720, 360), (800, 360),
+                    (480, 320), (620, 380), (640, 360), (720, 360), (800, 360),
                     (420, 820), (884, 700)):
         bg = main.layout_geometrie(lw, lh)
         name = f"{lw}x{lh}"
