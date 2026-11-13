@@ -39,6 +39,8 @@ from scan_core import (
     _safe_scan, _res, WORKER, History, Settings, data_dir, Health, health, reset_health,
     alarm_erlaubt, alarm_ereignis, ist_gebraucht, install_crash_hook, read_crash_log,
     lade_shop_config, aktualisiere_shop_config, flush_http_cache,
+    webhook_senden, webhook_preset, redact_url, sende_webhook_alarm,
+    verify_treffer, schnellscan_haendler, HOT_SHOPS,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -299,6 +301,27 @@ def android_insets():
         return (max(0,int(top))/d,max(0,int(bot))/d,
                 max(0,int(left))/d,max(0,int(right))/d)
     except Exception: return (0.0,0.0,0.0,0.0)
+
+def android_ist_wlan():
+    """True, wenn das aktive Netz WLAN ist (oder die Pruefung nicht geht).
+
+    Der Schnell-Modus fragt alle 60 s sechs Shops ab; ohne WLAN waere das
+    mobil schnell teuer. Ist die Pruefung auf dem Geraet nicht verfuegbar,
+    bleibt der Modus lieber an, statt still gar nicht zu laufen.
+    """
+    if platform!="android": return True
+    try:
+        from jnius import autoclass
+        act=autoclass("org.kivy.android.PythonActivity").mActivity
+        C=autoclass("android.content.Context")
+        cm=act.getSystemService(C.CONNECTIVITY_SERVICE)
+        net=cm.getActiveNetwork()
+        if net is None: return False
+        caps=cm.getNetworkCapabilities(net)
+        if caps is None: return False
+        NC=autoclass("android.net.NetworkCapabilities")
+        return bool(caps.hasTransport(NC.TRANSPORT_WIFI))
+    except Exception: return True
 
 def android_prepare_window():
     """Helle Systemleisten-Symbole auf dunklem Hintergrund (Android 15+)."""
@@ -1024,6 +1047,10 @@ class ResultCard(ButtonBehavior, BoxLayout):
                 "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ",
                 "parser":"PARSER-FEHLER"}
         st=st_map.get(r["klass"],"?")
+        vmap2={"bestaetigt":"BESTÄTIGT","geaendert":"ABWEICHUNG",
+               "weg":"WEG","unbestaetigt":"UNGEPRÜFT"}
+        if r["klass"]=="hit" and r.get("verify") in vmap2:
+            st=st+" · "+vmap2[r["verify"]]
         st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
                      font_size=fs(8.5),font_name=SST_FONT,
                      halign="left",valign="middle",
@@ -1264,6 +1291,11 @@ class MainUI(FloatLayout):
         self.notify_low_only=bool(self.settings.get("notify_low_only",False))
         self.notify_sofort=bool(self.settings.get("notify_sofort",True))
         self.quiet_hours=bool(self.settings.get("quiet_hours",False))
+        self.webhook_url=str(self.settings.get("webhook_url","") or "").strip()
+        self.webhook_status=""
+        self.schnellscan=bool(self.settings.get("schnellscan",False))
+        self.schnellscan_wlan=bool(self.settings.get("schnellscan_wlan",True))
+        self._fast_event=None; self._fast_next=0.0
         try: self.font_scale=float(self.settings.get("font_scale",1.0))
         except (TypeError,ValueError): self.font_scale=1.0
         if self.font_scale not in FONT_SCALES: self.font_scale=1.0
@@ -1289,6 +1321,7 @@ class MainUI(FloatLayout):
         if not self.settings.get("onboarded",False):
             Clock.schedule_once(self._show_onboarding,1.0)
         if self.auto_scan: Clock.schedule_once(lambda dt:self._auto_start(),1.5)
+        if self.schnellscan: Clock.schedule_once(lambda dt:self._fast_start(),2.0)
 
     # ── Aufbau ──────────────────────────────────────────────────────
     def _build_ui(self):
@@ -1502,6 +1535,10 @@ class MainUI(FloatLayout):
             self.radar_hud_left.text=(f"SCANNING · {self._scan_done}/{self._scan_total}"
                                       if self._scan_total else "SCANNING")
             self.radar_hud_left.color=PS1_CYAN
+        elif self.schnellscan:
+            n=len(self._schnell_shops())
+            self.radar_hud_left.text=f"SCHNELLSCAN · {n} SHOPS"
+            self.radar_hud_left.color=CARD_STATUS["hit"]
         else:
             self.radar_hud_left.text=f"{len(HAENDLER)} HÄNDLER · DE + AT"
             self.radar_hud_left.color=RADAR_TICK
@@ -1641,6 +1678,41 @@ class MainUI(FloatLayout):
             bg=self._bg_last_text()
             self.results_status.text=txt+(f" · BG {bg}" if bg else "")
         return True
+    # ── Schnell-Modus ───────────────────────────────────────────────
+    def _schnell_shops(self):
+        return schnellscan_haendler(HAENDLER,self.active_haendler)
+    def _toggle_schnellscan(self):
+        self.schnellscan=not self.schnellscan
+        self.settings.set("schnellscan",self.schnellscan)
+        if self.schnellscan:
+            self._fast_start(); self._toast("SCHNELLSCAN AN",color=CARD_STATUS["hit"])
+        else:
+            self._fast_stop(); self._toast("SCHNELLSCAN AUS",color=PS1_YELLOW)
+        self._update_radar_hud()
+    def _fast_start(self):
+        if not self.schnellscan: return
+        self._fast_next=time.time()+60
+        if self._fast_event is None:
+            self._fast_event=Clock.schedule_interval(self._fast_tick,1.0)
+        self._update_radar_hud()
+    def _fast_stop(self):
+        if self._fast_event is not None:
+            Clock.unschedule(self._fast_event); self._fast_event=None
+        self._fast_next=0.0
+    def _fast_tick(self,dt):
+        if not self.schnellscan: return False
+        if self.scanning: return True
+        jetzt=time.time()
+        if jetzt<self._fast_next: return True
+        shops=self._schnell_shops()
+        if not shops:
+            self._fast_next=jetzt+60; return True
+        if self.schnellscan_wlan and not android_ist_wlan():
+            # Mobilnetz: seltener pruefen, aber nicht ganz aussetzen.
+            self._fast_next=jetzt+120; return True
+        self._fast_next=jetzt+60
+        self._scan_start(nur=[h["name"] for h in shops])
+        return True
     def _cycle_font_scale(self):
         try: i=FONT_SCALES.index(self.font_scale)
         except ValueError: i=0
@@ -1687,6 +1759,41 @@ class MainUI(FloatLayout):
                         lambda dt:self._toast(msg,color=CARD_STATUS["hit"]),0)
                 except Exception: pass
         threading.Thread(target=send,daemon=True).start()
+        if self.webhook_url:
+            def send_web():
+                try: res=sende_webhook_alarm(r,self.settings,title,msg)
+                except Exception: return
+                if res is None: return
+                ok,info=res
+                self.webhook_status=("OK" if ok else str(info)[:40])
+                if not ok:
+                    try:
+                        Clock.schedule_once(
+                            lambda dt:self._toast("WEBHOOK: "+str(info)[:24],
+                                                  color=PS1_YELLOW),0)
+                    except Exception: pass
+            threading.Thread(target=send_web,daemon=True).start()
+
+    def _webhook_text(self):
+        if not self.webhook_url: return "AUS"
+        txt=f"{webhook_preset(self.webhook_url).upper()} · {redact_url(self.webhook_url)}"
+        return txt+(" · "+self.webhook_status if self.webhook_status else "")
+
+    def _send_test_webhook(self):
+        u=self.webhook_url.strip()
+        if not u:
+            self._toast("KEIN WEBHOOK GESETZT",color=PS1_YELLOW); return
+        def go():
+            try: ok,info=webhook_senden(u,webhook_preset(u),
+                                        "PS5 PRO TESTALARM","Webhook funktioniert.")
+            except Exception as e: ok,info=False,str(e)[:40]
+            self.webhook_status=("OK" if ok else str(info)[:40])
+            def ui(dt):
+                self._toast("WEBHOOK OK" if ok else f"WEBHOOK: {info}",
+                            color=CARD_STATUS["hit"] if ok else PS1_YELLOW)
+            try: Clock.schedule_once(ui,0)
+            except Exception: pass
+        threading.Thread(target=go,daemon=True).start()
 
     def _send_test_alarm(self):
         try:
@@ -1822,6 +1929,32 @@ class MainUI(FloatLayout):
                PS1_BLUE)
         action("TESTALARM",lambda: "SENDEN",self._send_test_alarm,PS1_CYAN)
 
+        section("ALARM-KANAL")
+        winfo=Label(text=f"WEBHOOK: {self._webhook_text()}",color=PS1_GREY,
+                    font_size=sp(8.5),font_name=SST_FONT,halign="left",
+                    valign="middle",shorten=True,shorten_from="right",
+                    size_hint_y=None,height=dp(16))
+        winfo.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        box.add_widget(winfo)
+        wrow=BoxLayout(size_hint_y=None,height=dp(34),spacing=dp(5))
+        wti=TextInput(text=self.webhook_url,multiline=False,password=True,
+                      font_size=sp(9),halign="left")
+        wsb=PS1Button(text="SPEICHERN",accent=PS1_CYAN,font_size=sp(8.5),
+                      size_hint_x=None,width=dp(92))
+        def save_webhook(*_):
+            u=str(wti.text or "").strip()
+            if u and (not u.startswith("https://") or len(u)<12):
+                self._toast("WEBHOOK BRAUCHT HTTPS",color=PS1_YELLOW); return
+            self.webhook_url=u; self.settings.set("webhook_url",u)
+            winfo.text=f"WEBHOOK: {self._webhook_text()}"
+            self._toast("WEBHOOK GESPEICHERT" if u else "WEBHOOK ENTFERNT",
+                        color=CARD_STATUS["hit"] if u else PS1_GREY)
+        wsb.bind(on_release=save_webhook)
+        wrow.add_widget(wti); wrow.add_widget(wsb); box.add_widget(wrow)
+        action("WEBHOOK-TEST",lambda: "SENDEN",self._send_test_webhook,PS1_GREEN)
+        action("SCHNELLSCAN",lambda: "AN" if self.schnellscan else "AUS",
+               self._toggle_schnellscan,PS1_BLUE)
+
         box.size_hint=(1,None)
         box.bind(minimum_height=box.setter("height"))
         sv=ScrollView(bar_width=dp(4),do_scroll_x=False)
@@ -1859,6 +1992,8 @@ class MainUI(FloatLayout):
             b.bind(on_release=flip); sync(); box.add_widget(b)
 
         add_toggle("notify_sofort",True,"NUR SOFORT: AN","NUR SOFORT: AUS",PS1_GREEN)
+        add_toggle("alarm_nur_bestaetigt",False,"NUR BESTÄTIGTE: AN",
+                   "NUR BESTÄTIGTE: AUS",PS1_CYAN)
         add_toggle("notify_low_only",False,"NUR TIEFSTPREIS: AN","NUR TIEFSTPREIS: AUS",PS1_YELLOW)
         add_toggle("quiet_hours",False,"RUHEZEIT 23-07: AN","RUHEZEIT 23-07: AUS",PS1_BLUE)
 
@@ -2035,6 +2170,10 @@ class MainUI(FloatLayout):
         zeilen=[("ZUSTAND",cond_txt),("VERKAEUFER",r.get("seller") or "—"),
                 ("LIEFERBAR",sofort_txt),("SIGNAL",str(r.get("signal") or "—").upper()),
                 ("VERFUEGBARKEIT",str(r.get("verfuegbarkeit") or "—"))]
+        vmap={"bestaetigt":"BESTÄTIGT","geaendert":"PREIS GEÄNDERT",
+              "weg":"2. ABRUF: WEG","unbestaetigt":"UNBESTÄTIGT"}
+        if r.get("verify") in vmap:
+            zeilen.append(("VERIFIKATION",vmap[r["verify"]]))
         hzustand=Health().all().get(name) or {}
         if hzustand.get("last_ts"):
             zeilen.append(("ZULETZT GEPRUEFT", self._age_text(hzustand["last_ts"])+" alt"))
@@ -2310,14 +2449,17 @@ class MainUI(FloatLayout):
         # Ein Health-Retry soll die bereits sichtbaren Ergebnisse behalten und
         # nur die auffaelligen Shops neu abfragen.
         if nur is None: self.scanned={}
+        # Ein Schnell- oder Health-Lauf prueft nur wenige Shops: Die bereits
+        # sichtbaren Karten bleiben stehen, statt jede Minute zu flackern.
         self.results_scroll.scroll_y=1
         self._scan_token+=1; tok=self._scan_token
         cancel=threading.Event(); self._scan_cancel_event=cancel
         self._drain_stale()
         if nur is None: self.radar.blips=[]
         self.radar.scanning=True
-        self._clear_results()
-        self._show_placeholder("SCANNE...","TIPPE STOP ZUM ABBRECHEN")
+        if nur is None:
+            self._clear_results()
+            self._show_placeholder("SCANNE...","TIPPE STOP ZUM ABBRECHEN")
         self.scan_btn.text="STOP"
         self._scan_t0=time.time(); self._scan_done=0
         self._scan_total=len(aktive)
@@ -2359,6 +2501,12 @@ class MainUI(FloatLayout):
                 try: r=f.result()
                 except Exception as e: r=_res(futs[f],None,"error",0,str(e)[:60])
                 if r is None: continue
+                # Ein Treffer wird vor der Anzeige einmal gegengeprueft. Das
+                # kostet 2 s pro Treffer (selten), verhindert aber falsche
+                # Alarme durch veraltete Shop-Antworten.
+                if r.get("klass")=="hit" and not ist_gebraucht(r.get("condition")):
+                    try: verify_treffer(futs[f],r,cancel)
+                    except Exception as e: print(f"[Verify] {r.get('haendler','?')}: {e}")
                 self.queue.put((tok,r))
         finally:
             # Der Cache puffert 304-Ergebnisse waehrend des Scans; hier wird
@@ -2394,7 +2542,9 @@ class MainUI(FloatLayout):
                      and not ist_gebraucht(x.get("condition")))
             self.results_status.text=scan_fortschritt(
                 self._scan_done,self._scan_total,hits,time.time()-self._scan_t0)
-            self.results_count.text=f"{hits}/{self._scan_done}" if self.filter_mode=="verfuegbar" else f"{self._scan_done}/{self._scan_total}"
+            self.results_count.text=(f"{hits}/{len(self.scanned)}"
+                                     if self.filter_mode=="verfuegbar"
+                                     else f"{self._scan_done}/{self._scan_total}")
             if ereignis:
                 self._maybe_notify(r)
             self._rerender_throttled()
@@ -2451,7 +2601,12 @@ class MainUI(FloatLayout):
             if err: teile.append(f"{err} FEHLER")
             if prs: teile.append(f"{prs} PARSER")
             self._show_placeholder("KEINE TREFFER"," · ".join(teile))
+        if self.filter_mode=="verfuegbar":
+            self.results_count.text=f"{len(hits)}/{len(self.scanned)}"
         if self.auto_scan: self.next_scan_at=time.time()+self.auto_interval
+        # Nach jedem Lauf (auch dem manuellen) mindestens eine Minute Ruhe,
+        # sonst schiesst der Schnell-Modus direkt hinterher.
+        self._fast_next=time.time()+60
 # ══════════ ROOT + APP ══════════
 class RootLayout(FloatLayout):
     def __init__(self,**kw):

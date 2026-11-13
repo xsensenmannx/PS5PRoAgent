@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.2 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.2/ps5prosearchagent-1.2-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.3 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.3/ps5prosearchagent-1.3-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -23,8 +23,9 @@ einmalig eine Deinstallation nötig.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.2** | Die aktuelle Version (versionCode 10200). Diese APK installieren. |
-| **v1.1** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.3** | Die aktuelle Version (versionCode 10300). Diese APK installieren. |
+| **v1.2** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.1** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
 Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
@@ -32,10 +33,10 @@ aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
 > **Eine Nummer für alles:** App, `main`-Branch, Release und Download heißen
-> **v1.2**. Der Button oben führt immer zur aktuellen APK.
+> **v1.3**. Der Button oben führt immer zur aktuellen APK.
 >
-> **Zur Zählung:** v1.2 ist die Fortsetzung der bisherigen 5.x-Stände. Die
-> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0 und v1.1 Archiv, v1.2 aktuell).
+> **Zur Zählung:** v1.3 ist die Fortsetzung der bisherigen 5.x-Stände. Die
+> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0–v1.2 Archiv, v1.3 aktuell).
 
 ## Eindruck
 
@@ -83,6 +84,18 @@ Signal, Preistiefs und den Preisverlauf:
 * **Alarm-Regeln**: nur sofort verfügbar, nur echte Tiefstpreise, Ruhezeit
   23–07, eigene Preisgrenze und Händler-Stummschaltung. Ein Restock wird auch
   dann gemeldet, wenn der Preis gegenüber dem letzten Treffer unverändert ist.
+* **Webhook-Alarme**: optional zusätzlich zur Android-Meldung an **ntfy**,
+  **Telegram** oder einen **Discord**-Webhook (oder eine eigene HTTPS-URL).
+  Der Testknopf in SETUP zeigt den HTTP-Status. Tokens werden maskiert und
+  niemals geloggt. Damit kommt ein Treffer auch an, wenn das Handy den
+  Hintergrunddienst beendet hat.
+* **Treffer-Verifikation**: Jeder Treffer wird nach 2 s ein zweites Mal ohne
+  Cache geprüft. Die Karte zeigt `BESTÄTIGT`, `UNGEPRÜFT` oder `ABWEICHUNG`;
+  ist der Shop beim zweiten Abruf ausverkauft, wird der Treffer zurückgestuft.
+  Optional meldet die App nur bestätigte Treffer.
+* **Schnell-Modus**: Bei geöffneter App prüft sie alle 60 s nur die heißen
+  Shops (Amazon, MediaMarkt, Saturn, Otto, Cyberport, Coolblue) — im WLAN,
+  mit Backoff nach Bot-Schutz und ohne den vollen Scan zu überlappen.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
   Treffer eines Laufs werden gruppiert.
@@ -225,7 +238,11 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.2** – Die aktuelle Version (versionCode 10200): flaches Querformat bleibt
+* **v1.3** – Die aktuelle Version (versionCode 10300): Webhook-Alarme für ntfy,
+  Telegram und Discord, Treffer-Verifikation mit Bestätigungskennzeichnung und
+  „nur bestätigte Treffer", Schnell-Modus für sechs heiße Shops im Minutentakt.
+  Dazu Token-Redaction, Webhook-Dedupe und Tests für alle drei Pfade.
+* **v1.2** – Vorherige Version (versionCode 10200): flaches Querformat bleibt
   zweispaltig, Radar und Trefferliste sind auch bei 620×380 sichtbar (inklusive
   Status- und Navigationsleisten). Dazu Geräteprüfung über ADB, ein
   reproduzierbares Screenshot-Werkzeug und `RELEASING.md`.
@@ -246,8 +263,8 @@ Die Release-APK wird im Workflow mit einem **festen Schlüssel** signiert
 (PKCS#12, Alias `ps5pro`). Dadurch installiert Android eine neue Version über
 die bestehende Installation, ohne dass die App deinstalliert werden muss.
 
-`versionName` und `versionCode` kommen aus dem Tag: `v1.2` wird zu `1.2` und
-`10200` (`MAJOR*10000 + MINOR*100 + PATCH`), siehe
+`versionName` und `versionCode` kommen aus dem Tag: `v1.3` wird zu `1.3` und
+`10300` (`MAJOR*10000 + MINOR*100 + PATCH`), siehe
 `tools/set_version_from_tag.sh`.
 
 Zertifikat (öffentlich; im Workflow als Sollwert hinterlegt):

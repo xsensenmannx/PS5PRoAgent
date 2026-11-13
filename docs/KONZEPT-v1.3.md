@@ -1,6 +1,6 @@
 # Konzept v1.3 — Alarmtreue, Verifikation, Schnell-Modus
 
-**Status:** Entwurf. Kein Code, kein Release. Grundlage ist v1.2 (`versionCode 10200`).
+**Status:** umgesetzt in v1.3 (`versionCode 10300`). Grundlage war v1.2.
 **Ziel:** Die drei Lücken schließen, die Nutzer tatsächlich merken — nicht „mehr Features".
 
 ## 1. Ziel und Nicht-Ziele
