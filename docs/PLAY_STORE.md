@@ -92,12 +92,16 @@ bundletool build-apks --bundle=bin/*.aab --output=/tmp/app.apks \
 ```
 
 **Im Repository verifiziert:** Der manuelle Workflow `Play AAB` baut mit
-`ARTIFACT=aab` ein Bundle, signiert es mit dem Upload-Key und prüft die Signatur
-mit `jarsigner`. Der Lauf vom 13.11.2026 ergab ein 21-MB-AAB (SHA-256
-`187b88c1…9d2660`), Manifest geprüft: `versionCode 10300`, `versionName 1.3`,
-`FOREGROUND_SERVICE_SPECIAL_USE`, `specialUse`-Subtyp und BootReceiver.
-Artefakt: Actions → „Play AAB“ → Artifact `ps5pro-aab`. Der Build nutzt noch den
-aktuellen Package-Namen; vor dem ersten Play-Upload muss der Rebrand erfolgen.
+`ARTIFACT=aab` ein Bundle, signiert es mit dem Upload-Key, prüft die Signatur
+mit `jarsigner` und validiert es zusätzlich mit **bundletool 1.18.3**. Aus dem
+Bundle wird eine **Universal-APK** erzeugt, mit `apksigner` gegen den erwarteten
+Upload-Key geprüft und per `aapt2` auf Package/Version kontrolliert. Beide
+Artefakte (`ps5pro-universal.apk`, `.apks`) landen im Artifact `ps5pro-aab`,
+zusammen mit dem AAB und `aab.sha256`. Der Lauf vom 13.11.2026 ergab ein
+21-MB-AAB (SHA-256 `187b88c1…9d2660`), Manifest: `versionCode 10300`,
+`versionName 1.3`, `FOREGROUND_SERVICE_SPECIAL_USE`, `specialUse`-Subtyp und
+BootReceiver. Der Build nutzt noch den aktuellen Package-Namen; vor dem ersten
+Play-Upload muss der Rebrand erfolgen.
 
 Wichtig:
 
@@ -145,7 +149,7 @@ dem ersten Review treffen, nicht vorher.
 
 - [ ] Neuer Package-Name und neue App-ID für die Play-Linie
 - [ ] `android.release_artifact = aab` im Play-Build, APK-Release unverändert
-- [ ] AAB signiert (`jarsigner -verify`), mit bundletool als Universal-APK getestet
+- [ ] AAB signiert (`jarsigner -verify`), mit bundletool validiert und als Universal-APK gebaut/getestet (macht der Workflow automatisch)
 - [ ] Play App Signing aktiviert, Upload-Key sicher verwahrt
 - [ ] `versionCode` monoton, `versionName` = Tag
 - [ ] targetSdk 36, minSdk 24, arm64-v8a

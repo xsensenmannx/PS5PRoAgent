@@ -176,7 +176,7 @@ store/                        Listing-Texte, Data-Safety- und Rating-Antworten
 tools/play_readiness.py       beratender Play-Store-Readiness-Check
 .github/workflows/ci.yml      Push/PR -> Shop-Config, Logiktests, Kivy-Smoke (4 Groessen)
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
-.github/workflows/play-aab.yml manuell -> signiertes AAB fuer Google Play
+.github/workflows/play-aab.yml manuell -> signiertes AAB + Universal-APK fuer Google Play
 LICENSE                       MIT-Lizenz
 THIRD_PARTY_NOTICES.md        Lizenzen der gebündelten Bibliotheken
 ```
