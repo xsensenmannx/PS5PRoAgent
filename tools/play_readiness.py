@@ -33,6 +33,13 @@ def spec_value(text, key):
     return m.group(1).strip() if m else ""
 
 
+def normalize_title(value):
+    """Titel vergleichbar machen: Geviertstriche, Doppel-Leerzeichen, Gross/Klein."""
+    text = str(value or "").casefold()
+    text = re.sub(r"[\u2010-\u2015]", "-", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def png_size(path):
     """Breite/Hoehe aus dem IHDR lesen - ohne Pillow."""
     try:
@@ -69,8 +76,9 @@ def main():
     add("OK" if minapi else "WARN", f"minSdk: {minapi or 'fehlt'}")
     add("OK" if artifact.lower() == "aab" else "BLOCK",
         f"release_artifact: {artifact} (Play braucht aab)")
-    if "ps5" in pkg.lower() or "playstation" in pkg.lower():
-        add("WARN", f"Package-Name enthaelt eine Sony-Marke: {pkg}")
+    if re.search(r"ps5|playstation|sony", pkg, re.I):
+        add("BLOCK", f"Package-Name enthaelt eine Sony-Marke: {pkg} "
+                     "(Play: Markenrisiko, neuer Package-Name noetig)")
     else:
         add("OK", f"Package-Name neutral: {pkg}")
 
@@ -88,22 +96,23 @@ def main():
         "FOREGROUND_SERVICE_SPECIAL_USE in Permissions")
 
     # Titel und Kurzbeschreibung aus dem deutschen Listing.
+    listing_titel = ""
     listing = os.path.join(ROOT, "store", "listing.de.md")
     if not os.path.isfile(listing):
         add("BLOCK", "store/listing.de.md fehlt")
     else:
         text = open(listing, encoding="utf-8").read()
-        titel = next((l[2:].strip() for l in text.splitlines()
-                      if l.startswith("# ")), "")
-        if not titel:
+        listing_titel = next((l[2:].strip() for l in text.splitlines()
+                              if l.startswith("# ")), "")
+        if not listing_titel:
             add("BLOCK", "Listing-Titel fehlt")
         else:
-            add("OK" if len(titel) <= 30 else "BLOCK",
-                f"Listing-Titel ({len(titel)}/30): {titel}")
-            if re.search(r"\b(ps5|playstation)\b", titel, re.I):
-                add("BLOCK", "Titel enthaelt eine Sony-Marke")
+            add("OK" if len(listing_titel) <= 30 else "BLOCK",
+                f"Listing-Titel ({len(listing_titel)}/30): {listing_titel}")
+            if re.search(r"\b(ps5|playstation|sony)\b", listing_titel, re.I):
+                add("BLOCK", "Store-Titel enthaelt eine Sony-Marke")
             else:
-                add("OK", "Titel ohne Sony-Marke")
+                add("OK", "Store-Titel ohne Sony-Marke")
         m = re.search(r"## Kurzbeschreibung.*?\n+([^\n#][^\n]*)", text)
         kurz = m.group(1).strip() if m else ""
         add("OK" if kurz and len(kurz) <= 80 else "WARN",
@@ -112,6 +121,24 @@ def main():
             r"(keine|keiner)\s+Verbindung|nicht\s+mit\s+Sony", text, re.I))
         add("OK" if hat_disclaimer else "WARN",
             "Disclaimer vorhanden" if hat_disclaimer else "Disclaimer fehlt")
+
+    # Der tatsaechliche App-Titel (Launcher/APK) muss zum Store-Titel passen.
+    # Sonst zeigt der Store einen anderen Namen als die installierte App - und
+    # eine Sony-Marke im Launcher-Namen bleibt ein IP-Risiko, auch wenn das
+    # Listing selbst neutral ist.
+    app_titel = spec_value(spec, "title")
+    if not app_titel:
+        add("BLOCK", "App-Titel fehlt in buildozer.spec")
+    else:
+        if re.search(r"\b(ps5|playstation|sony)\b", app_titel, re.I):
+            add("BLOCK", f"App-Titel enthaelt eine Sony-Marke: {app_titel}")
+        else:
+            add("OK", f"App-Titel ohne Sony-Marke: {app_titel}")
+        if listing_titel and normalize_title(app_titel) != normalize_title(listing_titel):
+            add("BLOCK", "App-Titel weicht vom Store-Titel ab: "
+                         f"\"{app_titel}\" vs. \"{listing_titel}\"")
+        elif listing_titel:
+            add("OK", "App-Titel und Store-Titel stimmen ueberein")
 
     # Datenschutzseite (Play verlangt eine oeffentliche URL).
     priv = os.path.join(ROOT, "docs", "privacy.html")
