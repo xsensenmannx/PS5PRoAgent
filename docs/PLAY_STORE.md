@@ -1,6 +1,6 @@
 # Play-Store-Launchplan
 
-**Stand:** November 2026 · gilt für v1.3 und die geplante v2.0.
+**Stand:** November 2026 · gilt für v1.4.0 und die geplante v2.0.
 **Ziel:** Die App als eigenständiges, policy-konformes Produkt im Google Play Store
 veröffentlichen — ohne die bestehende Sideload-Version zu beschädigen.
 
@@ -114,7 +114,7 @@ Wichtig:
 * **Kanal-Trennung:** Sideload-APK (GitHub) und Play-APK haben danach
   unterschiedliche Signaturen. Ein Wechsel zwischen den Kanälen erfordert
   Deinstallation. Das muss in Release-Notes und Store-Beschreibung stehen.
-* **versionCode** muss bei jedem Upload steigen (`10300`, `10301`, …).
+* **versionCode** muss bei jedem Upload steigen (`10400`, `10401`, …).
 * **64-bit:** arm64-v8a ist vorhanden; das erfüllt die Play-Anforderung.
 * **targetSdk 36** ist gesetzt (Play-Pflicht seit 31.08.2026).
 * **Kein `debuggable`**, keine Testsignatur, keine überflüssigen Permissions.

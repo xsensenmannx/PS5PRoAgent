@@ -1,8 +1,8 @@
 # Konzept — PS5 Pro Search Agent
 
-**Stand:** v1.4 ist vorbereitet (`versionCode 10400`); v1.3 bleibt als Release
-unverändert. Dieses Dokument beschreibt, was das Produkt ist, warum es so gebaut
-ist und was als Nächstes kommt.
+**Stand:** v1.4.0 ist veröffentlicht (`versionCode 10400`); v1.3 bleibt als
+Release unverändert. Dieses Dokument beschreibt, was das Produkt ist, warum es
+so gebaut ist und was als Nächstes kommt.
 **Leitsatz:** Ein Alarm muss stimmen. Lieber 30 Sekunden später als einmal falsch.
 
 ---
