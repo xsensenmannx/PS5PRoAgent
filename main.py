@@ -879,7 +879,6 @@ class LogoWidget(FloatLayout):
         self._c_led.rgba=(PS1_BLUE[0],PS1_BLUE[1],PS1_BLUE[2],a)
 
 # ══════════ RESULT CARD (PS1 style, horizontal) ══════════
-CARD_W = dp(246)
 
 def tief_30(serie):
     """Niedrigster Preis der letzten 30 Tage aus [[iso_ts, preis], ...]."""
@@ -926,11 +925,11 @@ class ResultCard(ButtonBehavior, BoxLayout):
         self._serie=serie or []
         self._down=None; self._moved=False
         self._detail_cb=detail_cb; self._long_event=None; self._long_done=False
-        self.orientation="vertical"
-        self.size_hint=(None,1)
-        self.width=CARD_W
-        self.padding=(dp(11),dp(10))
-        self.spacing=dp(3)
+        self.orientation="horizontal"
+        self.size_hint=(1,None)
+        self.height=dp(68) if result.get("klass")=="challenge" else dp(52)
+        self.padding=(dp(9),dp(6))
+        self.spacing=dp(7)
         self._build()
         self.bind(pos=self._redraw,size=self._redraw,state=self._redraw)
         if is_new:
@@ -969,43 +968,67 @@ class ResultCard(ButtonBehavior, BoxLayout):
         r=self.result
         co=CARD_STATUS.get(r["klass"],PS1_GREY)
 
-        # ── head: brand + readable retailer title
-        head=BoxLayout(orientation="horizontal",size_hint_y=None,
-                       height=dp(32),spacing=dp(8))
-        head.add_widget(BrandTile(r["haendler"],size_hint=(None,None),
-                                  size=(dp(30),dp(30))))
+        # Kompakte Zeile: Marke, Haendler/Meta, Preis/Status. Die alte
+        # 156-dp-Karte zeigte auf dem Telefon nur einen Treffer pro Wisch.
+        self.add_widget(BrandTile(r["haendler"],size_hint=(None,1),width=dp(28)))
+
         info=BoxLayout(orientation="vertical",spacing=dp(0))
         name_str=re.sub(r"\s+(DE|AT)$","",r["haendler"]).strip()
         n=Label(text=f"[b]{name_str}[/b]",markup=True,color=PS1_TEXT,
-                font_size=sp(13.5),font_name=SST_FONT,
+                font_size=sp(12),font_name=SST_FONT,
                 halign="left",valign="middle",
+                size_hint_y=None,height=dp(17),
                 shorten=True,shorten_from="right")
         n.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         info.add_widget(n)
-        meta=BoxLayout(orientation="horizontal",size_hint_y=None,
-                       height=dp(13),spacing=dp(4))
-        meta.add_widget(FlagWidget(r["land"],size=(dp(16),dp(11))))
-        m=Label(text=f"{r['land']} · PS5 PRO 2 TB · {r['zeit']}",
-                color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
+
+        meta_txt=f"{r['land']} · {r['zeit']}"
+        if self._is_new: meta_txt="NEU · "+meta_txt
+        elif ist_gebraucht(r.get("condition")): meta_txt="GEBRAUCHT · "+meta_txt
+        elif r.get("sofort") is False: meta_txt="VORBEST. · "+meta_txt
+        m=Label(text=meta_txt,color=PS1_GREY,font_size=sp(8.2),font_name=SST_FONT,
                 halign="left",valign="middle",
+                size_hint_y=None,height=dp(12),
                 shorten=True,shorten_from="right")
         m.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-        meta.add_widget(m)
-        info.add_widget(meta)
-        head.add_widget(info)
-        self.add_widget(head)
+        info.add_widget(m)
 
-        # ── price + difference to last scan
-        prow=BoxLayout(orientation="horizontal",size_hint_y=1,spacing=dp(4))
+        # BOT-SCHUTZ ist kein Fehler der App: Der Shop verlangt eine
+        # Challenge. Die App umgeht sie bewusst nicht und sagt das hier klar.
+        if r["klass"]=="challenge":
+            hint=Label(text="SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT",
+                       color=PS1_YELLOW,font_size=sp(7.8),font_name=SST_FONT,
+                       halign="left",valign="middle",
+                       shorten=True,shorten_from="right",
+                       size_hint_y=None,height=dp(14))
+            hint.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            info.add_widget(hint)
+        self.add_widget(info)
+
+        right=BoxLayout(orientation="vertical",size_hint_x=None,
+                        width=dp(100),spacing=dp(0))
         if r["preis"] is not None:
             p_txt=format_preis(r["preis"]); p_col=PS1_TEXT
         else:
             p_txt="—"; p_col=PS1_GREY
         p=Label(text=f"[b]{p_txt}[/b]",markup=True,color=p_col,
-                font_size=sp(23),font_name=SST_FONT,
-                halign="left",valign="middle")
+                font_size=sp(18),font_name=SST_FONT,
+                halign="right",valign="middle",
+                size_hint_y=None,height=dp(26))
         p.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-        prow.add_widget(p)
+        right.add_widget(p)
+
+        st_map={"hit":"VERFÜGBAR","expensive":"ZU TEUER","unknown":"PREIS OFFEN",
+                "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ"}
+        st=st_map.get(r["klass"],"?")
+        srow=BoxLayout(orientation="horizontal",size_hint_y=None,
+                       height=dp(14),spacing=dp(2))
+        s=Label(text=f"[b]{st}[/b]",markup=True,color=co,
+                font_size=sp(8.2),font_name=SST_FONT,
+                halign="left",valign="middle",
+                shorten=True,shorten_from="right")
+        s.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        srow.add_widget(s)
 
         d_txt=""; d_col=PS1_GREY
         if r["preis"] is not None and self._prev is not None:
@@ -1017,50 +1040,13 @@ class ResultCard(ButtonBehavior, BoxLayout):
             else:
                 d_txt="STABIL"; d_col=PS1_GREY
         if d_txt:
-            d=Label(text=d_txt,color=d_col,font_size=sp(9),bold=True,
+            d=Label(text=d_txt,color=d_col,font_size=sp(8),bold=True,
                     font_name=SST_FONT,halign="right",valign="middle",
-                    size_hint_x=None,width=dp(62))
+                    size_hint_x=None,width=dp(44))
             d.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-            prow.add_widget(d)
-        self.add_widget(prow)
-
-        # ── 30-Tage-Tief + Sparkline (nur wenn es schon Messpunkte gibt)
-        if len(self._serie)>=2:
-            tief=tief_30(self._serie)
-            if tief is not None:
-                srow=BoxLayout(orientation="horizontal",size_hint_y=None,
-                               height=dp(17),spacing=dp(5))
-                tl=Label(text=f"TIEF {format_preis(tief)}",color=PS1_GREY,
-                         font_size=sp(8),font_name=SST_FONT,
-                         halign="left",valign="middle",
-                         size_hint_x=None,width=dp(78),
-                         shorten=True,shorten_from="right")
-                tl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-                srow.add_widget(tl)
-                srow.add_widget(Sparkline(self._serie,color=co,size_hint_x=1))
-                self.add_widget(srow)
-
-        # ── status line
-        st_map={"hit":"VERFÜGBAR","expensive":"ZU TEUER","unknown":"PREIS OFFEN",
-                "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ"}
-        st=st_map.get(r["klass"],"?")
-        bottom=BoxLayout(orientation="horizontal",size_hint_y=None,
-                         height=dp(20),spacing=dp(5))
-        bottom.add_widget(Dot(co))
-        s=Label(text=f"[b]{st}[/b]",markup=True,color=co,
-                font_size=sp(9),font_name=SST_FONT,
-                halign="left",valign="middle",
-                shorten=True,shorten_from="right")
-        s.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-        bottom.add_widget(s)
-        if self._is_new:
-            bottom.add_widget(Tag("NEU",PS1_YELLOW))
-        if ist_gebraucht(r.get("condition")):
-            bottom.add_widget(Tag("GEBRAUCHT",PS1_YELLOW))
-        elif r.get("sofort") is False:
-            bottom.add_widget(Tag("VORBESTELLUNG",PS1_BLUE))
-        bottom.add_widget(Widget())
-        self.add_widget(bottom)
+            srow.add_widget(d)
+        right.add_widget(srow)
+        self.add_widget(right)
 
     def on_touch_down(self,touch):
         if self.collide_point(*touch.pos):
@@ -1307,9 +1293,8 @@ class MainUI(FloatLayout):
         self.results_scroll=HScrollView()
         self.results_row=BoxLayout(orientation="horizontal",
                                    size_hint=(None,1),
-                                   spacing=dp(8),padding=(dp(8),dp(6)))
-        self.results_row.bind(minimum_width=self._sync_row_width,
-                              minimum_height=self._sync_row_height)
+                                   spacing=dp(4),padding=(dp(8),dp(5)))
+        self.results_row.bind(minimum_height=self._sync_row_height)
         self.results_scroll.add_widget(self.results_row)
         self.results_scroll.bind(width=lambda w,v:self._resize_placeholder(v))
         self.results_panel.add_widget(self.results_scroll)
@@ -1432,29 +1417,22 @@ class MainUI(FloatLayout):
         try:
             self._insets=android_insets(); self._apply_sizes()
         except Exception as e: print(f"[Insets] {e}")
-    def _sync_row_width(self,row,value):
-        if not self._wide:
-            row.width=max(dp(1),value)
     def _sync_row_height(self,row,value):
-        if self._wide:
-            row.height=max(dp(1),value)
+        row.height=max(dp(1),value)
     def _set_results_mode(self,wide):
-        """Hochformat = horizontale Karten, Querformat = vertikale Liste."""
+        """Immer eine kompakte vertikale Liste; wide nutzt nur mehr Breite."""
         wide=bool(wide)
         if self._results_mode_set and wide==self._wide: return
         self._wide=wide; self._results_mode_set=True
-        self.results_scroll.do_scroll_x=not wide
-        self.results_scroll.do_scroll_y=wide
-        self.results_scroll.scroll_x=0; self.results_scroll.scroll_y=0
-        self.results_row.orientation="vertical" if wide else "horizontal"
-        self.results_row.size_hint=(1,None) if wide else (None,1)
-        if wide: self.results_row.width=max(dp(1),self.results_panel.width)
-        else: self.results_row.height=max(dp(1),self.results_scroll.height)
-        self.prev_btn.opacity=0 if wide else 1
-        self.next_btn.opacity=0 if wide else 1
-        self.prev_btn.disabled=wide; self.next_btn.disabled=wide
-        self.prev_btn.width=0 if wide else dp(24)
-        self.next_btn.width=0 if wide else dp(24)
+        self.results_scroll.do_scroll_x=False
+        self.results_scroll.do_scroll_y=True
+        self.results_scroll.scroll_x=0; self.results_scroll.scroll_y=1
+        self.results_row.orientation="vertical"
+        self.results_row.size_hint=(1,None)
+        self.results_row.width=max(dp(1),self.results_panel.width)
+        self.prev_btn.opacity=0; self.next_btn.opacity=0
+        self.prev_btn.disabled=True; self.next_btn.disabled=True
+        self.prev_btn.width=0; self.next_btn.width=0
         self._clear_results(); self._last_sig=None
         if self.scanning:
             self._show_placeholder("SCANNE...","TIPPE STOP ZUM ABBRECHEN")
@@ -1489,6 +1467,7 @@ class MainUI(FloatLayout):
             self.radar.reserve_bottom=g["radar_bottom"]
             self.radar.reserve_top=g["radar_top"]
             self._set_results_mode(g["wide"])
+            self.results_row.width=max(dp(1),g["panel_w"])
         except Exception as e: print(f"[Sizes] {e}")
 
     # ── Bedienung ───────────────────────────────────────────────────
@@ -1584,11 +1563,17 @@ class MainUI(FloatLayout):
         if len(self._known_hits)>200:
             self._known_hits=set(list(self._known_hits)[-100:])
         msg=f"{name}: {format_preis(preis)}"
-        try: ok=notify("PS5 PRO 2TB VERFÜGBAR",msg,url=r.get("url"))
-        except Exception: ok=False
-        if not ok:
-            try: self._toast(msg,color=CARD_STATUS["hit"])
-            except Exception: pass
+        # notify() kann auf Android Systemzeit kosten; das darf den Radar nicht
+        # mitten im Treffer einfrieren. Der Fallback-Toast laeuft im UI-Thread.
+        def send():
+            try: ok=notify("PS5 PRO 2TB VERFÜGBAR",msg,url=r.get("url"))
+            except Exception: ok=False
+            if not ok:
+                try:
+                    Clock.schedule_once(
+                        lambda dt:self._toast(msg,color=CARD_STATUS["hit"]),0)
+                except Exception: pass
+        threading.Thread(target=send,daemon=True).start()
 
     def _send_test_alarm(self):
         try:
@@ -1974,15 +1959,8 @@ class MainUI(FloatLayout):
             self._placeholder.width=max(dp(240),w)
     def _show_placeholder(self,titel,unter):
         self._clear_results()
-        w=(self.results_scroll.width if self.results_scroll.width>dp(20)
-           else Window.width-dp(16))
-        if self._wide:
-            box=BoxLayout(orientation="vertical",size_hint=(1,None),
-                          height=dp(180),spacing=dp(2),padding=dp(10))
-        else:
-            box=BoxLayout(orientation="vertical",size_hint=(None,1),
-                          width=max(dp(240),w),
-                          spacing=dp(2),padding=dp(10))
+        box=BoxLayout(orientation="vertical",size_hint=(1,None),
+                      height=dp(180),spacing=dp(2),padding=dp(10))
         box.add_widget(Widget())
         symrow=BoxLayout(orientation="horizontal",size_hint_y=None,height=dp(20))
         symrow.add_widget(Widget())
@@ -2033,18 +2011,19 @@ class MainUI(FloatLayout):
                   for n in namen)
         if sig==self._last_sig and self._placeholder is None:
             return
-        sx=self.results_scroll.scroll_x
+        sx=self.results_scroll.scroll_x; sy=self.results_scroll.scroll_y
         self._clear_results()
         self._last_sig=sig
         for n in namen:
             r=self.scanned[n]
             card=ResultCard(r,r.get("_is_new",False),r.get("_prev"),
                             self.history.get_serie(n),detail_cb=self._open_detail)
-            if self._wide:
-                card.size_hint=(1,None); card.height=dp(156)
+            card.size_hint=(1,None)
+            card.height=dp(68) if r["klass"]=="challenge" else dp(52)
             self.results_row.add_widget(card)
-        if sx>0:
-            Clock.schedule_once(lambda dt:setattr(self.results_scroll,"scroll_x",sx),0)
+        if sx>0 or sy<1:
+            Clock.schedule_once(lambda dt:(setattr(self.results_scroll,"scroll_x",sx),
+                                          setattr(self.results_scroll,"scroll_y",sy)),0)
 
     def _rerender_throttled(self):
         if self._rerender_event is None:
@@ -2059,6 +2038,8 @@ class MainUI(FloatLayout):
         else: self._scan_start()
     def _scan_start(self,nur=None):
         if self.scanning: return
+        if self._rerender_event is not None:
+            Clock.unschedule(self._rerender_event); self._rerender_event=None
         namen=set(nur) if nur is not None else self.active_haendler
         aktive=[h for h in HAENDLER if h["name"] in namen]
         if not aktive:
@@ -2067,6 +2048,7 @@ class MainUI(FloatLayout):
         # Ein Health-Retry soll die bereits sichtbaren Ergebnisse behalten und
         # nur die auffaelligen Shops neu abfragen.
         if nur is None: self.scanned={}
+        self.results_scroll.scroll_y=1
         self._scan_token+=1; tok=self._scan_token
         cancel=threading.Event(); self._scan_cancel_event=cancel
         self._drain_stale()
@@ -2167,7 +2149,11 @@ class MainUI(FloatLayout):
         new=sum(1 for x in self.scanned.values() if x.get("_is_new"))
         try: health().save()
         except Exception: pass
-        self.history.update(self.scanned.values()); self._rerender()
+        self.history.update(self.scanned.values())
+        # Bei Treffern keinen kompletten Karten-Neubau mitten in den letzten
+        # Radar-Frame legen; der geplante Throttle-Render uebernimmt.
+        if hits: self._rerender_throttled()
+        else: self._rerender()
         ts=datetime.now().strftime("%H:%M")
         if abgebrochen:
             self.results_status.text=(f"ABGEBROCHEN · {self._scan_done}/{self._scan_total}"

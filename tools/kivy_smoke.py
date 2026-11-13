@@ -115,6 +115,8 @@ class SmokeApp(App):
         try:
             self.alarm_rules()
             self.shop_health()
+            self.challenge_hint()
+            self.result_list()
             self.detail()
             self.no_popup()
         except Exception:
@@ -213,6 +215,41 @@ class SmokeApp(App):
         self.ui._open_health()
         p = self.popup("Shop-Health erneut")
         self.close(p, "ZU")
+
+    # ── BOT-SCHUTZ ──────────────────────────────────────────────────────
+    def challenge_hint(self):
+        result = {
+            "haendler": "Amazon DE", "land": "DE", "zeit": "12:00",
+            "preis": None, "klass": "challenge", "condition": None,
+            "seller": None, "sofort": None, "signal": None,
+            "verfuegbarkeit": None, "url": "https://example.invalid/challenge",
+        }
+        card = main.ResultCard(result, False, None)
+        text = " ".join(str(getattr(w, "text", "")) for w in card.walk())
+        check("BOT-SCHUTZ: Hinweis auf Challenge",
+              "SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT" in text, True)
+        check("Trefferliste: vertikal", self.ui.results_row.orientation, "vertical")
+        check("Trefferliste: kompakte Zeile", card.height <= main.dp(80), True)
+
+    def result_list(self):
+        basis = {"land": "DE", "zeit": "12:00", "condition": "new",
+                 "sofort": True, "url": "https://example.invalid/shop"}
+        self.ui.scanned = {
+            "Shop A": {"haendler": "Shop A", "preis": 899.0,
+                       "klass": "hit", "_is_new": False, **basis},
+            "Shop B": {"haendler": "Shop B", "preis": 799.0,
+                       "klass": "hit", "_is_new": True, **basis},
+        }
+        self.ui._rerender()
+        self.pump()
+        cards = [w for w in self.ui.results_row.children
+                 if isinstance(w, main.ResultCard)]
+        check("Trefferliste: beide Treffer sichtbar", len(cards), 2)
+        check("Trefferliste: Zeilen gestapelt",
+              all(c.size_hint_y is None and c.height <= main.dp(80) for c in cards), True)
+        check("Trefferliste: kein horizontaler Rest", self.ui.results_scroll.do_scroll_x, False)
+        self.ui.scanned = {}
+        self.ui._clear_results()
 
     # ── Detailansicht ───────────────────────────────────────────────────
     def detail(self):

@@ -45,9 +45,10 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 * **Neustart-fest**: Ist AUTO aktiv, startet der geschützte Foreground-Service
   nach einem Neustart oder App-Update automatisch wieder. Der Boot-Receiver
   prüft zuerst die lokale Einstellung und startet nur dann.
-* **Tablet- und Foldable-Layout**: Im Querformat ab 600 dp werden Treffer zu
-  einer vertikalen Liste am rechten Rand, das Radar bleibt links. Dialoge sind
-  in der Breite begrenzt; linke/rechte System-Insets werden berücksichtigt.
+* **Kompakte Trefferliste**: Treffer erscheinen in allen Ansichten als vertikale
+  Zeilen mit Preis und Status rechts; mehrere Treffer sind gleichzeitig sichtbar.
+  Im Querformat ab 600 dp wandert die Liste an den rechten Rand, das Radar bleibt
+  links. Dialoge sind in der Breite begrenzt; System-Insets werden berücksichtigt.
 * **Abbruch**: der Scan-Button wird während eines Laufs zu **STOP**. STOP und
   App-Pause setzen ein Abbruchsignal; laufende Requests laufen höchstens noch
   bis zum Timeout, danach starten keine Retries oder weiteren Shops mehr.
@@ -119,7 +120,7 @@ python3 tools/kivy_smoke.py
 
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
 HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
-Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 563 Zusicherungen,
+Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 569 Zusicherungen,
 ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test ist ebenfalls
 ein eigenes CI-Gate und braucht kein Android-Gerät.
 
@@ -161,6 +162,12 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v3.3** – Kompakte Trefferliste (versionCode 12): vertikale Zeilen statt
+  breiter Karten, dadurch mehrere Treffer gleichzeitig sichtbar; Preis, Status
+  und Preisänderung stehen rechts. Der BOT-SCHUTZ-Hinweis bleibt sichtbar.
+  Benachrichtigungen laufen außerhalb des UI-Threads, und der Karten-Neubau am
+  Scan-Ende wird entzerrt, damit das Radar bei Treffern flüssiger bleibt.
+  Enthält den vollständigen Stand aus v3.2.
 * **v3.2** – Robustere Treffer (versionCode 11): verschachtelte JSON-LD-Angebote,
   Angebotslisten mit „neu vor gebraucht“, Meta-/Microdata-Preise, Punkt-Dezimalpreise
   und Meta-Verfügbarkeit. Enthält den vollständigen Stand aus v3.1.

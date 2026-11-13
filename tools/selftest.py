@@ -364,6 +364,29 @@ def retry_tests():
         check("429 genau zwei Versuche", len(calls), 2)
         check("429 wartet Retry-After", sleeps, [2])
 
+        # STOP waehrend der 429-Wartezeit: _warte() liefert True, danach darf
+        # kein zweiter Request mehr starten. Das Event setzt sich beim Warten,
+        # damit der Test deterministisch bleibt.
+        class CancelImWait(threading.Event):
+            def __init__(self):
+                super().__init__(); self.waits = []
+            def wait(self, sekunden=None):
+                self.waits.append(sekunden); self.set(); return True
+
+        calls.clear(); sleeps.clear()
+        ev_wait = CancelImWait()
+        core._try_url = lambda u, a, p=None: (
+            calls.append(a), (None, "HTTP 429", {"retry_after": 5}))[1]
+        try:
+            core.fetch_html_multi(["https://example.invalid"], cancel=ev_wait)
+            abbruch = None
+        except core.ScanAbgebrochen:
+            abbruch = "abgebrochen"
+        check("429 Cancel waehrend Wartezeit", abbruch, "abgebrochen")
+        check("429 Cancel kein zweiter Versuch", len(calls), 1)
+        check("429 Cancel wartet Retry-After", ev_wait.waits, [5])
+        check("429 Cancel Event gesetzt", ev_wait.is_set(), True)
+
         # Ein sehr langes Retry-After blockiert den Scan nicht.
         calls.clear(); sleeps.clear()
         core._try_url = lambda u, a, p=None: (
@@ -415,6 +438,33 @@ def retry_tests():
     finally:
         core._try_url = echt
         core.time = echt_zeit
+
+
+def scan_status_tests():
+    """scan_einen muss Sperren wirklich als challenge zurueckgeben.
+
+    Die Hilfsfunktion fehler_klasse allein reicht nicht: der Fehler entsteht
+    in fetch_mit_cache und wird erst in scan_einen in eine Ergebnisklasse
+    uebersetzt. Beide Pfade werden deshalb durch scan_einen geprueft.
+    """
+    alt = core._try_url
+    try:
+        core.reset_http_cache()
+        core._try_url = lambda u, a, p=None: (None, "HTTP 403", {})
+        r403 = core.scan_einen({"name": "Test 403", "land": "DE",
+                                "urls": ["https://example.invalid/403"]})
+        check("scan_einen HTTP 403 ist challenge",
+              (r403 or {}).get("klass"), "challenge")
+
+        core.reset_http_cache()
+        core._try_url = lambda u, a, p=None: (
+            "<html><title>Just a moment...</title></html>", None, {})
+        rchallenge = core.scan_einen({"name": "Test Challenge", "land": "DE",
+                                      "urls": ["https://example.invalid/challenge"]})
+        check("scan_einen HTML-Challenge ist challenge",
+              (rchallenge or {}).get("klass"), "challenge")
+    finally:
+        core._try_url = alt
 
 
 def radar_tests():
@@ -529,8 +579,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "3.2")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "11")
+    check("spec version", c.get("app", "version"), "3.3")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "12")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -934,6 +984,7 @@ if __name__ == "__main__":
     try:
         main_tests()
         retry_tests()
+        scan_status_tests()
         radar_tests()
         progress_tests()
         service_tests()
