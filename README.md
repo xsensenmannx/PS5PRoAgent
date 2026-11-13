@@ -36,6 +36,21 @@ aktuelle Version steht oben. Alle Downloads:
 > **Zur Zählung:** v1.1 ist die Fortsetzung der bisherigen 5.x-Stände. Die
 > Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0 Archiv, v1.1 aktuell).
 
+## Eindruck
+
+| Hochformat | Querformat |
+|---|---|
+| <img src="docs/screenshots/hochformat.png" width="250" alt="Radar und Trefferliste im Hochformat"> | <img src="docs/screenshots/querformat.png" width="480" alt="Radar links, Trefferliste rechts im Querformat"> |
+
+**Detailansicht** – langes Tippen auf eine Trefferkarte zeigt Zustand, Verkäufer,
+Signal, Preistiefs und den Preisverlauf:
+
+<img src="docs/screenshots/detail.png" width="270" alt="Detailansicht mit Preisverlauf">
+
+**Scan** – Radar-Sweep, Fortschritt und Treffer, die nach und nach eintreffen:
+
+<img src="docs/screenshots/scan.gif" width="290" alt="Scan-Ablauf mit Radar und eintreffenden Treffern">
+
 ## Was die App kann
 
 * **Parallel-Scan** über 42 Shops (DE + AT) mit 6 Threads, Retry und wechselnden
@@ -136,6 +151,7 @@ tools/p4a_hook.py             ergänzt den specialUse-Subtyp im Android-Manifest
 tools/release_notes.sh        Release-Beschreibung (Änderungen, Installation, SHA-256)
 tools/ci_sign_apk.sh          signiert die APK mit dem festen Release-Schlüssel
 tools/ci_log_failure.sh       zeigt bei einem CI-Fehler den Buildozer-Log
+docs/screenshots/             Screenshots und Scan-GIF fuer dieses README
 .github/workflows/ci.yml      Push/PR -> Shop-Config, Logiktests, Kivy-Smoke (4 Groessen)
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
 LICENSE                       MIT-Lizenz
