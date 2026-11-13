@@ -1,7 +1,8 @@
 # Konzept — PS5 Pro Search Agent
 
-**Stand:** v1.3 ist veröffentlicht (`versionCode 10300`). Dieses Dokument beschreibt, was
-das Produkt ist, warum es so gebaut ist und was als Nächstes kommt.
+**Stand:** v1.4 ist vorbereitet (`versionCode 10400`); v1.3 bleibt als Release
+unverändert. Dieses Dokument beschreibt, was das Produkt ist, warum es so gebaut
+ist und was als Nächstes kommt.
 **Leitsatz:** Ein Alarm muss stimmen. Lieber 30 Sekunden später als einmal falsch.
 
 ---
@@ -51,11 +52,12 @@ Unterschied machen. Die Basis dafür steht seit v1.3; die Bausteine selbst sind 
 4. **Parser-Doktor** (v1.4, CI) — KI schlägt neue Regeln vor, wenn eine Shop-Seite bricht;
    Tests entscheiden, ein Mensch gibt frei. Kein LLM im Scan-Pfad.
 
-Bereits gebaut: Webhook-Alarme, Treffer-Verifikation und Schnell-Modus (v1.3).
+Bereits gebaut: Webhook-Alarme, Treffer-Verifikation und Schnell-Modus (v1.3);
+Verfügbarkeitszustände, Konfidenz, Beleg und GTIN/Bundle (v1.4).
 
 ---
 
-## 2. Ist-Stand v1.3
+## 2. Ist-Stand v1.4
 
 Bereits gebaut und getestet:
 
@@ -70,7 +72,10 @@ Bereits gebaut und getestet:
 * **Treffer-Verifikation** per zweitem Abruf ohne Cache; Rückstufung bei Ausverkauf.
 * **Schnell-Modus** für sechs heiße Shops im Minutentakt.
 * Remote-Konfiguration für URLs und deklarative Parser-Regeln.
-* 745 Logiktests, sechs Kivy-Smoke-Läufe (inkl. 120 % Schrift), signierte Releases.
+* **v1.4:** Verfügbarkeitszustände (Markt/Lotterie/Einladung/Vorbestellung),
+  Konfidenz 0–100, Beleg-Ausschnitt mit Hash, GTIN/EAN, Bundle-Filter,
+  Marketplace-Hinweis und ein 304-Cache mit maximal sechs Stunden Alter.
+* 777 Logiktests, sechs Kivy-Smoke-Läufe (inkl. 120 % Schrift), signierte Releases.
 
 Was das *nicht* löst: Das Handy schläft weiterhin, Lotterien werden nicht erkannt,
 und ein Treffer ist noch keine erklärte Entscheidung.
@@ -138,9 +143,11 @@ dieselbe Logik. Ein Treffer im Hintergrund ist derselbe Treffer wie im Vordergru
 
 Drei Releases, jedes mit einem klaren Zweck. Keine Version ohne Abnahmekriterien.
 
-### v1.4 — „Vertrauen" (2–3 Wochen)
+### v1.4 — „Vertrauen" (Kern umgesetzt)
 
-Das Release, das die zwei Nordstern-Zahlen wirklich bewegt.
+Das Release, das die zwei Nordstern-Zahlen wirklich bewegt. **In v1.4 umgesetzt:
+A (Konfidenz), B (Beweisfenster), C (Chance statt Treffer) sowie GTIN/Bundle und
+Cache-Frische. Offen bleiben D (adaptiver Scan) und E (Parser-Doktor).**
 
 **A. Konfidenz 2.0 (0–100)**
 Signale mit Gewicht: zweiter Abruf bestätigt (40), Preis plausibel zum 30-Tage-Median (15),

@@ -1,4 +1,4 @@
-"""PS5 Pro Search Agent v1.1 - PS1 Edition"""
+"""PS5 Pro Search Agent v1.4 - PS1 Edition"""
 import os, sys, json, re, time, math, random, queue, threading, hashlib
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,7 +40,7 @@ from scan_core import (
     alarm_erlaubt, alarm_ereignis, ist_gebraucht, install_crash_hook, read_crash_log,
     lade_shop_config, aktualisiere_shop_config, flush_http_cache,
     webhook_senden, webhook_preset, redact_url, sende_webhook_alarm,
-    verify_treffer, schnellscan_haendler, HOT_SHOPS,
+    verify_treffer, schnellscan_haendler, HOT_SHOPS, CHANCE_STATES,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -106,9 +106,11 @@ PS_CROSS    = (0.11,0.35,0.65,1)
 PS_SQUARE   = (0.85,0.11,0.46,1)
 
 STATUS_COLORS = {"hit":get_color_from_hex("#3ddc84"),"expensive":C_ORANGE,
+                 "chance":PS1_CYAN,
                  "unknown":C_YELLOW,"unavail":C_GRAY,"error":C_RED,
                  "challenge":C_YELLOW,"parser":PS1_RED}
 CARD_STATUS = {"hit":get_color_from_hex("#3ddc84"),"expensive":PS1_YELLOW,
+               "chance":PS1_CYAN,
                "unknown":get_color_from_hex("#9aa3ad"),
                "unavail":get_color_from_hex("#6b7280"),
                "error":get_color_from_hex("#ff5c5c"),
@@ -1027,8 +1029,10 @@ class ResultCard(ButtonBehavior, BoxLayout):
         meta_txt=f"{r['land']} · {r['zeit']}"
         if r.get("_restock"): meta_txt="WIEDER DA · "+meta_txt
         elif self._is_new: meta_txt="NEU · "+meta_txt
+        elif r.get("klass")=="chance": meta_txt="CHANCE · "+meta_txt
         elif ist_gebraucht(r.get("condition")): meta_txt="GEBRAUCHT · "+meta_txt
         elif r.get("sofort") is False: meta_txt="VORBEST. · "+meta_txt
+        if r.get("marketplace"): meta_txt="MARKETPLACE · "+meta_txt
         meta_row=BoxLayout(orientation="horizontal",size_hint_y=None,
                            height=dp(12)*s,spacing=dp(3))
         meta_row.add_widget(FlagWidget(r["land"],size=(dp(18)*s,dp(12)*s)))
@@ -1044,6 +1048,7 @@ class ResultCard(ButtonBehavior, BoxLayout):
         # Preis und Delta/BEST den Platz; so bleibt "NICHT VERFÜGBAR" auch
         # auf 320 dp und bei 120 % Schrift vollständig lesbar.
         st_map={"hit":"VERFÜGBAR","expensive":"ZU TEUER","unknown":"PREIS OFFEN",
+                "chance":"CHANCE",
                 "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ",
                 "parser":"PARSER-FEHLER"}
         st=st_map.get(r["klass"],"?")
@@ -1051,6 +1056,8 @@ class ResultCard(ButtonBehavior, BoxLayout):
                "weg":"WEG","unbestaetigt":"UNGEPRÜFT"}
         if r["klass"]=="hit" and r.get("verify") in vmap2:
             st=st+" · "+vmap2[r["verify"]]
+        if r["klass"] in ("hit","chance") and r.get("confidence") is not None:
+            st=st+f" · {int(r['confidence'])}%"
         st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
                      font_size=fs(8.5),font_name=SST_FONT,
                      halign="left",valign="middle",
@@ -1640,7 +1647,9 @@ class MainUI(FloatLayout):
         self._reclassify_all(); self._rerender()
     def _reclassify_all(self):
         for r in self.scanned.values():
-            if r["klass"] in ("error","challenge","unavail","parser"): continue
+            if r["klass"] in ("error","challenge","unavail","parser","chance"): continue
+            if r.get("avail_state") in CHANCE_STATES:
+                r["klass"]="chance"; continue
             if r["preis"] is None: r["klass"]="unknown"
             elif self.max_preis is None or r["preis"]<=self.max_preis: r["klass"]="hit"
             else: r["klass"]="expensive"
@@ -1994,6 +2003,17 @@ class MainUI(FloatLayout):
         add_toggle("notify_sofort",True,"NUR SOFORT: AN","NUR SOFORT: AUS",PS1_GREEN)
         add_toggle("alarm_nur_bestaetigt",False,"NUR BESTÄTIGTE: AN",
                    "NUR BESTÄTIGTE: AUS",PS1_CYAN)
+        # Konfidenz-Schwelle: 0 = aus, 70 = nur belastbare Alarme. Der
+        # Standard bleibt aus, damit v1.3-Verhalten nicht ueberraschend kippt.
+        kb=PS1Button(text="",accent=PS1_GREEN,font_size=sp(10),
+                     size_hint_y=None,height=dp(33))
+        def sync_konfidenz():
+            kb.text=("KONFIDENZ MIN 70%: AN" if float(self.settings.get("confidence_min",0) or 0)>0
+                     else "KONFIDENZ MIN 70%: AUS")
+        def flip_konfidenz(*_):
+            self.settings.set("confidence_min",0 if float(self.settings.get("confidence_min",0) or 0)>0 else 70)
+            sync_konfidenz(); haptic(0.02)
+        kb.bind(on_release=flip_konfidenz); sync_konfidenz(); box.add_widget(kb)
         add_toggle("notify_low_only",False,"NUR TIEFSTPREIS: AN","NUR TIEFSTPREIS: AUS",PS1_YELLOW)
         add_toggle("quiet_hours",False,"RUHEZEIT 23-07: AN","RUHEZEIT 23-07: AUS",PS1_BLUE)
 
@@ -2165,11 +2185,34 @@ class MainUI(FloatLayout):
                              size_hint_y=None,height=dp(28)))
         cond=r.get("condition"); cond_txt=("GEBRAUCHT/REFURB" if ist_gebraucht(cond)
                                           else "NEU" if cond=="new" else "UNBEKANNT")
-        sofort=r.get("sofort"); sofort_txt=("SOFORT" if sofort is True else
-                                            "VORBESTELLUNG" if sofort is False else "UNBEKANNT")
+        state_map={"in_stock":"AUF LAGER","online_only":"ONLINE",
+                   "limited":"BEGRENZT","pickup_only":"NUR IM MARKT",
+                   "preorder":"VORBESTELLUNG","backorder":"NACHBESTELLUNG",
+                   "lottery":"LOTTERIE","invite":"EINLADUNG",
+                   "sold_out":"AUSVERKAUFT","discontinued":"EINGESTELLT",
+                   "unknown":"UNBEKANNT"}
+        state_txt=state_map.get(r.get("avail_state"),
+                                str(r.get("verfuegbarkeit") or "—"))
+        sofort=r.get("sofort")
+        if r.get("klass")=="chance" or r.get("avail_state") in CHANCE_STATES:
+            sofort_txt="CHANCE (KEIN ALARM)"
+        else:
+            sofort_txt=("SOFORT" if sofort is True else
+                        "VORBESTELLUNG" if sofort is False else "UNBEKANNT")
         zeilen=[("ZUSTAND",cond_txt),("VERKAEUFER",r.get("seller") or "—"),
-                ("LIEFERBAR",sofort_txt),("SIGNAL",str(r.get("signal") or "—").upper()),
-                ("VERFUEGBARKEIT",str(r.get("verfuegbarkeit") or "—"))]
+                ("VERFUEGBARKEIT",state_txt),("LIEFERBAR",sofort_txt),
+                ("SIGNAL",str(r.get("signal") or "—").upper())]
+        if r.get("confidence") is not None:
+            zeilen.insert(1,("KONFIDENZ",f"{int(r['confidence'])} / 100"))
+        if r.get("gtin"):
+            zeilen.append(("GTIN/EAN",str(r["gtin"])))
+        if r.get("bundle"):
+            zeilen.append(("PRODUKT","BUNDLE - ABGEWERTET"))
+        beleg=r.get("beleg")
+        if isinstance(beleg,dict) and beleg.get("excerpt"):
+            ts=str(beleg.get("ts") or "")
+            zeit=ts[11:19] if len(ts)>=19 else ts
+            zeilen.append(("BELEG",f"{zeit} · {beleg.get('hash','')}"))
         vmap={"bestaetigt":"BESTÄTIGT","geaendert":"PREIS GEÄNDERT",
               "weg":"2. ABRUF: WEG","unbestaetigt":"UNBESTÄTIGT"}
         if r.get("verify") in vmap:
@@ -2185,6 +2228,12 @@ class MainUI(FloatLayout):
                     halign="right",valign="middle",shorten=True,shorten_from="right")
             for x in (a,b): x.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             row.add_widget(a); row.add_widget(b); box.add_widget(row)
+        if isinstance(beleg,dict) and beleg.get("excerpt"):
+            bl=Label(text="BELEG: "+str(beleg["excerpt"]),color=PS1_SILVER,
+                     font_size=sp(8),font_name=SST_FONT,halign="left",valign="top",
+                     size_hint_y=None,height=dp(34))
+            bl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            box.add_widget(bl)
         tief30=tief_30(serie); allzeit=self.history.get_tief(name)
         info=Label(text=f"30-TAGE-TIEF: {format_preis(tief30) if tief30 else '—'}\n"
                          f"ALLZEIT-TIEF: {format_preis(allzeit) if allzeit else '—'}",
@@ -2380,7 +2429,7 @@ class MainUI(FloatLayout):
             self._show_placeholder("SYSTEM BEREIT","TIPPE AUF SCAN"); return
         namen=[n for n in self.scanned
                if self.filter_mode=="alle" or
-               (self.scanned[n]["klass"]=="hit"
+               (self.scanned[n]["klass"] in ("hit","chance")
                 and not ist_gebraucht(self.scanned[n].get("condition")))]
         self.results_count.text=f"{len(namen)}/{len(self.scanned)}"
         if not namen:
@@ -2528,8 +2577,8 @@ class MainUI(FloatLayout):
         self._scan_done+=1; name=r.get("haendler","?")
         self._update_radar_hud()
         try:
-            if r["klass"] not in ("error","challenge","unavail","parser"):
-                r["klass"]=classify(True,r["preis"],self.max_preis)
+            if r["klass"] not in ("error","challenge","unavail","parser","chance"):
+                r["klass"]=classify(True,r["preis"],self.max_preis,r.get("avail_state"))
             prev=self.history.get_last(name)
             vorher_av=self.history.get_verfuegbar(name)
             ereignis=alarm_ereignis(r,prev,vorher_av)

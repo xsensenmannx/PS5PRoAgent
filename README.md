@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.3 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.3/ps5prosearchagent-1.3-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.4 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.4/ps5prosearchagent-1.4-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -23,8 +23,9 @@ einmalig eine Deinstallation nötig.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.3** | Die aktuelle Version (versionCode 10300). Diese APK installieren. |
-| **v1.2** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.4** | Die aktuelle Version (versionCode 10400). Diese APK installieren. |
+| **v1.3** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.2** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.1** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
@@ -33,10 +34,10 @@ aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
 > **Eine Nummer für alles:** App, `main`-Branch, Release und Download heißen
-> **v1.3**. Der Button oben führt immer zur aktuellen APK.
+> **v1.4**. Der Button oben führt immer zur aktuellen APK.
 >
-> **Zur Zählung:** v1.3 ist die Fortsetzung der bisherigen 5.x-Stände. Die
-> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0–v1.2 Archiv, v1.3 aktuell).
+> **Zur Zählung:** v1.4 ist die Fortsetzung der bisherigen 5.x-Stände. Die
+> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0–v1.3 Archiv, v1.4 aktuell).
 
 ## Eindruck
 
@@ -61,11 +62,20 @@ Signal, Preistiefs und den Preisverlauf:
   User-Agents.
 * **Preis-Erkennung** über JSON-LD (`schema.org/Product`, auch verschachtelte
   `priceSpecification` und Angebotslisten), Meta-Tags/Microdata und Text-Fallback —
+  inklusive GTIN/EAN, Bundle-Filter und Marketplace-Kennzeichnung —
   inklusive Filter gegen Zubehör (DualSense Edge, Portal, Laufwerk …) und gegen alles,
   was nicht die 2-TB-Konsole ist. Bei mehreren Angeboten gewinnt das günstigste
   neue Angebot vor Gebrauchtware; Fremdwährungen werden nicht als Euro gezählt.
 * **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen),
   sonst „ZU TEUER"; Bot-Schutz und Fehler werden getrennt ausgewiesen.
+* **Verfügbarkeitszustände (v1.4)**: `InStoreOnly`, `OnlineOnly`,
+  `LimitedAvailability`, Vorbestellung, Nachbestellung, Lotterie, Einladung und
+  Ausverkauf sind getrennte Zustände. Marktabholung, Lotterie und Einladung
+  erscheinen als **CHANCE** und lösen bewusst keinen „verfügbar"-Alarm aus.
+* **Konfidenz und Beleg (v1.4)**: Jeder Treffer trägt 0–100 aus nachvollziehbaren
+  Signalen (zweiter Abruf, Preis plausibel, Belegquelle, Zustand, Verkäufer,
+  Frische, GTIN). Die Detailansicht zeigt den Beleg-Ausschnitt mit Zeitstempel
+  und Hash; optional alarmiert die App erst ab 70 %.
 * **Fairer Bot-Schutz:** 403/CAPTCHA wird erkannt und nicht wiederholt; 429
   respektiert `Retry-After` und wird höchstens einmal erneut versucht. Kein
   Captcha-Solver, keine Proxy-Rotation, kein JavaScript-Challenge-Bypass.
@@ -192,7 +202,7 @@ python3 tools/validate_shop_config.py
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
-responsive Layout-Geometrie und Boot-Manifest — 699 Zusicherungen, ohne Kivy
+responsive Layout-Geometrie und Boot-Manifest — 777 Zusicherungen, ohne Kivy
 und ohne Android. Der CI-Workflow führt sie bei jedem Push und Pull Request
 aus, der Release-Workflow zusätzlich vor jedem Release. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät; er läuft in
@@ -245,7 +255,12 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.3** – Die aktuelle Version (versionCode 10300): Webhook-Alarme für ntfy,
+* **v1.4** – Die aktuelle Version (versionCode 10400): Verfügbarkeitszustände
+  statt eines booleschen „verfügbar", CHANCE für Marktabholung, Lotterie,
+  Einladung und Vorbestellung, Konfidenz 0–100 mit optionaler 70-%-Schwelle,
+  Beleg-Ausschnitt mit Hash, GTIN/EAN- und Bundle-Erkennung, Marketplace-Hinweis
+  und ein 304-Cache mit maximal sechs Stunden Alter. Dazu 777 Logiktests.
+* **v1.3** – Vorherige Version (versionCode 10300): Webhook-Alarme für ntfy,
   Telegram und Discord, Treffer-Verifikation mit Bestätigungskennzeichnung und
   „nur bestätigte Treffer", Schnell-Modus für sechs heiße Shops im Minutentakt.
   Dazu Token-Redaction, Webhook-Dedupe und Tests für alle drei Pfade.

@@ -1267,6 +1267,100 @@ def v13_tests():
     check("Dienst verifiziert Treffer", "verify_treffer" in svc_q, True)
 
 
+def v14_tests():
+    """Verfuegbarkeitszustaende, Konfidenz und Beleg - die v1.4-Basis."""
+    check("v1.4 state InStock", core.availability_state("https://schema.org/InStock"),
+          "in_stock")
+    check("v1.4 state InStoreOnly",
+          core.availability_state("https://schema.org/InStoreOnly"), "pickup_only")
+    check("v1.4 state OnlineOnly",
+          core.availability_state("https://schema.org/OnlineOnly"), "online_only")
+    check("v1.4 state LimitedAvailability",
+          core.availability_state("https://schema.org/LimitedAvailability"), "limited")
+    check("v1.4 state PreOrder",
+          core.availability_state("https://schema.org/PreOrder"), "preorder")
+    check("v1.4 state BackOrder",
+          core.availability_state("https://schema.org/BackOrder"), "backorder")
+    check("v1.4 state SoldOut",
+          core.availability_state("https://schema.org/SoldOut"), "sold_out")
+    check("v1.4 InStoreOnly nicht sofort",
+          core._availability_flags("https://schema.org/InStoreOnly"), (True, False))
+    check("v1.4 Chance-Klasse", core.classify(True, 799.0, 900.0, "pickup_only"),
+          "chance")
+    check("v1.4 OnlineOnly bleibt Treffer",
+          core.classify(True, 799.0, 900.0, "online_only"), "hit")
+    check("v1.4 Lotterie erkannt",
+          core.chance_aus_text("Teilnahme nur per Lotterie moeglich"), "lottery")
+    check("v1.4 Einladung erkannt",
+          core.chance_aus_text("Nur mit Einladung bestellbar"), "invite")
+    check("v1.4 Marktabholung erkannt",
+          core.chance_aus_text("Nur im Markt abholbar"), "pickup_only")
+
+    st = core.extract_structured(HTML_OK.replace("InStock", "InStoreOnly"))
+    check("v1.4 JSON-LD Zustand", st.get("state"), "pickup_only")
+    check("v1.4 JSON-LD Markt nicht sofort", st.get("sofort"), False)
+    st_gtin = core.extract_structured(HTML_OK.replace(
+        '"name":', '"gtin13":"0711719570280","name":'))
+    check("v1.4 GTIN gelesen", st_gtin.get("gtin"), "0711719570280")
+    check("v1.4 Bundle abgelehnt", core.extract_structured(
+        HTML_OK.replace("(E-Chassis)", "Bundle mit Controller"))["ist_konsole"], False)
+
+    basis = {"klass": "hit", "preis": 799.0, "avail_state": "in_stock",
+             "stock_source": "jsonld", "condition": "new", "marketplace": False,
+             "gtin": "0711719570280", "fresh": True}
+    check("v1.4 Konfidenz ungeprueft", core.berechne_konfidenz(dict(basis)), 60)
+    check("v1.4 Konfidenz bestaetigt",
+          core.berechne_konfidenz({**basis, "verify": "bestaetigt"}), 100)
+    check("v1.4 Chance gedeckelt",
+          core.berechne_konfidenz({**basis, "klass": "chance"}), 60)
+
+    beleg = core.beleg_erzeugen("<html><body>PS5 Pro 2 TB · 799,00 € · Auf Lager</body></html>",
+                                799.0, "in_stock")
+    check("v1.4 Beleg Preis", beleg.get("preis"), 799.0)
+    check("v1.4 Beleg Hash", len(beleg.get("hash") or ""), 16)
+    check("v1.4 Beleg Ausschnitt", "799,00" in (beleg.get("excerpt") or ""), True)
+
+    tmp = tempfile.mkdtemp(prefix="ps5pro-v14-")
+    try:
+        ev = core.Evidence(os.path.join(tmp, "evidence.json"))
+        ev.put("Shop A", beleg)
+        check("v1.4 Beleg gespeichert", ev.get("Shop A").get("hash"), beleg["hash"])
+        c = core.HttpCache(os.path.join(tmp, "cache.json"))
+        c.put("https://shop/v14", {"preis": 799.0}, "etag", None)
+        check("v1.4 Cache Zeitstempel", float(c.get("https://shop/v14")["ts"]) > 0, True)
+
+        alt_dir = core._data_dir()
+        alt_try = core._try_url
+        try:
+            core.set_data_dir(tmp); core.reset_http_cache()
+            chance_html = HTML_OK.replace("InStock", "InStoreOnly")
+            core._try_url = lambda u, a, p=None: (chance_html, None, {})
+            r = core.scan_einen({"name": "Markt Shop", "land": "DE",
+                                 "urls": ["https://example.invalid/markt"]})
+            check("v1.4 Scan Chance", (r or {}).get("klass"), "chance")
+            check("v1.4 Scan Zustand", (r or {}).get("avail_state"), "pickup_only")
+            check("v1.4 Scan nicht sofort", (r or {}).get("sofort"), False)
+            check("v1.4 Scan Beleg", bool((r or {}).get("beleg")), True)
+        finally:
+            core._try_url = alt_try; core.set_data_dir(alt_dir)
+
+        class _S:
+            def __init__(self, **kw): self.d = kw
+            def get(self, k, d=None): return self.d.get(k, d)
+        chance = {"klass": "chance", "preis": 799.0, "haendler": "Markt Shop"}
+        check("v1.4 Chance kein Alarm",
+              core.alarm_erlaubt(chance, None, _S()), False)
+        ruhig = {"klass": "hit", "preis": 799.0, "haendler": "Shop A",
+                 "sofort": True, "condition": "new", "confidence": 60}
+        check("v1.4 Konfidenz-Schwelle blockt",
+              core.alarm_erlaubt(ruhig, None, _S(confidence_min=70)), False)
+        check("v1.4 Konfidenz-Schwelle laesst durch",
+              core.alarm_erlaubt({**ruhig, "confidence": 90}, None,
+                                 _S(confidence_min=70)), True)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -1280,6 +1374,7 @@ if __name__ == "__main__":
         fixture_tests()
         capture_helper_tests()
         v13_tests()
+        v14_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.

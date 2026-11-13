@@ -4,7 +4,7 @@ Wird von der App (main.py) und vom Hintergrund-Service (service.py) benutzt.
 Der Service laeuft in einem eigenen Prozess ohne UI - dort darf kein Kivy
 importiert werden, deshalb liegt diese Logik hier getrennt.
 """
-import os, sys, json, re, time, random, threading, traceback
+import os, sys, json, re, time, random, threading, traceback, hashlib
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
@@ -61,6 +61,31 @@ HTTP_CACHE_FILE = "ps5pro_http_cache.json"
 # alles darueber ist fuer die Preiserkennung nutzlos und kostet nur Traffic.
 MAX_HTML_BYTES = 5 * 1024 * 1024
 MAX_SERIE_PUNKTE = 120
+# Ein 304 darf keinen beliebig alten Stand konservieren. Nach sechs Stunden
+# wird die Seite einmal unbedingt neu geladen; danach greift wieder ETag/304.
+CACHE_MAX_ALTER = 6 * 3600
+# Belege sind kleine, redigierte Ausschnitte - kein HTML, keine Tokens.
+EVIDENCE_FILE = "ps5pro_evidence.json"
+MAX_BELEGE = 200
+
+# Zustaende statt eines booleschen "verfuegbar": Ein Marktmodell, eine
+# Lotterie und eine Einladung sind keine online kaufbare Konsole.
+AVAILABILITY_STATES = ("in_stock", "online_only", "limited", "pickup_only",
+                       "preorder", "backorder", "lottery", "invite",
+                       "sold_out", "discontinued", "unknown")
+CHANCE_STATES = frozenset(("pickup_only", "preorder", "backorder", "lottery", "invite"))
+SOLD_STATES = frozenset(("sold_out", "discontinued"))
+BUNDLE_MUSTER = re.compile(
+    r"\b(bundle|im\s+set|set\s+mit|inkl\.?\s+controller|mit\s+controller|"
+    r"controller\s+bundle|zubehoer\s+inkl\.?)\b", re.I)
+CHANCE_PATTERNS = (
+    ("lottery", ("lotterie", "verlosung", "gewinnspiel", "teilnahmeschluss",
+                 "teilnahme am gewinnspiel")),
+    ("invite", ("nur mit einladung", "nur auf einladung", "invite only",
+                "invitation only", "einladung erforderlich")),
+    ("pickup_only", ("nur im markt", "nur zur abholung", "click & collect",
+                     "click and collect", "abholung im markt", "im markt abholbar")),
+)
 # Webhook-Alarme: ein Versuch plus ein Retry, danach ist der Kanal fuer diesen
 # Treffer erledigt. Der Cooldown verhindert Doppelmeldungen aus App und Dienst.
 WEBHOOK_TIMEOUT = 8
@@ -332,7 +357,8 @@ PRODUKT_MUSTER = [re.compile(r"playstation[\s\-®™]*5[\s\-®™]*pro\b",re.I),
 PRODUKT_2TB = re.compile(r"\b2\s*(?:tb|terabyte)\b",re.I)
 PRODUKT_AUSSCHLUSS = ["dualsense edge","edge controller","ps portal","portal remote",
     "pulse headset","pulse explore","psvr2","vr2 headset","faceplate","face plate",
-    "disc drive","laufwerk"]
+    "disc drive","laufwerk","bundle","im set","inkl. controller",
+    "mit controller","controller bundle","30th anniversary bundle"]
 VORBESTELL_MUSTER = ["vorbestell","vorbestellung","preorder","pre-order","backorder",
                      "back-order","reservier"]
 GEBRAUCHT_MUSTER = ["usedcondition","used condition","refurbished","refurb",
@@ -402,13 +428,46 @@ def _seller_name(v):
     if isinstance(v,str): return v.strip()
     return ""
 
-def _availability_flags(av):
-    """(verfuegbar, sofort) aus einem schema.org-availability-Wert."""
+def availability_state(av):
+    """schema.org-Verfuegbarkeit in einen expliziten Zustand uebersetzen.
+
+    Reihenfolge ist wichtig: ``InStoreOnly`` enthaelt ebenfalls ``instore``
+    und ``LimitedAvailability`` enthaelt ``limited``. Ohne die spezifischen
+    Pruefungen wuerde beides als sofort online verfuegbar gelten.
+    """
     a=str(av or "").lower()
-    if any(k in a for k in ("preorder","backorder","presale")): return True,False
-    if any(k in a for k in ("instock","instoreonly","limited","onlineonly")): return True,True
-    if any(k in a for k in ("outofstock","soldout","discontinued")): return False,False
-    return None,None
+    if not a: return None
+    if "instoreonly" in a: return "pickup_only"
+    if "onlineonly" in a: return "online_only"
+    if "limitedavailability" in a or "limited" in a: return "limited"
+    if any(k in a for k in ("preorder", "presale")): return "preorder"
+    if "backorder" in a: return "backorder"
+    if any(k in a for k in ("outofstock", "soldout")): return "sold_out"
+    if "discontinued" in a: return "discontinued"
+    if "instock" in a: return "in_stock"
+    return "unknown"
+
+
+def _availability_flags(av):
+    """(verfuegbar, sofort) - kompatibel fuer die vorhandenen Aufrufer."""
+    state=availability_state(av)
+    if state in ("in_stock", "online_only", "limited"): return True, True
+    if state in CHANCE_STATES: return True, False
+    if state in SOLD_STATES: return False, False
+    return None, None
+
+
+def chance_aus_text(html):
+    """Lotterie/Einladung/Marktabholung aus sichtbaren Markern erkennen.
+
+    Bewusst nur sehr spezifische Formulierungen: ``Verlosung`` in einer
+    Fusszeile ist selten, ``Gewinnspiel`` dagegen haeufig - deshalb werden
+    die Marker nur auf der bereits als PS5-Pro-Seite erkannten Seite geprueft.
+    """
+    low=(html or "").lower()
+    for state, muster in CHANCE_PATTERNS:
+        if any(m in low for m in muster): return state
+    return None
 
 def _offer_specs(off):
     """priceSpecification kann ein Objekt oder eine Liste sein."""
@@ -450,7 +509,8 @@ def _offer_verfuegbarkeit(off):
 def extract_structured(html):
     res={"ist_konsole":False,"preis":None,"verfuegbar":None,
          "signal":"jsonld","condition":None,"seller":None,
-         "verfuegbarkeit":None,"sofort":None}
+         "verfuegbarkeit":None,"sofort":None,"state":None,
+         "gtin":None,"sku":None,"bundle":False}
     try: jl=extract_jsonld(html)
     except Exception: jl=[]
     prods=[]
@@ -460,8 +520,18 @@ def extract_structured(html):
         if not any(rx.search(name) for rx in PRODUKT_MUSTER): continue
         if not PRODUKT_2TB.search(name): continue
         low=name.lower()
-        if any(ex in low for ex in PRODUKT_AUSSCHLUSS): continue
+        if any(ex in low for ex in PRODUKT_AUSSCHLUSS) or BUNDLE_MUSTER.search(name):
+            res["bundle"]=True
+            continue
         res["ist_konsole"]=True
+        # GTIN/EAN oder SKU sind der stabilste Produktbeweis. Der Name bleibt
+        # fuer Shops ohne strukturierte Daten der Fallback.
+        for key in ("gtin13", "gtin12", "gtin14", "gtin", "sku", "mpn"):
+            wert=p.get(key)
+            if wert and not res["gtin"]:
+                res["gtin"]=str(wert).strip()[:40]
+            if key == "sku" and wert and not res["sku"]:
+                res["sku"]=str(wert).strip()[:60]
         off=p.get("offers")
         offers=off if isinstance(off,list) else [off]
         # Bei mehreren Angeboten gewinnt das guenstigste neue Angebot; nur
@@ -491,6 +561,8 @@ def extract_structured(html):
             # Phantasiewerte aus kaputten Feeds.
             if pv is not None: res["preis"]=pv
             res["verfuegbarkeit"]=av or None
+            state=availability_state(av)
+            if state: res["state"]=state
             v,sofort=_availability_flags(av)
             if v is not None: res["verfuegbar"]=v
             if sofort is not None: res["sofort"]=sofort
@@ -524,25 +596,37 @@ def extract_meta_preis(html):
         except re.error: continue
     return None
 
-def extract_meta_verfuegbarkeit(html):
-    """schema.org-Verfuegbarkeit aus Meta-Tags oder Microdata."""
+def _meta_availability_raw(html):
     pats = [
-        r'<meta[^>]+(?:property|name)=["\'](?:og|product):availability["\'][^>]+content=["\']([^"\']+)',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og|product):availability["\']',
-        r'<link[^>]+itemprop=["\']availability["\'][^>]+href=["\']([^"\']+)',
-        r'<meta[^>]+itemprop=["\']availability["\'][^>]+content=["\']([^"\']+)',
+        r"""<meta[^>]+(?:property|name)=["'](?:og|product):availability["'][^>]+content=["']([^"']+)""",
+        r"""<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og|product):availability["']""",
+        r"""<link[^>]+itemprop=["']availability["'][^>]+href=["']([^"']+)""",
+        r"""<meta[^>]+itemprop=["']availability["'][^>]+content=["']([^"']+)""",
     ]
     for pat in pats:
         for m in re.finditer(pat,html,re.I):
-            v,sofort=_availability_flags(m.group(1))
-            if v is not None: return v,sofort
-    return None,None
+            return m.group(1)
+    return None
+
+
+def extract_meta_verfuegbarkeit(html):
+    """schema.org-Verfuegbarkeit aus Meta-Tags oder Microdata."""
+    raw=_meta_availability_raw(html)
+    if raw is None: return None,None
+    return _availability_flags(raw)
+
+
+def extract_meta_state(html):
+    return availability_state(_meta_availability_raw(html))
 
 
 def detect_challenge(low): return any(p in low for p in CHALLENGE_PATTERNS)
 
 def pruefe_nur_konsole(html, st):
     if st.get("ist_konsole"): return True
+    # Nur ein Bundle erkannt: nicht ueber den HTML-Fallback doch als Konsole
+    # durchwinken, sonst landet der Bundle-Preis als Konsolen-Treffer.
+    if st.get("bundle"): return False
     # Beide Muster sind re.I - ein zusaetzliches html.lower() wuerde nur eine
     # zweite Kopie der Seite im Speicher anlegen (bei Shops leicht 2-6 MB).
     if not any(rx.search(html) for rx in PRODUKT_MUSTER): return False
@@ -609,6 +693,18 @@ def _remote_verfuegbarkeit(html, parser):
     if sofort: return None,True
     return None,None
 
+def _remote_state(html, parser):
+    """Zustand aus denselben literalen Markern wie die Remote-Verfuegbarkeit."""
+    if not isinstance(html,str) or not isinstance(parser,dict): return None
+    low=html.lower()
+    def hat(key):
+        marker=parser.get(key)
+        return bool(marker) and any(str(m).lower() in low for m in marker)
+    if hat("out_of_stock"): return "sold_out"
+    if hat("preorder"): return "preorder"
+    if hat("in_stock"): return "in_stock"
+    return None
+
 def remote_parser_ergebnis(html, parser):
     """Wendet die optionalen Remote-Regeln auf eine bereits geladene Seite an."""
     out={}
@@ -618,6 +714,8 @@ def remote_parser_ergebnis(html, parser):
     v,sofort=_remote_verfuegbarkeit(html,parser)
     if v is not None: out["verfuegbar"]=v
     if sofort is not None: out["sofort"]=sofort
+    state=_remote_state(html,parser)
+    if state is not None: out["state"]=state
     return out
 
 def ist_sofort_verfuegbar(html):
@@ -630,7 +728,116 @@ def ist_sofort_verfuegbar(html):
 def ist_gebraucht(condition):
     return str(condition or "").lower() in ("used","refurbished","damaged")
 
-def classify(v,p,m):
+def _marketplace(seller, haendler):
+    """Heuristik: ein fremder Verkaeufer ist kein Erstverkauf des Shops."""
+    s=re.sub(r"[^a-z0-9]","",str(seller or "").lower())
+    h=re.sub(r"[^a-z0-9]","",str(haendler or "").lower())
+    if not s: return False
+    if s in h or h in s: return False
+    return True
+
+
+def berechne_konfidenz(r):
+    """0-100 aus nachvollziehbaren Signalen, keine Zufallszahl.
+
+    Ein ungepruefter Treffer kann hoechstens 60 erreichen; erst der zweite
+    Abruf bringt die 40 Punkte fuer ``verify == bestaetigt``. Damit ist die
+    Standard-Schwelle 70 ohne Verifikation unerreichbar.
+    """
+    if not isinstance(r,dict) or r.get("klass") not in ("hit","chance"):
+        return 0
+    p=r.get("preis")
+    if p is None: return 0
+    punkte=0
+    if r.get("verify")=="bestaetigt": punkte+=40
+    try:
+        if MIN_PREIS<=float(p)<=1100: punkte+=15
+    except (TypeError,ValueError): pass
+    if r.get("avail_state") not in (None,"unknown") and \
+            r.get("stock_source") in ("remote","jsonld","meta","text"):
+        punkte+=15
+    if not ist_gebraucht(r.get("condition")): punkte+=10
+    if not r.get("marketplace"): punkte+=10
+    if r.get("gtin"): punkte+=5
+    if r.get("fresh",True): punkte+=10
+    punkte=min(100,punkte)
+    # Ohne zweiten Abruf bleibt es bei 60 - die Schwelle 70 ist dann bewusst
+    # nicht erreichbar, auch wenn alle anderen Signale passen.
+    if r.get("verify")!="bestaetigt": punkte=min(60,punkte)
+    if r.get("klass")=="chance": punkte=min(60,punkte)
+    return punkte
+
+
+def _sichtbarer_text(html):
+    """Reduziert HTML auf sichtbaren Text - fuer den kleinen Beleg-Ausschnitt."""
+    s=re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>"," ",html or "")
+    s=re.sub(r"(?s)<[^>]+>"," ",s)
+    return re.sub(r"\s+"," ",s).strip()
+
+
+def beleg_erzeugen(html, preis, state="unknown"):
+    """Kleiner, redigierter Beweis: Preis, Zustand, Zeitstempel und Hash.
+
+    Bewusst kein HTML und keine Tokens: maximal 180 Zeichen sichtbarer Text
+    rund um den Preis. Der Hash macht den Ausschnitt spaeter pruefbar.
+    """
+    text=_sichtbarer_text(html)
+    if not text: return None
+    kandidaten=[]
+    if preis is not None:
+        kandidaten=[format_preis(preis).replace(" €",""),
+                    ("%.2f"%float(preis)).replace(".",","),
+                    str(int(float(preis)))]
+    pos=-1
+    for k in kandidaten:
+        pos=text.find(k)
+        if pos>=0: break
+    if pos<0:
+        for label in ("lager", "verfuegbar", "verfügbar", "lieferbar"):
+            pos=text.lower().find(label)
+            if pos>=0: break
+    if pos<0: pos=0
+    ausschnitt=text[max(0,pos-80):pos+100].strip()
+    if not ausschnitt: return None
+    return {"ts": datetime.now().isoformat(timespec="seconds"),
+            "preis": preis, "state": state, "excerpt": ausschnitt[:180],
+            "hash": hashlib.sha256(ausschnitt.encode("utf-8")).hexdigest()[:16]}
+
+
+class Evidence:
+    """Maximal 200 kleine Belege, neueste pro Shop, FIFO bei Ueberlauf."""
+    def __init__(self, path=None):
+        self.path=path or os.path.join(_data_dir(),EVIDENCE_FILE)
+        try:
+            with open(self.path,"r",encoding="utf-8") as f:
+                data=json.load(f)
+            self.data=data if isinstance(data,dict) else {}
+        except Exception: self.data={}
+    def put(self, haendler, beleg):
+        if not haendler or not isinstance(beleg,dict): return False
+        self.data[str(haendler)]=dict(beleg)
+        if len(self.data)>MAX_BELEGE:
+            order=sorted(self.data.items(), key=lambda kv: str(kv[1].get("ts") or ""))
+            for name,_ in order[:len(self.data)-MAX_BELEGE]:
+                self.data.pop(name,None)
+        try:
+            tmp=self.path+".tmp"
+            with open(tmp,"w",encoding="utf-8") as f:
+                json.dump(self.data,f,ensure_ascii=False,indent=1)
+            os.replace(tmp,self.path)
+            return True
+        except Exception: return False
+    def get(self, haendler):
+        e=self.data.get(str(haendler or ""))
+        return dict(e) if isinstance(e,dict) else None
+
+def beleg_speichern(haendler, beleg):
+    try: return Evidence().put(haendler,beleg)
+    except Exception: return False
+
+def classify(v,p,m,state=None):
+    if state in CHANCE_STATES: return "chance"
+    if state in SOLD_STATES: return "unavail"
     if not v: return "unavail"
     if p is None: return "unknown"
     if m is None or p<=m: return "hit"
@@ -677,7 +884,8 @@ class HttpCache:
         Cache-Datei neu zu serialisieren.
         """
         with self._lock:
-            self.data[u]={"etag":etag,"last_modified":last_modified,"result":result}
+            self.data[u]={"ts":time.time(),"etag":etag,
+                           "last_modified":last_modified,"result":result}
             self._dirty=True
             if persist: self._save_locked()
     def drop(self,u):
@@ -859,6 +1067,14 @@ def fetch_mit_cache(urls, cancel=None, force=False):
                     cache.drop(u); last="HTTP 304"; continue
                 eintrag=cache.get(u)
                 if eintrag and isinstance(eintrag.get("result"),dict):
+                    try:
+                        alter=time.time()-float(eintrag.get("ts") or 0)
+                    except (TypeError,ValueError):
+                        alter=CACHE_MAX_ALTER+1
+                    if alter>CACHE_MAX_ALTER:
+                        # Ein 304 auf einen beliebig alten Stand ist kein
+                        # frischer Treffer. Einmal unbedingt neu laden.
+                        cache.drop(u); last="HTTP 304 (zu alt)"; continue
                     return "",u,dict(eintrag["result"]),meta
                 # Cache-Eintrag geloescht: Validatoren verwerfen und ohne
                 # Bedingung erneut laden, statt den Haendler als Fehler zu werten.
@@ -910,12 +1126,14 @@ def fetch_html_multi(urls, cancel=None):
     return h,u
 
 def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
-         seller=None,verfuegbarkeit=None,sofort=None):
-    return {"haendler":h["name"],"url":final_url or h["urls"][0],"land":h["land"],
-            "preis":preis,"klass":klass,"dauer":round(dauer,1),
-            "zeit":datetime.now().strftime("%H:%M:%S"),"fehler":err,
-            "signal":signal or "unbekannt","condition":condition,"seller":seller,
-            "verfuegbarkeit":verfuegbarkeit,"sofort":sofort}
+         seller=None,verfuegbarkeit=None,sofort=None,**extra):
+    r={"haendler":h["name"],"url":final_url or h["urls"][0],"land":h["land"],
+       "preis":preis,"klass":klass,"dauer":round(dauer,1),
+       "zeit":datetime.now().strftime("%H:%M:%S"),"fehler":err,
+       "signal":signal or "unbekannt","condition":condition,"seller":seller,
+       "verfuegbarkeit":verfuegbarkeit,"sofort":sofort}
+    r.update(extra)
+    return r
 
 def scan_einen(h, cancel=None, force=False):
     st=time.time()
@@ -925,30 +1143,62 @@ def scan_einen(h, cancel=None, force=False):
         if _abgebrochen(cancel): raise ScanAbgebrochen
         if cached is not None:
             p=cached.get("preis"); v=bool(cached.get("verfuegbar"))
-            res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,
+            state=cached.get("avail_state") or cached.get("state") or "unknown"
+            res=_res(h,p,classify(v,p,MAX_PREIS,state),d,None,fu,
                      signal=cached.get("signal"),condition=cached.get("condition"),
                      seller=cached.get("seller"),
                      verfuegbarkeit=cached.get("verfuegbarkeit"),
-                     sofort=cached.get("sofort"))
+                     sofort=cached.get("sofort"),
+                     avail_state=state,stock_source=cached.get("stock_source"),
+                     gtin=cached.get("gtin"),sku=cached.get("sku"),
+                     bundle=bool(cached.get("bundle")),
+                     marketplace=bool(cached.get("marketplace")),
+                     beleg=cached.get("beleg"))
+            # Ein 304 ist ein gueltiger Stand, aber keine frische Antwort.
+            res["fresh"]=False
+            res["confidence"]=berechne_konfidenz(res)
             res["_cache"]=True
             return res
         if detect_challenge(html[:3000].lower()):
-            return _res(h,None,"challenge",d,"Bot-Challenge",fu)
+            return _res(h,None,"challenge",d,"Bot-Challenge",fu,
+                        avail_state="unknown",stock_source="challenge")
         s=extract_structured(html)
         if not pruefe_nur_konsole(html,s):
-            return _res(h,None,"unknown",d,"nicht PS5 Pro 2TB",fu)
+            return _res(h,None,"unknown",d,"nicht PS5 Pro 2TB",fu,
+                        avail_state="unknown",stock_source="text")
         remote=remote_parser_ergebnis(html,h.get("parser"))
         meta_v,meta_sofort=extract_meta_verfuegbarkeit(html)
+        meta_state=extract_meta_state(html)
         v=remote.get("verfuegbar")
+        state=remote.get("state")
+        quelle="remote" if state else None
         # Strukturierte Daten (JSON-LD) haben Vorrang vor einem eventuell
         # veralteten Meta-Tag; erst danach greifen Meta und Text-Fallback.
         v_explizit=v is not None
         if v is None:
             v=s.get("verfuegbar"); v_explizit=v is not None
+            if state is None and s.get("state"):
+                state=s["state"]; quelle="jsonld"
         if v is None:
             v=meta_v; v_explizit=v is not None
+            if state is None and meta_state:
+                state=meta_state; quelle="meta"
+        # Chance-Marker vor dem Text-Fallback pruefen: "Nur im Markt" steht
+        # oft neben "In den Warenkorb" und darf nicht als normaler Treffer
+        # durchgehen.
+        if state is None:
+            chance=chance_aus_text(html)
+            if chance:
+                state=chance; quelle="text"; v=True; v_explizit=True
         if v is None:
             v,v_explizit=_verfuegbarkeit_aus_text(html)
+            if state is None and v_explizit:
+                state="sold_out" if v is False else "in_stock"
+                quelle="text"
+        if state is None:
+            state="unknown"; quelle=quelle or "text"
+        if state in CHANCE_STATES:
+            v=True; v_explizit=True
         p=remote.get("preis")
         if p is None: p=s.get("preis")
         if p is None: p=extract_meta_preis(html)
@@ -961,18 +1211,35 @@ def scan_einen(h, cancel=None, force=False):
                         signal="parser",condition=s.get("condition"),
                         seller=s.get("seller"),
                         verfuegbarkeit=s.get("verfuegbarkeit"),
-                        sofort=s.get("sofort"))
-        signal=("remote" if remote else
+                        sofort=s.get("sofort"),avail_state=state,
+                        stock_source=quelle,gtin=s.get("gtin"),sku=s.get("sku"),
+                        bundle=bool(s.get("bundle")))
+        signal=("remote" if remote.get("preis") is not None else
                 "jsonld" if s.get("preis") is not None else
                 "meta" if p is not None else "text")
         sofort=remote.get("sofort")
         if sofort is None: sofort=s.get("sofort")
         if sofort is None: sofort=meta_sofort
         if sofort is None and v: sofort=ist_sofort_verfuegbar(html)
+        if state in CHANCE_STATES: sofort=False
         if _abgebrochen(cancel): raise ScanAbgebrochen
-        res=_res(h,p,classify(v,p,MAX_PREIS),d,None,fu,
+        res=_res(h,p,classify(v,p,MAX_PREIS,state),d,None,fu,
                  signal=signal,condition=s.get("condition"),seller=s.get("seller"),
-                 verfuegbarkeit=s.get("verfuegbarkeit"),sofort=sofort)
+                 verfuegbarkeit=s.get("verfuegbarkeit"),sofort=sofort,
+                 avail_state=state,stock_source=quelle,gtin=s.get("gtin"),
+                 sku=s.get("sku"),bundle=bool(s.get("bundle")),
+                 marketplace=_marketplace(s.get("seller"),h["name"]))
+        res["fresh"]=True
+        res["confidence"]=berechne_konfidenz(res)
+        # Ein Beleg entsteht nur fuer echte Treffer/Chancen, nicht fuer jede
+        # der 42 Seiten. Der Ausschnitt ist klein und enthaelt keine Tokens.
+        if res["klass"] in ("hit","chance"):
+            try:
+                beleg=beleg_erzeugen(html,p,state)
+                if beleg:
+                    res["beleg"]=beleg
+                    beleg_speichern(h["name"],beleg)
+            except Exception: pass
         # Auch "nicht verfuegbar" cachen: der naechste 304 spart die Seite
         # komplett, und die Verfuegbarkeit stammt aus demselben Abruf. Parser-
         # Fehler werden nicht gecacht, sonst wuerde ein 304 den Fehler als
@@ -981,7 +1248,12 @@ def scan_einen(h, cancel=None, force=False):
             http_cache().put(fu or h["urls"][0],
                              {"preis":p,"verfuegbar":bool(v),"signal":signal,
                               "condition":s.get("condition"),"seller":s.get("seller"),
-                              "verfuegbarkeit":s.get("verfuegbarkeit"),"sofort":sofort},
+                              "verfuegbarkeit":s.get("verfuegbarkeit"),"sofort":sofort,
+                              "avail_state":state,"stock_source":quelle,
+                              "gtin":s.get("gtin"),"sku":s.get("sku"),
+                              "bundle":bool(s.get("bundle")),
+                              "marketplace":_marketplace(s.get("seller"),h["name"]),
+                              "beleg":res.get("beleg")},
                              meta.get("etag"),meta.get("last_modified"),persist=False)
         except Exception: pass
         return res
@@ -989,7 +1261,9 @@ def scan_einen(h, cancel=None, force=False):
         return None
     except Exception as e:
         err=str(e)[:60]
-        return _res(h,None,fehler_klasse(err),time.time()-st,err)
+        return _res(h,None,fehler_klasse(err),time.time()-st,err,
+                    avail_state="unknown",stock_source="error")
+
 
 def _safe_scan(h, cancel=None):
     st=time.time()
@@ -1031,7 +1305,7 @@ def scan_alle(haendler, max_preis=None, fortschritt=None, cancel=None):
                 break
             r = f.result()
             if r is None: continue
-            if r.get("klass") not in ("error", "challenge", "unavail", "parser"):
+            if r.get("klass") not in ("error", "challenge", "unavail", "parser", "chance"):
                 r["klass"] = classify(True, r.get("preis"), mp)
             ergebnisse.append(r)
             if fortschritt is not None:
@@ -1212,6 +1486,8 @@ def verify_treffer(h, erster, cancel=None, pause=2.0):
         erster["verify_preis"]=zweiter.get("preis")
     elif entscheidung=="weg":
         erster["klass"]="unavail"; erster["verify_preis"]=None
+    try: erster["confidence"]=berechne_konfidenz(erster)
+    except Exception: pass
     return erster
 
 def schnellscan_haendler(haendler, aktiv=None, hot=None):
@@ -1330,7 +1606,14 @@ def alarm_erlaubt(r,tief,settings,jetzt=None):
     zaehlen nur echte Tiefstpreise und es gelten Ruhezeiten.
     """
     if not isinstance(r,dict) or r.get("preis") is None: return False
+    # Chance ist eine Information, kein Verfuegbarkeitsalarm. Lotterie,
+    # Einladung und Marktabholung melden bewusst nie "jetzt kaufen".
+    if r.get("klass")=="chance": return False
     if ist_gebraucht(r.get("condition")): return False
+    try:
+        schwelle=float(_setting(settings,"confidence_min",0) or 0)
+        if schwelle>0 and float(r.get("confidence",100))<schwelle: return False
+    except (TypeError,ValueError): pass
     # "Nur bestaetigte Treffer" heisst genau das: ohne zweiten Abruf kein Alarm.
     if _setting(settings,"alarm_nur_bestaetigt",False) and r.get("verify")!="bestaetigt":
         return False
