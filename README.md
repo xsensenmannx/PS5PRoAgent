@@ -12,14 +12,14 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v5.1 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v5.1/ps5prosearchagent-5.1-arm64-v8a-debug.apk)**
+**[PS5 Pro Search Agent v1.1 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.1/ps5prosearchagent-1.1-arm64-v8a-debug.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
 
 | Stand | Bedeutung |
 |---|---|
-| **v5.1** | Die aktuelle Version (versionCode 18). Diese APK installieren. |
+| **v1.1** | Die aktuelle Version (versionCode 19). Diese APK installieren. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
 Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
@@ -27,7 +27,10 @@ aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
 > **Eine Nummer für alles:** App, `main`-Branch, Release und Download heißen
-> **v5.1**. Der Button oben führt immer zur aktuellen APK.
+> **v1.1**. Der Button oben führt immer zur aktuellen APK.
+>
+> **Zur Zählung:** v1.1 ist die Fortsetzung der bisherigen 5.x-Stände. Die
+> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0 Archiv, v1.1 aktuell).
 
 ## Was die App kann
 
@@ -189,7 +192,7 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v5.1** – Die aktuelle Version (versionCode 18): Radar und Trefferliste sind
+* **v1.1** – Die aktuelle Version (versionCode 19): Radar und Trefferliste sind
   in Hoch- und Querformat fest getrennt, die Treffer-Marken bleiben innerhalb
   des Radarrings, die Gradzahlen werden nicht mehr angeschnitten. Dazu kommen
   die frei skalierbare Schrift (SETUP), Parserfehler getrennt von echter

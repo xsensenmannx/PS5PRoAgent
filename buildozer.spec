@@ -34,7 +34,7 @@ source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .ven
 source.exclude_patterns = ps5pro_settings.json, ps5pro_history.json, *.md, *.log
 
 # (str) Application versioning (method 1)
-version = 5.1
+version = 1.1
 
 # (str) Application versioning (method 2)
 # version.regex = __version__ = ['"](.*)['"]
@@ -341,7 +341,7 @@ android.archs = arm64-v8a
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # Google Play verlangt fuer JEDEN Upload einen hoeheren versionCode. Vor dem
 # naechsten Play-Upload hier +1 (die Anzeige-Version oben bleibt davon unabhaengig).
-android.numeric_version = 18
+android.numeric_version = 19
 
 
 # (bool) enables Android auto backup feature (Android API >=23)

@@ -1,4 +1,4 @@
-"""PS5 Pro Search Agent v5.1 - PS1 Edition"""
+"""PS5 Pro Search Agent v1.1 - PS1 Edition"""
 import os, sys, json, re, time, math, random, queue, threading, hashlib
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed

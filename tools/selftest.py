@@ -601,8 +601,8 @@ def spec_tests():
     check("spec kivy nicht 2.3.0", "kivy==2.3.0" in req, False)
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
-    check("spec version", c.get("app", "version"), "5.1")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "18")
+    check("spec version", c.get("app", "version"), "1.1")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "19")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
