@@ -883,13 +883,13 @@ class ResultCard(ButtonBehavior, BoxLayout):
         holder.add_widget(info)
 
         right=BoxLayout(orientation="vertical",size_hint_x=None,
-                        width=dp(126),spacing=dp(0))
+                        width=dp(134),spacing=dp(0))
         if r["preis"] is not None:
             p_txt=format_preis(r["preis"]); p_col=PS1_TEXT
         else:
             p_txt="—"; p_col=PS1_GREY
         p=Label(text=f"[b]{p_txt}[/b]",markup=True,color=p_col,
-                font_size=sp(17),font_name=SST_FONT,
+                font_size=sp(16.5),font_name=SST_FONT,
                 halign="right",valign="middle",
                 size_hint_y=None,height=dp(26))
         p.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
