@@ -6,6 +6,23 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ![Icon](icon.png)
 
+## Welche Version brauche ich?
+
+| Stand | Bedeutung |
+|---|---|
+| **v5.0** | Aktueller veröffentlichter Release. Für die normale Installation und Updates nehmen. |
+| **v1.0beta** | Beta-Alias auf Basis von v5.0; gleicher Code wie v5.0, nur als zusätzlicher Test-Release. |
+| **v5.1** | In Vorbereitung, noch **kein GitHub-Release**. Enthält den lokalen Radar-/Lesbarkeits-Fix. |
+| **v3.3.2** | Letzter 3.x-Hotfix. Nur als Fallback für die alte 3.x-Oberfläche. |
+| **v4.0-beta / beta2** | Historische Testversionen. Nicht mehr für Neuinstallationen verwenden. |
+| **v1.0–v3.3.1** | Archiv der frühen Versionen; nur zur Nachvollziehbarkeit. |
+
+Die Release-APK liegt unter **[Releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**.
+Die vollständige Historie bleibt erhalten; neue 3.x-Releases nach v4/v5 wird es nicht
+mehr geben. v1.0beta ist keine neue 3.x-Entwicklung, sondern nur ein Beta-Alias auf
+dem v5.0-Code. Die Versionscodes sind chronologisch, auch wenn v3.3.2 nach den
+v4.0-Betas veröffentlicht wurde.
+
 ## Was die App kann
 
 * **Parallel-Scan** über 42 Shops (DE + AT) mit 6 Threads, Retry und wechselnden
@@ -117,13 +134,18 @@ ps5pro.zip                    Upload-Paket für Colab
 ```
 python3 tools/selftest.py
 python3 tools/kivy_smoke.py
+python3 tools/validate_shop_config.py
 ```
 
-Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung,
-HTTP-Cache, Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive
-Parser-Regeln, responsive Layout-Geometrie und Boot-Manifest — 572 Zusicherungen,
-ohne Kivy und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test ist ebenfalls
-ein eigenes CI-Gate und braucht kein Android-Gerät.
+Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
+Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
+Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
+responsive Layout-Geometrie und Boot-Manifest — 584 Zusicherungen, ohne Kivy
+und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test
+ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät.
+`tools/validate_shop_config.py` prüft die echte `shop_config.json` mit genau
+derselben Validierung wie die App und läuft in Build- und Release-Workflow vor
+den Logiktests.
 
 `tools/kivy_smoke.py` öffnet die Popups **Alarm-Regeln**, **Shop-Health** und
 **Detailansicht** mit echtem Kivy, prüft Inhalt und Größe und klickt die
@@ -161,16 +183,36 @@ Bot-Challenges ab. `--input` arbeitet offline; `--full` ist der Notausgang, wenn
 eine echte Seite durch die Minimierung anders geparst würde. Die CI führt den
 Helfer nicht aus und braucht keinen Shop-Zugriff.
 
-## Versionen
+## Versionshistorie
 
+Die Liste ist nach Veröffentlichung sortiert, nicht nach Versionsnummer. Für neue
+Installationen zählt nur der aktuelle Release oben; die älteren Einträge sind Archiv.
+
+* **v5.1 Lesbarkeit** – **in Vorbereitung, noch kein Release** (versionCode 18): Der BOT-SCHUTZ-Hinweis nutzt jetzt
+  10,0 sp statt 8,2 sp und ist auf `BOT-SCHUTZ · APP UMGEHT SIE NICHT` gekürzt,
+  damit er bei 246×156 dp vollständig lesbar bleibt. Die Karten-Schrift lässt
+  sich in `SETUP → SCHRIFT` auf 100 %, 110 % oder 120 % skalieren; der
+  120-%-Fall ist im 246-dp-Stresstest abgesichert. HTTP-200-Seiten ohne Preis
+  werden jetzt als **PARSER** von echtem **NICHT VERFÜGBAR** getrennt;
+  Shop-Health zählt aufeinanderfolgende Parserfehler und zeigt sie pro Shop.
+  Die echte `shop_config.json` wird vor jedem CI-Build validiert. Der Radar
+  hält außerdem 12 dp Abstand zur Trefferleiste, damit seine unteren
+  Markierungen nicht mehr angeschnitten werden. Enthält v5.0 Final.
+* **v1.0beta** – Beta-Alias auf v5.0 (versionCode 17): gleicher Code wie v5.0,
+  nur als zusätzlicher Test-Release. Kein eigener Entwicklungsstand.
 * **v5.0 Final** – Das aufgeräumte Gesamtsystem (versionCode 17): Das Radar
   zeigt jetzt ein ruhiges HUD mit Scan-Fortschritt, Zielmarken für Treffer,
   Sonar-Pings und einem `TARGET · 2 TB`-Status. Die Trefferliste bekommt einen
   Metall-Verlauf, eine cyanfarbene `BEST`-Markierung für den günstigsten Treffer
   und eine feinere Statuskante. `SETUP` öffnet eine zentrale Systemkonfiguration
   für Scan, Alarme, Preisgrenze, Sortierung, Händler, Regeln und Shop-Health.
-  Enthält v4.0 Beta 2, den v3.3.2-Layout-Fix und alle älteren Parser-, Alarm-
-  und Hintergrunddienste. 572 Zusicherungen.
+  Enthält v4.0 Beta 2, den im v4-Zweig nachgebauten v3.3.2-Layout-Fix und alle
+  älteren Parser-, Alarm- und Hintergrunddienste. 572 Zusicherungen.
+* **v3.3.2** – Preis-Layout-Hotfix (versionCode 16): Die Preisspalte wuchs auf
+  134 dp, die Preis-Schrift auf 16,5 sp; damit passt `1.299,00 €` auch mit den
+  Linux-Schriftmetriken. Der Release-Lauf prüft Kivy vor dem APK-Build. Der
+  Stand wurde nach v4.0 Beta 2 veröffentlicht; der gleiche Fix wurde im
+  v4-Zweig separat nachgebaut.
 * **v4.0 Beta 2** – Länderflagge in der Trefferliste (versionCode 15): Die
   Flagge steht klein in der Meta-Zeile vor `DE · 12:00` und zeigt die Herkunft
   des Treffers; vor dem Händlernamen bleibt die Zeile symbolfrei. Keine
@@ -186,8 +228,9 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
   Preise und die Verfuegbarkeit. 572 Zusicherungen. Enthält v3.3.1.
 * **v3.3.1** – Layout-Patch (versionCode 13): Der BOT-SCHUTZ-Hinweis steht
   auf einer eigenen vollbreiten Zeile und bleibt auch auf schmalen Displays
-  vollständig sichtbar; die breitere Preisspalte verhindert abgeschnittene
-  Beträge wie `1.299,00 €`. Enthält den vollständigen Stand aus v3.3.
+  vollständig sichtbar. Die Preisspalte war hier noch zu schmal; v3.3.2
+  behebt abgeschnittene Beträge wie `1.299,00 €`. Enthält den vollständigen
+  Stand aus v3.3.
 * **v3.3** – Kompakte Trefferliste (versionCode 12): vertikale Zeilen statt
   breiter Karten, dadurch mehrere Treffer gleichzeitig sichtbar; Preis, Status
   und Preisänderung stehen rechts. Der BOT-SCHUTZ-Hinweis bleibt sichtbar.
