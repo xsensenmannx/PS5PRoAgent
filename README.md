@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.4 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.4/ps5prosearchagent-1.4-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.4.0 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.4.0/ps5prosearchagent-1.4.0-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -23,7 +23,7 @@ einmalig eine Deinstallation nötig.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.4** | Die aktuelle Version (versionCode 10400). Diese APK installieren. |
+| **v1.4.0** | Die aktuelle Version (versionCode 10400). Diese APK installieren. |
 | **v1.3** | Vorherige Version; bleibt als Archiv-Release erhalten. |
 | **v1.2** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.1** | Ältere Version; bleibt als Archiv-Release erhalten. |
@@ -33,11 +33,12 @@ Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
 aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
-> **Eine Nummer für alles:** App, `main`-Branch, Release und Download heißen
-> **v1.4**. Der Button oben führt immer zur aktuellen APK.
+> **Eine Nummer für alles:** App, Release und Download heißen **v1.4.0**
+> (App-Version 1.4, versionCode 10400). Der Button oben führt immer zur
+> aktuellen APK.
 >
-> **Zur Zählung:** v1.4 ist die Fortsetzung der bisherigen 5.x-Stände. Die
-> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0–v1.3 Archiv, v1.4 aktuell).
+> **Zur Zählung:** v1.4.0 ist die Fortsetzung der bisherigen 5.x-Stände. Die
+> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0–v1.3 Archiv, v1.4.0 aktuell).
 
 ## Eindruck
 
@@ -255,7 +256,7 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.4** – Die aktuelle Version (versionCode 10400): Verfügbarkeitszustände
+* **v1.4.0** – Die aktuelle Version (versionCode 10400): Verfügbarkeitszustände
   statt eines booleschen „verfügbar", CHANCE für Marktabholung, Lotterie,
   Einladung und Vorbestellung, Konfidenz 0–100 mit optionaler 70-%-Schwelle,
   Beleg-Ausschnitt mit Hash, GTIN/EAN- und Bundle-Erkennung, Marketplace-Hinweis
@@ -286,7 +287,7 @@ Die Release-APK wird im Workflow mit einem **festen Schlüssel** signiert
 die bestehende Installation, ohne dass die App deinstalliert werden muss.
 
 `versionName` und `versionCode` kommen aus dem Tag: `v1.3` wird zu `1.3` und
-`10300` (`MAJOR*10000 + MINOR*100 + PATCH`), siehe
+`10300`, `v1.4.0` zu `1.4.0` und `10400` (`MAJOR*10000 + MINOR*100 + PATCH`), siehe
 `tools/set_version_from_tag.sh`.
 
 Zertifikat (öffentlich; im Workflow als Sollwert hinterlegt):
