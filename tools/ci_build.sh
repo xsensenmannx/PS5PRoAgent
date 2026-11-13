@@ -2,6 +2,8 @@
 # Baut die Android-APK auf einem Linux-Rechner (GitHub-Runner, WSL, VM).
 # Der Release-Workflow .github/workflows/release.yml ruft dieses Skript auf;
 # lokal ist es derselbe Weg: bash tools/ci_build.sh
+# Play: buildozer.play.spec vorher als buildozer.spec aktivieren und
+# ARTIFACT=aab setzen (macht .github/workflows/play-aab.yml).
 #
 # Umgebungsvariablen (optional):
 #   SKIP_APT=1   Systempakete nicht anfassen (wenn schon installiert)
@@ -33,13 +35,17 @@ for f in main.py scan_core.py service.py shop_config.json buildozer.spec icon.pn
          tools/kivy_smoke.py tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
          tools/ci_check_apk_aapt2.sh \
          tools/validate_shop_config.py \
-         tools/p4a_hook.py tools/ci_log_failure.sh \
-         android_src/de/ps5pro/ps5prosearchagent/BootReceiver.java; do
+         tools/p4a_hook.py tools/ci_log_failure.sh; do
     if [ ! -f "$f" ]; then
         echo "::error file=$f::Pflichtdatei fehlt: $f"
         missing=1
     fi
 done
+if [ ! -f android_src/de/ps5pro/ps5prosearchagent/BootReceiver.java ] && \
+   [ ! -f android_src_play/de/konsolenradar/app/BootReceiver.java ]; then
+    echo "::error file=android_src::Keine BootReceiver.java fuer Sideload oder Play gefunden"
+    missing=1
+fi
 if [ "$missing" -ne 0 ]; then
     echo "Bitte die genannten Dateien ins Repository legen."
     exit 1

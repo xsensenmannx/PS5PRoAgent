@@ -10,6 +10,7 @@ Start/Stop erfolgen aus main.py ueber ServicePs5proscan.start()/stop().
 import os, json, time, traceback
 from datetime import datetime
 
+import branding
 import scan_core as core
 
 # Im Hintergrund hoechstens alle 15 Minuten - kuerzere Intervalle aus der App
@@ -25,6 +26,13 @@ def _argument():
         return arg if isinstance(arg, dict) else {}
     except Exception:
         return {}
+
+
+def _labels():
+    """Der Service erbt die Marke ueber das Startargument der App."""
+    arg = _argument()
+    play = arg.get("brand") == "play" if arg.get("brand") else None
+    return branding.labels(play)
 
 
 def _status_schreiben(ergebnisse, neu, fehler=None, intervall=None):
@@ -73,17 +81,18 @@ def _benachrichtige(titel, text, url=None):
         Builder = autoclass("android.app.Notification$Builder")
         if autoclass("android.os.Build$VERSION").SDK_INT >= 26:
             NM = autoclass("android.app.NotificationManager")
+            L = _labels()
             kanal = autoclass("android.app.NotificationChannel")(
-                "ps5pro_hits", "PS5 Pro Treffer", NM.IMPORTANCE_HIGH)
-            kanal.setDescription("Verfuegbarkeit der PS5 Pro 2 TB")
+                L["channel_id"], L["channel_name"], NM.IMPORTANCE_HIGH)
+            kanal.setDescription(L["channel_desc"])
             nm.createNotificationChannel(kanal)
-            b = Builder(service, "ps5pro_hits")
+            b = Builder(service, L["channel_id"])
         else:
             b = Builder(service)
             b.setPriority(autoclass("android.app.Notification").PRIORITY_HIGH)
         b.setContentTitle(titel)
         b.setContentText(text)
-        b.setGroup("ps5pro_hits")
+        b.setGroup(_labels()["group"])
         # System-Drawable: das App-Icon ist seit API 26 ein adaptives Icon und
         # als Small-Icon ungueltig (Meldung wuerde verworfen).
         b.setSmallIcon(autoclass("android.R$drawable").stat_notify_chat)
@@ -124,19 +133,21 @@ def _benachrichtige_summary(neu):
         Builder = autoclass("android.app.Notification$Builder")
         if autoclass("android.os.Build$VERSION").SDK_INT >= 26:
             NM = autoclass("android.app.NotificationManager")
+            L = _labels()
             kanal = autoclass("android.app.NotificationChannel")(
-                "ps5pro_hits", "PS5 Pro Treffer", NM.IMPORTANCE_HIGH)
+                L["channel_id"], L["channel_name"], NM.IMPORTANCE_HIGH)
+            kanal.setDescription(L["channel_desc"])
             nm.createNotificationChannel(kanal)
-            b = Builder(service, "ps5pro_hits")
+            b = Builder(service, L["channel_id"])
         else:
             b = Builder(service)
             b.setPriority(autoclass("android.app.Notification").PRIORITY_HIGH)
-        titel = "PS5 Pro: %d Treffer" % len(neu)
+        titel = "%s: %d Treffer" % (_labels()["summary_title"], len(neu))
         b.setContentTitle(titel)
         b.setContentText("Tippen fuer Details")
         b.setSmallIcon(autoclass("android.R$drawable").stat_notify_chat)
         b.setAutoCancel(True)
-        b.setGroup("ps5pro_hits")
+        b.setGroup(_labels()["group"])
         b.setGroupSummary(True)
         try:
             style = autoclass("android.app.Notification$InboxStyle")()

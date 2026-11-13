@@ -5,11 +5,13 @@ Prueft Spec, Permissions, Listing-Texte, Datenschutzseite und vorhandene Assets.
 Der Check blockiert nichts im Release; er zeigt, was fuer eine Play-Einreichung
 noch fehlt.
 
-    python3 tools/play_readiness.py
-    python3 tools/play_readiness.py --strict   # Exit 1 bei Blockern
+    python3 tools/play_readiness.py                 # Play-Spec, sofern vorhanden
+    python3 tools/play_readiness.py --spec buildozer.spec  # Sideload pruefen
+    python3 tools/play_readiness.py --strict         # Exit 1 bei Blockern
 
 Exit-Code: 0 = nur Hinweise, 1 = Blocker (mit --strict), 2 = Aufruffehler.
 """
+import argparse
 import os
 import re
 import struct
@@ -23,8 +25,9 @@ def add(level, text):
     (BLOCK if level == "BLOCK" else WARN if level == "WARN" else OK).append(text)
 
 
-def spec_text():
-    with open(os.path.join(ROOT, "buildozer.spec"), encoding="utf-8") as f:
+def spec_text(path=None):
+    path = path or os.path.join(ROOT, "buildozer.spec")
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -59,7 +62,21 @@ def image_size(path):
 
 
 def main():
-    spec = spec_text()
+    parser = argparse.ArgumentParser(description=__doc__)
+    default_spec = ("buildozer.play.spec"
+                    if os.path.isfile(os.path.join(ROOT, "buildozer.play.spec"))
+                    else "buildozer.spec")
+    parser.add_argument("--spec", default=default_spec,
+                        help="Buildozer-Spec (Sideload: buildozer.spec)")
+    parser.add_argument("--strict", action="store_true",
+                        help="Exit 1 bei Blockern (fuer CI)")
+    args = parser.parse_args()
+    spec_path = args.spec if os.path.isabs(args.spec) else os.path.join(ROOT, args.spec)
+    if not os.path.isfile(spec_path):
+        print(f"Spec nicht gefunden: {spec_path}")
+        return 2
+    spec = spec_text(spec_path)
+    print(f"Spec: {os.path.relpath(spec_path, ROOT)}")
 
     version = spec_value(spec, "version")
     api = spec_value(spec, "android.api")
@@ -194,7 +211,7 @@ def main():
     print(f"\nErgebnis: {len(BLOCK)} Blocker, {len(WARN)} Hinweise, {len(OK)} ok")
     if BLOCK:
         print("Details und Reihenfolge: docs/PLAY_STORE.md")
-    return 1 if (BLOCK and "--strict" in sys.argv) else 0
+    return 1 if (BLOCK and args.strict) else 0
 
 
 if __name__ == "__main__":

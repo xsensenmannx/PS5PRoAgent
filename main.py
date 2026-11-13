@@ -1,4 +1,4 @@
-"""PS5 Pro Search Agent v1.4 - PS1 Edition"""
+"""Konsolen-Radar / PS5 Pro Search Agent v1.4."""
 import os, sys, json, re, time, math, random, queue, threading, hashlib
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -34,6 +34,7 @@ from kivy.uix.widget import Widget
 from kivy.animation import Animation
 from kivy.utils import get_color_from_hex, platform
 
+import branding
 from scan_core import (
     HAENDLER, MAX_PREIS, BG_STATUS_FILE, format_preis, classify,
     _safe_scan, _res, WORKER, History, Settings, data_dir, Health, health, reset_health,
@@ -224,7 +225,7 @@ def notify(t,m,url=None):
             except Exception:
                 si=a.getApplicationInfo().icon
             b.setSmallIcon(si); b.setAutoCancel(True)
-            b.setGroup("ps5pro_hits")
+            b.setGroup(branding.GROUP)
             try:
                 Intent=autoclass("android.content.Intent")
                 PendingIntent=autoclass("android.app.PendingIntent")
@@ -241,10 +242,10 @@ def notify(t,m,url=None):
                 if autoclass("android.os.Build$VERSION").SDK_INT>=26:
                     NM=autoclass("android.app.NotificationManager")
                     ch=autoclass("android.app.NotificationChannel")(
-                        "ps5pro_hits","PS5 Pro Treffer",NM.IMPORTANCE_HIGH)
-                    ch.setDescription("Verf\u00fcgbarkeit der PS5 Pro 2 TB")
+                        branding.CHANNEL_ID,branding.CHANNEL_NAME,NM.IMPORTANCE_HIGH)
+                    ch.setDescription(branding.CHANNEL_DESC)
                     a.getSystemService(C.NOTIFICATION_SERVICE).createNotificationChannel(ch)
-                    b.setChannelId("ps5pro_hits")
+                    b.setChannelId(branding.CHANNEL_ID)
             except Exception: pass
             nm=a.getSystemService(C.NOTIFICATION_SERVICE)
             # Ab Android 13 kann das Recht fehlen; notify() wirft dann nicht,
@@ -341,7 +342,7 @@ def android_prepare_window():
 
 # ── Hintergrund-Scan (eigener Prozess) ──────────────────────────────
 # Java-Klasse aus der Spec-Zeile services = ps5proscan:...:foreground
-BG_SERVICE = "de.ps5pro.ps5prosearchagent.ServicePs5proscan"
+BG_SERVICE = branding.PACKAGE + ".ServicePs5proscan"
 
 def bg_service_start(interval):
     """Foreground-Service starten. Nur Android, sonst ein No-op."""
@@ -352,8 +353,9 @@ def bg_service_start(interval):
         Svc=autoclass(BG_SERVICE)
         # data_dir mitgeben: der Service-Prozess hat keine Kivy-App und muss
         # dieselben Settings-/Verlaufsdateien lesen wie die Oberflaeche.
-        arg=json.dumps({"interval":int(interval),"data_dir":data_dir()})
-        Svc.start(PA.mActivity,"notify_icon","PS5 Pro Scan",
+        arg=json.dumps({"interval":int(interval),"data_dir":data_dir(),
+                        "brand":branding.labels()["brand_arg"]})
+        Svc.start(PA.mActivity,"notify_icon",branding.SERVICE_TITLE,
                   "Pr\u00fcft H\u00e4ndler im Hintergrund",arg)
         return True
     except Exception as e:
@@ -375,11 +377,11 @@ class PSShapesWidget(Widget):
         self.size_hint = (None, None)
         self.size = size
         with self.canvas:
-            Color(*PS_TRIANGLE); self.t_line = Line(width=dp(1.2))
-            Color(*PS_CIRCLE);   self.c_line = Line(width=dp(1.2))
-            Color(*PS_CROSS);    self.x_line1 = Line(width=dp(1.2))
+            self._t_col = Color(*PS_TRIANGLE); self.t_line = Line(width=dp(1.2))
+            self._c_col = Color(*PS_CIRCLE);   self.c_line = Line(width=dp(1.2))
+            self._x_col = Color(*PS_CROSS);    self.x_line1 = Line(width=dp(1.2))
             self.x_line2 = Line(width=dp(1.2))
-            Color(*PS_SQUARE);   self.s_line = Line(width=dp(1.2))
+            self._s_col = Color(*PS_SQUARE);   self.s_line = Line(width=dp(1.2))
         self.bind(pos=self.update_canvas, size=self.update_canvas)
 
     def update_canvas(self, *args):
@@ -387,6 +389,18 @@ class PSShapesWidget(Widget):
         step = self.width / 4
         cy = self.y + self.height / 2
         r = min(step, self.height) * 0.25
+
+        if branding.PLAY:
+            # Neutrale Signalbalken statt der vier PlayStation-Formen.
+            for col in (self._t_col, self._c_col, self._x_col, self._s_col):
+                col.rgba = (0.22, 0.70, 0.86, 1)
+            lines = (self.t_line, self.c_line, self.x_line1, self.x_line2)
+            for i, line in enumerate(lines):
+                cx = self.x + step * (i + 0.5)
+                frac = (0.40, 0.60, 0.80, 1.0)[i]
+                line.points = [cx, cy-r, cx, cy-r+2*r*frac]
+            self.s_line.points = []
+            return
 
         cx1 = self.x + step * 0.5
         self.t_line.points = [cx1, cy+r, cx1-r, cy-r, cx1+r, cy-r, cx1, cy+r]
@@ -531,7 +545,7 @@ class RadarWidget(Widget):
         super().__init__(**kw); self._fl=[]
         st=["triangle","circle","cross","square"]
         cm={"triangle":PS_TRIANGLE,"circle":PS_CIRCLE,"cross":PS_CROSS,"square":PS_SQUARE}
-        for _ in range(6):
+        for _ in range(0 if branding.PLAY else 6):
             t=random.choice(st)
             self._fl.append({"x":random.uniform(0.2,0.8),"y":random.uniform(0.2,0.8),
                 "vx":random.uniform(-0.0004,0.0004),"vy":random.uniform(-0.0004,0.0004),
@@ -686,11 +700,19 @@ class RadarWidget(Widget):
                 else: r=min(dp(4),mr*0.022)
                 Color(co[0],co[1],co[2],b.get("intensity",1.0))
                 Ellipse(pos=(bx-r,by-r),size=(r*2,r*2))
-            for sym,col,deg in [("triangle",PS_TRIANGLE,0),("circle",PS_CIRCLE,90),
-                                 ("cross",PS_CROSS,180),("square",PS_SQUARE,270)]:
-                aa=math.radians(90-deg)
-                mx=cx+mr*0.90*math.cos(aa); my=cy+mr*0.90*math.sin(aa)
-                self._sym(sym,mx,my,dp(11),(col[0],col[1],col[2],0.9))
+            if branding.PLAY:
+                # Neutrale Peilpunkte an den vier Hauptachsen.
+                for deg in (0,90,180,270):
+                    aa=math.radians(90-deg)
+                    mx=cx+mr*0.90*math.cos(aa); my=cy+mr*0.90*math.sin(aa)
+                    Color(0.30,0.72,0.90,0.9)
+                    Ellipse(pos=(mx-dp(2.5),my-dp(2.5)),size=(dp(5),dp(5)))
+            else:
+                for sym,col,deg in [("triangle",PS_TRIANGLE,0),("circle",PS_CIRCLE,90),
+                                     ("cross",PS_CROSS,180),("square",PS_SQUARE,270)]:
+                    aa=math.radians(90-deg)
+                    mx=cx+mr*0.90*math.cos(aa); my=cy+mr*0.90*math.sin(aa)
+                    self._sym(sym,mx,my,dp(11),(col[0],col[1],col[2],0.9))
             pu=0.7+0.3*math.sin(now*2.5)
             Color(RADAR_RING[0],RADAR_RING[1],RADAR_RING[2],pu)
             Ellipse(pos=(cx-dp(10)*pu,cy-dp(10)*pu),size=(dp(20)*pu,dp(20)*pu))
@@ -792,8 +814,8 @@ class PSMark(Widget):
     """Silver PS monogram badge."""
     def __init__(self,**kw):
         super().__init__(**kw)
-        self._lbl=Label(text="PS",bold=True,color=PS1_SILVER,font_name=SST_FONT,
-                        halign="center",valign="middle")
+        self._lbl=Label(text="" if branding.PLAY else "PS",bold=True,color=PS1_SILVER,
+                        font_name=SST_FONT,halign="center",valign="middle")
         self.add_widget(self._lbl)
         self.bind(pos=self._redraw,size=self._redraw)
         Clock.schedule_once(self._redraw,0)
@@ -802,6 +824,23 @@ class PSMark(Widget):
         s=min(self.width,self.height)
         if s<=0: return
         x=self.x+(self.width-s)/2; y=self.y+(self.height-s)/2
+        if branding.PLAY:
+            # Kleine Radar-Marke: Ringe plus Preis-Pfeil, keine PS-Formen.
+            with self.canvas.before:
+                Color(0.03,0.09,0.13,1)
+                RoundedRectangle(pos=(x,y),size=(s,s),radius=[s*0.22])
+                Color(0.18,0.55,0.72,1)
+                Line(circle=(x+s/2,y+s/2,s*0.31),width=max(dp(1),s*0.035))
+                Line(circle=(x+s/2,y+s/2,s*0.20),width=max(dp(1),s*0.025))
+                Color(0.20,0.83,0.60,1)
+                Line(points=[x+s*0.50,y+s*0.66,x+s*0.38,y+s*0.48,
+                             x+s*0.46,y+s*0.48,x+s*0.46,y+s*0.34,
+                             x+s*0.54,y+s*0.34,x+s*0.54,y+s*0.48,
+                             x+s*0.62,y+s*0.48,x+s*0.50,y+s*0.66],
+                     width=max(dp(1),s*0.045))
+            self._lbl.text=""
+            self._lbl.pos=(x,y); self._lbl.size=(s,s)
+            return
         with self.canvas.before:
             Color(0,0,0,0.9); Rectangle(pos=(x-dp(1),y-dp(1)),
                                        size=(s+dp(2),s+dp(2)))
@@ -844,11 +883,12 @@ class LogoWidget(FloatLayout):
         self.textbox=BoxLayout(orientation="vertical",size_hint=(None,None),
                                spacing=dp(1),padding=0)
         self.title=Label(markup=True,
-                         text="[b]PLAYSTATION[/b] [color=3f8cff][b]5 PRO[/b][/color]",
+                         text=(f"[b]{branding.SHORT}[/b]" if branding.PLAY else
+                               "[b]PLAYSTATION[/b] [color=3f8cff][b]5 PRO[/b][/color]"),
                          color=PS1_SILVER,font_size=sp(18),font_name=SST_FONT,
                          halign="left",valign="middle",
                          shorten=True,shorten_from="right")
-        self.sub=Label(text="S E A R C H   A G E N T   ·   2 T B",color=PS1_GREY,
+        self.sub=Label(text=branding.SUBTITLE,color=PS1_GREY,
                        font_size=sp(8.5),font_name=SST_FONT,bold=True,
                        halign="left",valign="middle")
         self.title.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
@@ -889,10 +929,14 @@ class LogoWidget(FloatLayout):
         # Textkasten bietet. Dann bleibt "PS5 PRO" als kurze, vollstaendig
         # lesbare Marke stehen, statt den Schriftzug mit "..." abzuschneiden.
         compact = tw < dp(460)
-        title_text = "[b]PS5 PRO[/b]" if compact else \
-            "[b]PLAYSTATION[/b] [color=3f8cff][b]5 PRO[/b][/color]"
-        sub_text = "SEARCH AGENT  ·  2 TB" if compact else \
-            "S E A R C H   A G E N T   ·   2 T B"
+        if branding.PLAY:
+            title_text = f"[b]{branding.SHORT}[/b]"
+            sub_text = branding.SUBTITLE
+        else:
+            title_text = "[b]PS5 PRO[/b]" if compact else \
+                "[b]PLAYSTATION[/b] [color=3f8cff][b]5 PRO[/b][/color]"
+            sub_text = "SEARCH AGENT  ·  2 TB" if compact else \
+                "S E A R C H   A G E N T   ·   2 T B"
         if self.title.text != title_text: self.title.text = title_text
         if self.sub.text != sub_text: self.sub.text = sub_text
         fs=max(sp(12),min(sp(19),tw*0.062))
@@ -1755,8 +1799,8 @@ class MainUI(FloatLayout):
         if len(self._known_hits)>200:
             self._known_hits=set(list(self._known_hits)[-100:])
         msg=f"{name}: {format_preis(preis)}"
-        title=("PS5 PRO 2TB WIEDER VERFÜGBAR" if r.get("_restock")
-               else "PS5 PRO 2TB VERFÜGBAR")
+        title=(branding.NOTIFY_RESTOCK if r.get("_restock")
+               else branding.NOTIFY_HIT)
         # notify() kann auf Android Systemzeit kosten; das darf den Radar nicht
         # mitten im Treffer einfrieren. Der Fallback-Toast laeuft im UI-Thread.
         def send():
@@ -1794,7 +1838,7 @@ class MainUI(FloatLayout):
             self._toast("KEIN WEBHOOK GESETZT",color=PS1_YELLOW); return
         def go():
             try: ok,info=webhook_senden(u,webhook_preset(u),
-                                        "PS5 PRO TESTALARM","Webhook funktioniert.")
+                                        branding.TEST_TITLE,"Webhook funktioniert.")
             except Exception as e: ok,info=False,str(e)[:40]
             self.webhook_status=("OK" if ok else str(info)[:40])
             def ui(dt):
@@ -1806,7 +1850,7 @@ class MainUI(FloatLayout):
 
     def _send_test_alarm(self):
         try:
-            ok=notify("PS5 PRO TESTALARM","Benachrichtigungen funktionieren.",
+            ok=notify(branding.TEST_TITLE,"Benachrichtigungen funktionieren.",
                       url="https://direct.playstation.com/de-de/buy-consoles/playstation5-pro-console-2-tb")
         except Exception: ok=False
         self._toast("TESTALARM GESENDET" if ok else "TESTALARM FEHLGESCHLAGEN",
@@ -1822,7 +1866,7 @@ class MainUI(FloatLayout):
         ht.add_widget(Label(text="[b]SYSTEM BEREIT[/b]",markup=True,color=PS1_ICE,
                             font_size=sp(17),font_name=SST_FONT,
                             size_hint_y=None,height=dp(22)))
-        ht.add_widget(Label(text="PS5 PRO 2 TB  ·  LIMITED SEARCH AGENT",color=PS1_CYAN,
+        ht.add_widget(Label(text=branding.SETUP_HEAD,color=PS1_CYAN,
                             font_size=sp(7.8),bold=True,font_name=SST_FONT,
                             size_hint_y=None,height=dp(13)))
         head.add_widget(ht); box.add_widget(head)
@@ -1873,7 +1917,7 @@ class MainUI(FloatLayout):
         t=Label(text="[b]SYSTEM CONFIG[/b]",markup=True,color=PS1_ICE,
                 font_size=sp(15),font_name=SST_FONT,halign="left",valign="middle",
                 size_hint_y=None,height=dp(22))
-        sub=Label(text="PS5 PRO 2 TB · FINAL EDITION",color=PS1_CYAN,
+        sub=Label(text=branding.SETUP_SUB,color=PS1_CYAN,
                   font_size=sp(8),bold=True,font_name=SST_FONT,
                   halign="left",valign="middle",size_hint_y=None,height=dp(14))
         for x in (t,sub): x.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
@@ -2670,7 +2714,8 @@ class RootLayout(FloatLayout):
         self.toast=Toast(); self.add_widget(self.toast)
 
 class PS5ProApp(App):
-    title="Playstation 5 Pro Search Agent"
+    title=(branding.PLAY_TITLE if branding.PLAY
+           else "Playstation 5 Pro Search Agent")
     def on_start(self):
         # Kalter Start ueber eine Benachrichtigung: nach dem ersten Frame oeffnen.
         Clock.schedule_once(self._open_deep_link,0.8)

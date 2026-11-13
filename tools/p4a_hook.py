@@ -7,7 +7,8 @@ Service nicht selbst stoppt). `specialUse` hat dieses Limit nicht; Google Play
 verlangt dafuer den Subtyp als <property> im <service>-Element.
 
 Zusaetzlich traegt der Hook den BootReceiver ein. Der Receiver ist eine kleine
-Java-Klasse (android_src/.../BootReceiver.java), weil ein manifest-deklarierter
+Java-Klasse (Sideload: android_src/.../BootReceiver.java, Play:
+android_src_play/.../BootReceiver.java), weil ein manifest-deklarierter
 BroadcastReceiver eine Java-Klasse sein muss. Er startet den Service nur, wenn
 der Nutzer AUTO aktiviert hat; die Pruefung passiert im Receiver.
 
@@ -15,15 +16,32 @@ Der Hook laeuft nach dem Rendern des Manifests und vor Gradle
 (after_apk_build im p4a-Toolchain).
 """
 import os
+import re
 import xml.etree.ElementTree as ET
 
-PACKAGE = "de.ps5pro.ps5prosearchagent"
-SERVICE = PACKAGE + ".ServicePs5proscan"
-RECEIVER = PACKAGE + ".BootReceiver"
 SUBTYPE = ("Periodic price and availability checks for a product the user "
            "is watching; started explicitly via the AUTO switch")
 
-RECEIVER_XML = """        <receiver
+
+def erweitere_manifest(text):
+    """Ergaenzt Service-Property und BootReceiver; bei Fehlern unveraendert.
+
+    Package und Service-Klasse werden aus dem gerenderten Manifest gelesen.
+    Dadurch funktioniert derselbe Hook fuer Sideload (de.ps5pro...) und Play
+    (de.konsolenradar.app), ohne dass eine Marke hartcodiert bleibt.
+    Die Funktion ist absichtlich ohne Toolchain testbar. Sie gibt immer ein
+    vollstaendiges, XML-parsebares Manifest zurueck (oder das Original).
+    """
+    original = text
+    if not isinstance(text, str):
+        return original
+
+    m = re.search(r'android:name="([^"]+)\.ServicePs5proscan"', text)
+    if not m:
+        return original
+    service = m.group(1) + ".ServicePs5proscan"
+    receiver = m.group(1) + ".BootReceiver"
+    receiver_xml = """        <receiver
             android:name="%s"
             android:enabled="true"
             android:exported="true">
@@ -32,20 +50,9 @@ RECEIVER_XML = """        <receiver
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
-""" % RECEIVER
+""" % receiver
 
-
-def erweitere_manifest(text):
-    """Ergaenzt Service-Property und BootReceiver; bei Fehlern unveraendert.
-
-    Die Funktion ist absichtlich ohne Toolchain testbar. Sie gibt immer ein
-    vollstaendiges, XML-parsebares Manifest zurueck (oder das Original).
-    """
-    original = text
-    if not isinstance(text, str):
-        return original
-
-    needle = 'android:name="%s"' % SERVICE
+    needle = 'android:name="%s"' % service
     start = text.find(needle)
     if start < 0:
         return original
@@ -60,11 +67,11 @@ def erweitere_manifest(text):
                 '        </service>' % SUBTYPE)
         text = text[:end] + prop + text[end + 2:]
 
-    if RECEIVER not in text:
+    if receiver not in text:
         close = text.rfind("</application>")
         if close < 0:
             return original
-        text = text[:close] + RECEIVER_XML + text[close:]
+        text = text[:close] + receiver_xml + text[close:]
 
     try:
         ET.fromstring(text)
