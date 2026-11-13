@@ -106,4 +106,6 @@ fi
 cp "$TMP/signed.apk" "$APK"
 
 echo "APK signiert und geprueft: $APK"
-grep -E "Signer #1 certificate (DN|SHA-256)" "$TMP/certs.txt" | sed 's/^/  /'
+# Nur zur Anzeige: sed liefert auch ohne Treffer 0, waehrend ein grep ohne
+# Treffer unter `set -e`/pipefail den bereits erfolgreichen Lauf kippt.
+sed -n '/Signer #1 certificate/p' "$TMP/certs.txt" | sed 's/^/  /'
