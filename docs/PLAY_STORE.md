@@ -7,8 +7,9 @@ veröffentlichen — ohne die bestehende Sideload-Version zu beschädigen.
 > **Kurzfassung:** Der Play-Rebrand ist umgesetzt: neutraler Titel
 > „Konsolen-Radar – Preisalarm“, Package `de.konsolenradar.app`, ein eigenes
 > Radar-Icon und fertige Store-Assets. `tools/play_readiness.py` meldet für
-> `buildozer.play.spec` **0 Blocker**. Es fehlen nur noch der neue AAB-Build
-> (Hinweis, kein Blocker), die FGS-Demo und die 12er-Testphase.
+> `buildozer.play.spec` **0 Blocker und 0 Hinweise**. Der Play-AAB-Build
+> `43526728548` ist erfolgreich; es fehlen nur noch die FGS-Demo und die
+> 12er-Testphase.
 
 ---
 
@@ -107,9 +108,17 @@ validate` erfolgreich, Universal-APK mit Upload-Key signiert (Zertifikat
 `63:E5:1D:…:70:DD`), Package `de.ps5pro.ps5prosearchagent`,
 `versionCode 10400`, `versionName 1.4.0`, minSdk 24, targetSdk 36,
 `FOREGROUND_SERVICE_SPECIAL_USE`, `specialUse`-Subtyp und BootReceiver. Dieser
-Lauf dokumentiert den alten Package-Namen der v1.4.0. Für den Play-Upload muss
-derselbe Workflow mit `buildozer.play.spec` laufen; erwartet werden Package
-`de.konsolenradar.app` und Titel `Konsolen-Radar – Preisalarm`.
+Lauf dokumentiert den alten Package-Namen der v1.4.0.
+
+**Play-Rebrand-Lauf:** `43526728548` auf dem Branch `play-rebrand-aab`
+(10m27s, erfolgreich). Erzeugt wurden ein 21-MB-AAB
+(`SHA-256 a7224f54…84e4`) und eine 21-MB-Universal-APK
+(`SHA-256 9fbaed8e…7f70`). Geprüft: Package `de.konsolenradar.app`, Titel
+`Konsolen-Radar – Preisalarm`, `versionCode 10400`, minSdk 24, targetSdk 36,
+`arm64-v8a`, `specialUse`-Property, BootReceiver mit `BOOT_COMPLETED` und
+`MY_PACKAGE_REPLACED`, App-Icon `res/mipmap/icon.png` (Radar/Pfeil, keine
+PlayStation-Formen) sowie Upload-Key-Signatur. Die Artefakte liegen lokal in
+`bin/` und im Actions-Artifact `ps5pro-aab`.
 
 Wichtig:
 
