@@ -252,9 +252,6 @@ verworfen, damit ein 304 nicht den alten Preis konserviert.
 
 App und Hintergrund-Service laden höchstens einmal pro Tag und nutzen ETag/304.
 Der Button **SHOPS → REMOTE-CONFIG AKTUALISIEREN** erzwingt einen Abruf.
-APKs bis v1.4 ignorieren zusätzliche `parser`-Felder, solange `urls` vorhanden
-ist; damit ältere Clients die Datei weiterhin akzeptieren, sollte ein Eintrag
-mit Parser-Regel auch `urls` enthalten.
 * Debug-APK zum Sideloading; für den Play Store ist ein signierter AAB-Build nötig.
 
 ## Lizenz

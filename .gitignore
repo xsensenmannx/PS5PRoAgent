@@ -20,3 +20,6 @@ buildozer.log
 # Betriebssystem-Kram
 .DS_Store
 Thumbs.db
+
+# Lokale Debug-/Scrape-Seite, nicht ins Repository
+.a.html
