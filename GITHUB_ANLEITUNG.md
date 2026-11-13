@@ -115,7 +115,7 @@ workflows → Save**, dann **Actions → APK bauen → Run workflow**.
 | --- | --- | --- |
 | Auschecken | Sekunden | lädt deinen Commit |
 | Java 17 | ~20 s | Temurin-JDK, das Gradle erwartet |
-| **Logiktests** | ~2 s | 572 Zusicherungen; rot = kein Build |
+| **Logiktests** | ~2 s | 584 Zusicherungen; rot = kein Build |
 | **Kivy-Smoke-Test** | ~1 min | öffnet die drei Popups unter Xvfb; rot = kein Build |
 | Build-Cache | ~1 min | SDK/NDK (~2 GB) aus dem Cache oder Download |
 | **APK bauen** | 20–35 min | ruft `tools/ci_build.sh` auf (Pflichtdateien, Pakete, venv, Lizenzen, Build) |
@@ -155,7 +155,7 @@ Personal access tokens (classic) → Haken `repo`. Die `.gitignore` hält `.buil
 
 ## APK installieren
 
-1. `ps5pro-apk.zip` entpacken → `ps5prosearchagent-5.0-arm64-v8a-debug.apk`.
+1. `ps5pro-apk.zip` entpacken → `ps5prosearchagent-5.1-arm64-v8a-debug.apk`.
 2. Aufs Handy bringen (Kabel, Cloud, Messenger); der Name muss auf `.apk` enden.
 3. Antippen → **Installation aus dieser Quelle erlauben** → **Installieren**.
 4. Play-Protect-Hinweis „App wurde nicht geprüft" → **Mehr Details → Trotzdem installieren**.
@@ -213,32 +213,32 @@ Release — der Link ist danach ohne Login auf dem Handy zu öffnen.
 **Tag setzen, ohne Kommandozeile:**
 
 1. **Code** → rechts **Releases** → **Draft a new release**.
-2. Bei **Choose a tag** `v5.0` eintippen → **Create new tag: v5.0 on publish**.
-3. Titel z. B. `v5.0 Final` → **Publish release**.
+2. Bei **Choose a tag** `v5.1` eintippen → **Create new tag: v5.1 on publish**.
+3. Titel z. B. `v5.1 Final` → **Publish release**.
 
 Der Tag zeigt damit auf den aktuellen Stand von `main`, und der Workflow **Release**
 startet. Nach 20–40 Minuten (erster Lauf länger) liegt die APK am Release:
-**Releases → v5.0 → Assets → `ps5prosearchagent-5.0-arm64-v8a-debug.apk`**.
+**Releases → v5.1 → Assets → `ps5prosearchagent-5.1-arm64-v8a-debug.apk`**.
 
 **Mit der Kommandozeile:**
 
 ```bash
-git tag v5.0
-git push origin v5.0
+git tag v5.1
+git push origin v5.1
 ```
 
-Der Workflow legt das Release selbst an (Titel = Tag, hier `v5.0`). Ein schon
+Der Workflow legt das Release selbst an (Titel = Tag, hier `v5.1`). Ein schon
 publiziertes Release stört nicht — die APK wird dort ergänzt, der Titel bleibt.
 
-**Release-Stand:** `buildozer.spec` setzt `version = 5.0`; der finale Tag heißt
-`v5.0`. Tag und Spec-Version dürfen abweichen, aber der Dateiname der APK enthält die
+**Release-Stand:** `buildozer.spec` setzt `version = 5.1`; der finale Tag heißt
+`v5.1`. Tag und Spec-Version dürfen abweichen, aber der Dateiname der APK enthält die
 Version aus der Spec — gleiche Nummern halten die Zuordnung eindeutig.
 
 **Tag am falschen Commit oder vertippt?** Lokal und auf GitHub löschen, neu setzen:
 
 ```bash
-git tag -d v5.0
-git push origin :refs/tags/v5.0
+git tag -d v5.1
+git push origin :refs/tags/v5.1
 ```
 
 Ein bereits angelegtes Release bleibt dabei bestehen (samt alter APK) — im Zweifel im
@@ -249,6 +249,6 @@ Web löschen und neu taggen.
 Dafür braucht es einen signierten **AAB**: `android.release_artifact = aab`,
 `android.api = 36` und einen eigenen Keystore über die vier GitHub-Secrets
 `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` und
-`ANDROID_KEY_PASSWORD`. Ohne diese Secrets erzeugt der v5.0-Lauf nur ein
+`ANDROID_KEY_PASSWORD`. Ohne diese Secrets erzeugt der v5.1-Lauf nur ein
 Smoke-Test-AAB. Die vollständige Anleitung inklusive nachträglichem AAB-Release
-für v5.0 steht in [PLAY_STORE.md](PLAY_STORE.md).
+für v5.1 steht in [PLAY_STORE.md](PLAY_STORE.md).
