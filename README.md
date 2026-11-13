@@ -169,6 +169,11 @@ tools/ci_sign_apk.sh          signiert die APK mit dem festen Release-Schlüssel
 tools/ci_log_failure.sh       zeigt bei einem CI-Fehler den Buildozer-Log
 docs/screenshots/             Screenshots und Scan-GIF fuer dieses README
 docs/KONZEPT.md               Produktkonzept, Roadmap und bewusste Nicht-Ziele
+docs/PLAY_STORE.md            Launchplan, Policy-Risiken und Play-Checkliste
+docs/privacy.html             Datenschutzseite fuer GitHub Pages / Play
+docs/PRIVACY.md               Datenschutzerklaerung als Markdown
+store/                        Listing-Texte, Data-Safety- und Rating-Antworten
+tools/play_readiness.py       beratender Play-Store-Readiness-Check
 .github/workflows/ci.yml      Push/PR -> Shop-Config, Logiktests, Kivy-Smoke (4 Groessen)
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
 LICENSE                       MIT-Lizenz
