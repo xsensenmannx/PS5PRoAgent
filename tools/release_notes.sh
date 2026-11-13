@@ -59,7 +59,7 @@ fi
     echo "- Release-APK, **$SIZE_MB MB** (\`$NAME\`)"
     echo "- Unbekannte Quellen für Browser bzw. Dateimanager erlauben"
     echo "- Updates installieren sich über die bestehende Version"
-    echo "- Beim Wechsel aus der alten 5.x-Reihe einmalig deinstallieren"
+    echo "- Beim Wechsel von einer anders signierten Vorversion einmalig deinstallieren"
     echo
     echo "## Prüfsumme"
     echo
