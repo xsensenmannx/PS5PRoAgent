@@ -98,11 +98,11 @@ Bundle wird eine **Universal-APK** erzeugt, mit `apksigner` gegen den erwarteten
 Upload-Key geprüft und per `aapt2` auf Package/Version kontrolliert. Beide
 Artefakte (`ps5pro-universal.apk`, `.apks`) landen im Artifact `ps5pro-aab`,
 zusammen mit dem AAB und `aab.sha256`. Letzter vollständiger Lauf:
-`43511580140` (13.11.2026). Ergebnis: 21-MB-AAB (SHA-256 `04f153c5…d986`)
-und 21-MB-Universal-APK (SHA-256 `bffbae0d…bccd`). Geprüft: `bundletool
+`43518504491` (v1.4.0). Ergebnis: 21-MB-AAB (SHA-256 `37217381…f6b0`)
+und 21-MB-Universal-APK (SHA-256 `f399f91c…4312`). Geprüft: `bundletool
 validate` erfolgreich, Universal-APK mit Upload-Key signiert (Zertifikat
 `63:E5:1D:…:70:DD`), Package `de.ps5pro.ps5prosearchagent`,
-`versionCode 10300`, `versionName 1.3`, minSdk 24, targetSdk 36,
+`versionCode 10400`, `versionName 1.4.0`, minSdk 24, targetSdk 36,
 `FOREGROUND_SERVICE_SPECIAL_USE`, `specialUse`-Subtyp und BootReceiver. Der
 Build nutzt noch den aktuellen Package-Namen; vor dem ersten Play-Upload muss
 der Rebrand erfolgen.
