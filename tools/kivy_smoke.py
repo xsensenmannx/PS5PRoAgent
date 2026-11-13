@@ -449,6 +449,18 @@ class SmokeApp(App):
         check("Setup: Filter-Aktionen", "MAX-PREIS" in text and "SORTIERUNG" in text, True)
         check("Setup: Schrift-Skalierung", "SCHRIFT" in text and "100 %" in text, True)
         check("Setup: System-Aktionen", "SHOP-HEALTH" in text and "ALARM-REGELN" in text, True)
+        check("Setup: Alarm-Kanal", "WEBHOOK" in text and "WEBHOOK-TEST" in text, True)
+        check("Setup: Schnellscan", "SCHNELLSCAN" in text, True)
+        felder = [w for w in p.walk() if isinstance(w, main.TextInput)]
+        check("Setup: Webhook-Feld", len(felder) >= 1, True)
+        if felder:
+            check("Setup: Webhook maskiert", felder[0].password, True)
+            check("Setup: Webhook-Feld breit", felder[0].width >= main.dp(80), True)
+        self.ui.schnellscan = True
+        self.ui._update_radar_hud()
+        check("Schnellscan: HUD", "SCHNELLSCAN" in self.ui.radar_hud_left.text, True)
+        self.ui.schnellscan = False
+        self.ui._update_radar_hud()
         self.close(p, "SCHLIESSEN")
 
     def onboarding(self):

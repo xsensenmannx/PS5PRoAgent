@@ -61,6 +61,15 @@ HTTP_CACHE_FILE = "ps5pro_http_cache.json"
 # alles darueber ist fuer die Preiserkennung nutzlos und kostet nur Traffic.
 MAX_HTML_BYTES = 5 * 1024 * 1024
 MAX_SERIE_PUNKTE = 120
+# Webhook-Alarme: ein Versuch plus ein Retry, danach ist der Kanal fuer diesen
+# Treffer erledigt. Der Cooldown verhindert Doppelmeldungen aus App und Dienst.
+WEBHOOK_TIMEOUT = 8
+WEBHOOK_COOLDOWN = 600
+WEBHOOK_PRESETS = ("ntfy","telegram","discord","generisch")
+# Shops, die fuer den Schnell-Modus zuerst geprueft werden. Alle Namen muessen
+# in HAENDLER vorkommen; unbekannte werden ignoriert.
+HOT_SHOPS = ["Amazon DE","MediaMarkt DE","Saturn DE","Otto DE",
+             "Cyberport DE","Coolblue DE"]
 BG_STATUS_FILE = "ps5pro_bg.json"
 HEALTH_FILE = "ps5pro_health.json"
 CRASH_FILE = "ps5pro_crash.log"
@@ -760,12 +769,14 @@ def fehler_klasse(fehler):
             else "error")
 
 
-def _try_url(u, att, proxy=None):
+def _try_url(u, att, proxy=None, force=False):
     """Eine Anfrage. Rueckgabe (html, fehler, meta).
 
     meta["not_modified"] signalisiert einen 304. Bedingte Header gehen nur beim
     ersten Versuch mit: ein Cache-Buster im Retry wuerde den Cache ohnehin
-    umgehen, und ein 304 auf einen Retry waere wertlos.
+    umgehen, und ein 304 auf einen Retry waere wertlos. ``force`` ueberspringt
+    die Validatoren komplett - die Verifikation eines Treffers braucht den
+    echten aktuellen Stand, keinen 304 aus dem letzten Scan.
     """
     uu=u
     if att>0: uu+=("&" if "?" in uu else "?")+"_cb="+str(int(time.time()*1000))
@@ -775,7 +786,7 @@ def _try_url(u, att, proxy=None):
     meta={"not_modified":False,"etag":None,"last_modified":None}
     # Nur der erste Versuch ist bedingt; der Cache ist prozessweit, weil die
     # Scan-Threads dieselbe Datei teilen und _try_url so kompatibel bleibt.
-    cache=http_cache() if att==0 else None
+    cache=http_cache() if (att==0 and not force) else None
     eintrag=cache.get(u) if cache is not None else None
     if eintrag:
         if eintrag.get("etag"): hd["If-None-Match"]=eintrag["etag"]
@@ -821,12 +832,13 @@ def _try_url(u, att, proxy=None):
         return None,f"HTTP {e.code}",meta
     except Exception as e: return None,str(e)[:50],meta
 
-def fetch_mit_cache(urls, cancel=None):
+def fetch_mit_cache(urls, cancel=None, force=False):
     """Wie fetch_html_multi, liefert zusaetzlich ein 304-Ergebnis aus dem Cache.
 
     ``cancel`` ist ein optionales threading.Event. Es wird vor jedem Versuch
     und vor jeder Retry-Pause geprueft; ein laufender HTTP-Request selbst kann
     nicht unterbrochen werden, aber danach wird kein weiterer Versuch gestartet.
+    ``force`` laedt die Seite ohne ETag/Last-Modified neu (Treffer-Verifikation).
     """
     last=None
     proxy=os.environ.get("PS5_PROXY","").strip() or None
@@ -837,9 +849,14 @@ def fetch_mit_cache(urls, cancel=None):
         rate_limited=False
         for u in urls:
             if _abgebrochen(cancel): raise ScanAbgebrochen
-            h,e,meta=_try_url(u,att,proxy)
+            # ``force`` nur weiterreichen, wenn es gesetzt ist: Tests ersetzen
+            # _try_url durch ein einfaches Lambda mit drei Argumenten.
+            h,e,meta=(_try_url(u,att,proxy,force=True) if force
+                      else _try_url(u,att,proxy))
             if _abgebrochen(cancel): raise ScanAbgebrochen
             if meta.get("not_modified"):
+                if force:
+                    cache.drop(u); last="HTTP 304"; continue
                 eintrag=cache.get(u)
                 if eintrag and isinstance(eintrag.get("result"),dict):
                     return "",u,dict(eintrag["result"]),meta
@@ -900,11 +917,11 @@ def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
             "signal":signal or "unbekannt","condition":condition,"seller":seller,
             "verfuegbarkeit":verfuegbarkeit,"sofort":sofort}
 
-def scan_einen(h, cancel=None):
+def scan_einen(h, cancel=None, force=False):
     st=time.time()
     try:
         if _abgebrochen(cancel): raise ScanAbgebrochen
-        html,fu,cached,meta=fetch_mit_cache(h["urls"], cancel=cancel); d=time.time()-st
+        html,fu,cached,meta=fetch_mit_cache(h["urls"], cancel=cancel, force=force); d=time.time()-st
         if _abgebrochen(cancel): raise ScanAbgebrochen
         if cached is not None:
             p=cached.get("preis"); v=bool(cached.get("verfuegbar"))
@@ -1051,6 +1068,158 @@ def alarm_ereignis(r, letzter, vorher_verfuegbar):
     if ist_neuer_treffer(r["preis"],letzter): return "new"
     return None
 
+# ── Webhook-Alarme ─────────────────────────────────────────────────
+def webhook_preset(url):
+    """Erkennt den Kanal an der URL. Unbekannte Ziele bekommen neutrales JSON."""
+    try: host=(urlparse(str(url)).hostname or "").lower()
+    except Exception: return "generisch"
+    if host=="ntfy.sh" or host.endswith(".ntfy.sh"): return "ntfy"
+    if host=="api.telegram.org": return "telegram"
+    if host in ("discord.com","discordapp.com","ptb.discord.com","canary.discord.com"):
+        return "discord"
+    return "generisch"
+
+def redact_url(url):
+    """Nur Schema und Host - Tokens im Pfad oder Query duerfen nie ins Log."""
+    try:
+        p=urlparse(str(url))
+        if not p.scheme or not p.hostname: return "—"
+        return f"{p.scheme}://{p.hostname}/…"
+    except Exception: return "—"
+
+def webhook_nachricht(preset, titel, text, ziel_url=None):
+    """Body und Header fuer den gewaehlten Kanal. Reine Funktion, testbar."""
+    titel=str(titel or ""); text=str(text or "")
+    if preset=="ntfy":
+        hd={"Content-Type":"text/plain; charset=utf-8","Title":titel,
+            "Priority":"high"}
+        if ziel_url: hd["Click"]=str(ziel_url)
+        return (titel+"\n"+text if titel else text),hd
+    if preset=="telegram":
+        return (json.dumps({"text":(titel+"\n"+text) if titel else text,
+                            "disable_web_page_preview":True},
+                           ensure_ascii=False),
+                {"Content-Type":"application/json; charset=utf-8"})
+    if preset=="discord":
+        inhalt=(titel+"\n"+text) if titel else text
+        if ziel_url: inhalt=inhalt+"\n"+str(ziel_url)
+        return (json.dumps({"content":inhalt},ensure_ascii=False),
+                {"Content-Type":"application/json; charset=utf-8"})
+    return (json.dumps({"titel":titel,"text":text,"url":ziel_url or ""},
+                       ensure_ascii=False),
+            {"Content-Type":"application/json; charset=utf-8"})
+
+def webhook_senden(url, preset=None, titel="", text="", ziel_url=None,
+                   timeout=WEBHOOK_TIMEOUT, pause=3.0, post=None):
+    """Sendet eine Meldung. Rueckgabe (ok, status).
+
+    Nur HTTPS. 4xx wird nicht wiederholt (URL oder Token falsch), 5xx und
+    Zeitueberschreitungen genau einmal. ``post`` und ``pause`` sind fuer Tests.
+    """
+    try: p=urlparse(str(url))
+    except Exception: return False,"URL ungueltig"
+    if p.scheme!="https" or not p.hostname: return False,"nur HTTPS"
+    if preset not in WEBHOOK_PRESETS: preset=webhook_preset(url)
+    body,headers=webhook_nachricht(preset,titel,text,ziel_url)
+    if post is None: post=_requests().post
+    letzter="kein Versuch"
+    for versuch in range(2):
+        try:
+            r=post(str(url),data=body.encode("utf-8"),headers=headers,timeout=timeout)
+            code=int(getattr(r,"status_code",0) or 0)
+            if 200<=code<300: return True,f"HTTP {code}"
+            letzter=f"HTTP {code}"
+            if 400<=code<500: return False,letzter
+        except Exception as e:
+            letzter=str(e)[:60]
+        if versuch==0 and pause:
+            time.sleep(pause)
+    return False,letzter
+
+_WEBHOOK_SEEN={}
+_WEBHOOK_LOCK=threading.Lock()
+
+def webhook_dedupe(haendler,preis,restock=False,jetzt=None,cooldown=WEBHOOK_COOLDOWN):
+    """True, wenn dieser Treffer noch nicht gemeldet wurde.
+
+    Der Key ist Haendler + Preis + Restock-Flag. App und Dienst laufen in
+    getrennten Prozessen; der Cooldown wirkt deshalb pro Prozess.
+    """
+    jetzt=time.time() if jetzt is None else jetzt
+    key=(str(haendler or "?"),round(float(preis or 0),2),bool(restock))
+    with _WEBHOOK_LOCK:
+        for k in [k for k,t in _WEBHOOK_SEEN.items() if jetzt-t>cooldown]:
+            _WEBHOOK_SEEN.pop(k,None)
+        if key in _WEBHOOK_SEEN: return False
+        _WEBHOOK_SEEN[key]=jetzt
+        return True
+
+def reset_webhook_dedupe():
+    """Nur fuer Tests."""
+    with _WEBHOOK_LOCK: _WEBHOOK_SEEN.clear()
+
+def sende_webhook_alarm(r, settings, titel, text, tester=False):
+    """Webhook fuer einen Treffer. None = kein Kanal oder schon gemeldet."""
+    url=str(_setting(settings,"webhook_url","") or "").strip()
+    if not url: return None
+    preset=_setting(settings,"webhook_preset","")
+    if preset not in WEBHOOK_PRESETS: preset=webhook_preset(url)
+    if not tester and not webhook_dedupe(r.get("haendler"),r.get("preis"),
+                                        bool(r.get("_restock"))):
+        return None
+    return webhook_senden(url,preset,titel,text,r.get("url"))
+
+# ── Treffer-Verifikation ───────────────────────────────────────────
+def verify_entscheidung(erster,zweiter):
+    """Vergleicht den Treffer mit dem zweiten Abruf. Reine Funktion."""
+    if not isinstance(erster,dict) or erster.get("klass")!="hit": return None
+    if not isinstance(zweiter,dict): return "unbestaetigt"
+    if zweiter.get("klass")=="unavail": return "weg"
+    if zweiter.get("preis") is not None and zweiter.get("klass") in ("hit","expensive"):
+        try:
+            if abs(float(zweiter["preis"])-float(erster.get("preis") or 0))<=0.005:
+                return "bestaetigt"
+        except (TypeError,ValueError): pass
+        return "geaendert"
+    return "unbestaetigt"
+
+def verify_treffer(h, erster, cancel=None, pause=2.0):
+    """Bestaetigt einen Treffer mit einem zweiten, unbedingten Abruf.
+
+    Nur Treffer kosten diesen Extraschritt. Ein 403/429 beim zweiten Abruf
+    wird nicht wiederholt und als ``unbestaetigt`` markiert. Ist der Shop
+    inzwischen ausverkauft, wird der Treffer auf ``unavail`` zurueckgestuft -
+    lieber kein Alarm als ein falscher.
+    """
+    if not isinstance(erster,dict) or erster.get("klass")!="hit": return erster
+    if pause:
+        try:
+            if cancel is not None:
+                if cancel.wait(pause):
+                    erster["verify"]="unbestaetigt"; return erster
+            else: time.sleep(pause)
+        except Exception:
+            time.sleep(pause)
+    if _abgebrochen(cancel):
+        erster["verify"]="unbestaetigt"; return erster
+    try: zweiter=scan_einen(h,cancel=cancel,force=True)
+    except Exception: zweiter=None
+    if _abgebrochen(cancel):
+        erster["verify"]="unbestaetigt"; return erster
+    entscheidung=verify_entscheidung(erster,zweiter)
+    erster["verify"]=entscheidung
+    if entscheidung=="geaendert":
+        erster["verify_preis"]=zweiter.get("preis")
+    elif entscheidung=="weg":
+        erster["klass"]="unavail"; erster["verify_preis"]=None
+    return erster
+
+def schnellscan_haendler(haendler, aktiv=None, hot=None):
+    """Hot-Shops, die auch in der aktiven Auswahl stehen."""
+    namen=set(hot or HOT_SHOPS)
+    if aktiv: namen &= set(aktiv)
+    return [h for h in haendler if h.get("name") in namen]
+
 def bg_intervall(sekunden, minimum=900):
     """Akku-freundlich: im Hintergrund nie oefter als alle 15 Minuten."""
     try: s = int(sekunden)
@@ -1162,6 +1331,9 @@ def alarm_erlaubt(r,tief,settings,jetzt=None):
     """
     if not isinstance(r,dict) or r.get("preis") is None: return False
     if ist_gebraucht(r.get("condition")): return False
+    # "Nur bestaetigte Treffer" heisst genau das: ohne zweiten Abruf kein Alarm.
+    if _setting(settings,"alarm_nur_bestaetigt",False) and r.get("verify")!="bestaetigt":
+        return False
     if _setting(settings,"notify_sofort",True) and r.get("sofort") is False:
         return False
     stumm=_setting(settings,"mute_haendler",[]) or []

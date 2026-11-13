@@ -17,6 +17,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -803,7 +804,7 @@ def feature_tests():
             # End-to-End: scan_einen nutzt die Remote-Regel vor dem Fallback.
             alt_fetch = core.fetch_mit_cache
             try:
-                core.fetch_mit_cache = lambda urls, cancel=None: (html_rules, urls[0], None, {})
+                core.fetch_mit_cache = lambda urls, cancel=None, force=False: (html_rules, urls[0], None, {})
                 core.reset_http_cache()
                 hrr = {"name": "Amazon DE", "land": "DE",
                        "urls": ["https://www.amazon.de/dp/REMOTE-RULES"],
@@ -824,7 +825,7 @@ def feature_tests():
                                   'content="https://schema.org/InStock">')
             alt_fetch = core.fetch_mit_cache
             try:
-                core.fetch_mit_cache = lambda urls, cancel=None: (
+                core.fetch_mit_cache = lambda urls, cancel=None, force=False: (
                     html_meta_konflikt, urls[0], None, {})
                 core.reset_http_cache()
                 r_meta = core.scan_einen({"name": "Amazon DE", "land": "DE",
@@ -1138,6 +1139,134 @@ def adaptive_boot_tests():
     check("Manifest idempotent", hook.erweitere_manifest(neu).count(".BootReceiver"), 1)
 
 
+def v13_tests():
+    """Webhook-Alarme, Treffer-Verifikation und Schnell-Modus (v1.3)."""
+    check("Webhook erkennt ntfy", core.webhook_preset("https://ntfy.sh/mein-topic"), "ntfy")
+    check("Webhook erkennt Telegram",
+          core.webhook_preset("https://api.telegram.org/botT/sendMessage?chat_id=1"),
+          "telegram")
+    check("Webhook erkennt Discord",
+          core.webhook_preset("https://discord.com/api/webhooks/1/abc"), "discord")
+    check("Webhook unbekannt generisch",
+          core.webhook_preset("https://example.com/hook"), "generisch")
+
+    # Tokens stecken in Pfad oder Query und duerfen nie im Log/Toast landen.
+    geheim = core.redact_url("https://ntfy.sh/geheimer-topic-123")
+    check("Webhook-Redaction Host", geheim, "https://ntfy.sh/…")
+    check("Webhook-Redaction ohne Token", "geheimer" in geheim, False)
+    check("Webhook-Redaction mit Query",
+          core.redact_url("https://example.com/a?token=abc"), "https://example.com/…")
+
+    body, hd = core.webhook_nachricht("ntfy", "TITEL", "TEXT", "https://shop/x")
+    check("ntfy Body", body, "TITEL\nTEXT")
+    check("ntfy Title", hd.get("Title"), "TITEL")
+    check("ntfy Click", hd.get("Click"), "https://shop/x")
+    body, hd = core.webhook_nachricht("discord", "T", "X", "https://shop/x")
+    check("Discord JSON", json.loads(body)["content"], "T\nX\nhttps://shop/x")
+    check("Discord Header", "application/json" in hd.get("Content-Type", ""), True)
+    body, _ = core.webhook_nachricht("generisch", "T", "X", "https://shop/x")
+    check("Generisch JSON", json.loads(body), {"titel": "T", "text": "X",
+                                                "url": "https://shop/x"})
+
+    class _Resp:
+        def __init__(self, code): self.status_code = code
+    calls = []
+    def post_ok(url, data=None, headers=None, timeout=None):
+        calls.append(url); return _Resp(204)
+    ok, info = core.webhook_senden("https://ntfy.sh/t", titel="T", text="X",
+                                   pause=0, post=post_ok)
+    check("Webhook sendet", ok, True)
+    check("Webhook Status", info, "HTTP 204")
+    calls.clear()
+    ok, info = core.webhook_senden("http://ntfy.sh/t", pause=0, post=post_ok)
+    check("Webhook nur HTTPS", ok, False)
+    check("Webhook HTTPS Text", info, "nur HTTPS")
+    calls.clear()
+    ok, info = core.webhook_senden("https://ntfy.sh/t", pause=0,
+                                   post=lambda *a, **k: (calls.append(1), _Resp(400))[1])
+    check("Webhook 4xx kein Retry", (ok, len(calls)), (False, 1))
+    calls.clear()
+    ok, info = core.webhook_senden("https://ntfy.sh/t", pause=0,
+                                   post=lambda *a, **k: (calls.append(1), _Resp(503))[1])
+    check("Webhook 5xx ein Retry", (ok, len(calls)), (False, 2))
+
+    core.reset_webhook_dedupe()
+    check("Webhook Dedupe erst", core.webhook_dedupe("Amazon DE", 799), True)
+    check("Webhook Dedupe zweit", core.webhook_dedupe("Amazon DE", 799), False)
+    check("Webhook Dedupe anderer Preis", core.webhook_dedupe("Amazon DE", 819), True)
+    check("Webhook Dedupe Restock", core.webhook_dedupe("Amazon DE", 799, True), True)
+    check("Webhook Dedupe abgelaufen",
+          core.webhook_dedupe("Amazon DE", 799, jetzt=time.time() + 601), True)
+    core.reset_webhook_dedupe()
+
+    treffer = {"klass": "hit", "preis": 799.0, "haendler": "Amazon DE"}
+    check("Verify gleicher Preis",
+          core.verify_entscheidung(treffer, {"klass": "hit", "preis": 799.0}),
+          "bestaetigt")
+    check("Verify anderer Preis",
+          core.verify_entscheidung(treffer, {"klass": "hit", "preis": 819.0}),
+          "geaendert")
+    check("Verify ausverkauft",
+          core.verify_entscheidung(treffer, {"klass": "unavail", "preis": None}), "weg")
+    check("Verify Bot-Schutz",
+          core.verify_entscheidung(treffer, {"klass": "challenge", "preis": None}),
+          "unbestaetigt")
+    check("Verify ohne Antwort", core.verify_entscheidung(treffer, None), "unbestaetigt")
+    check("Verify kein Treffer", core.verify_entscheidung({"klass": "unavail"}, treffer), None)
+
+    alt_scan = core.scan_einen
+    gesehen = {}
+    try:
+        def fake_scan(h, cancel=None, force=False):
+            gesehen["force"] = force
+            return {"klass": "unavail", "preis": None}
+        core.scan_einen = fake_scan
+        r = dict(treffer)
+        core.verify_treffer({"name": "Amazon DE", "urls": ["https://x"]}, r, pause=0)
+        check("Verify zweiter Abruf ohne Cache", gesehen.get("force"), True)
+        check("Verify stuft weg", (r.get("klass"), r.get("verify")), ("unavail", "weg"))
+        core.scan_einen = lambda h, cancel=None, force=False: {"klass": "hit", "preis": 799.0}
+        r = dict(treffer)
+        core.verify_treffer({"name": "Amazon DE", "urls": ["https://x"]}, r, pause=0)
+        check("Verify bestaetigt", r.get("verify"), "bestaetigt")
+    finally:
+        core.scan_einen = alt_scan
+
+    class _S:
+        def __init__(self, **kw): self.d = kw
+        def get(self, k, d=None): return self.d.get(k, d)
+    r = {"klass": "hit", "preis": 799.0, "haendler": "Amazon DE",
+         "sofort": True, "condition": "new"}
+    s_aus = _S(alarm_nur_bestaetigt=False)
+    s_an = _S(alarm_nur_bestaetigt=True)
+    check("Alarm ohne Verifikation erlaubt", core.alarm_erlaubt(dict(r), None, s_aus), True)
+    check("Alarm nur bestaetigt blockt ungeprueft",
+          core.alarm_erlaubt(dict(r), None, s_an), False)
+    check("Alarm nur bestaetigt laesst bestaetigt durch",
+          core.alarm_erlaubt({**r, "verify": "bestaetigt"}, None, s_an), True)
+    check("Alarm nur bestaetigt blockt weg",
+          core.alarm_erlaubt({**r, "verify": "weg"}, None, s_an), False)
+
+    aktiv = {"Amazon DE", "Otto DE", "PS Direct DE", "Unbekannt"}
+    hot = core.schnellscan_haendler(core.HAENDLER, aktiv)
+    check("Schnellscan nur aktive Hot-Shops",
+          sorted(h["name"] for h in hot), ["Amazon DE", "Otto DE"])
+    check("Schnellscan ohne Auswahl",
+          len(core.schnellscan_haendler(core.HAENDLER)), len(core.HOT_SHOPS))
+    check("Schnellscan unbekannter Shop ignoriert",
+          all(h["name"] in {x["name"] for x in core.HAENDLER}
+              for h in core.schnellscan_haendler(core.HAENDLER)), True)
+
+    main_q = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    svc_q = open(os.path.join(ROOT, "service.py"), encoding="utf-8").read()
+    check("App sendet Webhook", "sende_webhook_alarm" in main_q, True)
+    check("App verifiziert Treffer", "verify_treffer(futs[f]" in main_q, True)
+    check("App zeigt Verifikation", "VERIFIKATION" in main_q, True)
+    check("App hat Schnellscan", "SCHNELLSCAN" in main_q, True)
+    check("Dienst sendet Webhook", "sende_webhook_alarm" in svc_q, True)
+    check("Dienst verifiziert Treffer", "verify_treffer" in svc_q, True)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -1150,6 +1279,7 @@ if __name__ == "__main__":
         adaptive_boot_tests()
         fixture_tests()
         capture_helper_tests()
+        v13_tests()
         spec_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.

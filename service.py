@@ -215,6 +215,15 @@ def main():
             ergebnisse = []
 
         if ergebnisse:
+            # Auch im Hintergrund wird ein Treffer gegengeprueft. Ohne diesen
+            # zweiten Abruf waere "NUR BESTAETIGTE" dort wirkungslos.
+            nach_name = {h["name"]: h for h in haendler}
+            for r in list(ergebnisse):
+                if r.get("klass") == "hit" and not core.ist_gebraucht(r.get("condition")):
+                    try:
+                        core.verify_treffer(nach_name.get(r.get("haendler")), r)
+                    except Exception as e:
+                        print("[BG] verify:", e)
             hist = core.History()
             neu = []
             for r in core.treffer_aus(ergebnisse):
@@ -244,6 +253,10 @@ def main():
                             if r.get("_restock") else
                             r["haendler"] + " - jetzt verfuegbar")
                     _benachrichtige(titel, text, r.get("url"))
+                    try:
+                        core.sende_webhook_alarm(r, settings, titel, text)
+                    except Exception as e:
+                        print("[BG] webhook:", e)
                 _benachrichtige_summary(neu[:5])
             print("[BG] %s geprueft, %s Treffer, %s neu"
                   % (len(ergebnisse), len(core.treffer_aus(ergebnisse)), len(neu)))
