@@ -168,6 +168,7 @@ tools/release_notes.sh        Release-Beschreibung (Änderungen, Installation, S
 tools/ci_sign_apk.sh          signiert die APK mit dem festen Release-Schlüssel
 tools/ci_log_failure.sh       zeigt bei einem CI-Fehler den Buildozer-Log
 docs/screenshots/             Screenshots und Scan-GIF fuer dieses README
+docs/KONZEPT.md               Produktkonzept, Roadmap und bewusste Nicht-Ziele
 .github/workflows/ci.yml      Push/PR -> Shop-Config, Logiktests, Kivy-Smoke (4 Groessen)
 .github/workflows/release.yml Tag v* -> APK als Release-Asset
 LICENSE                       MIT-Lizenz
