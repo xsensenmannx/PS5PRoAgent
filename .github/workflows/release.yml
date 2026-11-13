@@ -46,8 +46,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            xvfb libgl1 libgl1-mesa-dri libglu1-mesa libegl1 libgles2 libmtdev1
-          python -m venv /tmp/ps5pro-kivy
+            xvfb python3-venv libgl1 libgl1-mesa-dri libglu1-mesa libegl1 libgles2 libmtdev1
+          # Bewusst das System-Python fuer den UI-Smoke: Der App-Build selbst
+          # wird mit dem gepinnten Python 3.11.9 gebaut und getestet.
+          /usr/bin/python3 -m venv /tmp/ps5pro-kivy
           /tmp/ps5pro-kivy/bin/pip install --quiet "kivy[base]==2.3.1"
           xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" \
             /tmp/ps5pro-kivy/bin/python tools/kivy_smoke.py
