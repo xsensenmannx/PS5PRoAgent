@@ -162,6 +162,10 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v3.3.1** – Layout-Patch (versionCode 13): Der BOT-SCHUTZ-Hinweis steht
+  auf einer eigenen vollbreiten Zeile und bleibt auch auf schmalen Displays
+  vollständig sichtbar; die breitere Preisspalte verhindert abgeschnittene
+  Beträge wie `1.299,00 €`. Enthält den vollständigen Stand aus v3.3.
 * **v3.3** – Kompakte Trefferliste (versionCode 12): vertikale Zeilen statt
   breiter Karten, dadurch mehrere Treffer gleichzeitig sichtbar; Preis, Status
   und Preisänderung stehen rechts. Der BOT-SCHUTZ-Hinweis bleibt sichtbar.

@@ -34,7 +34,9 @@ Config.set("graphics", "resizable", "0")
 
 from kivy.app import App  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
+from kivy.core.text import Label as CoreLabel  # noqa: E402
 from kivy.core.window import Window  # noqa: E402
+from kivy.uix.layout import Layout  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -220,7 +222,7 @@ class SmokeApp(App):
     def challenge_hint(self):
         result = {
             "haendler": "Amazon DE", "land": "DE", "zeit": "12:00",
-            "preis": None, "klass": "challenge", "condition": None,
+            "preis": 1299.0, "klass": "challenge", "condition": None,
             "seller": None, "sofort": None, "signal": None,
             "verfuegbarkeit": None, "url": "https://example.invalid/challenge",
         }
@@ -230,6 +232,33 @@ class SmokeApp(App):
               "SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT" in text, True)
         check("Trefferliste: vertikal", self.ui.results_row.orientation, "vertical")
         check("Trefferliste: kompakte Zeile", card.height <= main.dp(80), True)
+
+        # Die Anforderung nennt ausdruecklich die alte 246-dp-Breite und
+        # 156-dp-Hoehe. Beides ist heute nicht mehr die Standardkarte, aber
+        # der Stressfall muss trotzdem ohne abgeschnittenen Hinweis und ohne
+        # verdrängten Preis funktionieren.
+        card.size_hint = (None, None)
+        card.width = main.dp(246)
+        card.height = main.dp(156)
+        card.do_layout()
+        for layout in [w for w in card.walk() if isinstance(w, Layout)]:
+            layout.do_layout()
+        hint = next(w for w in card.walk()
+                    if isinstance(w, main.Label) and "SHOP-CHALLENGE" in str(w.text))
+        price = next(w for w in card.walk()
+                     if isinstance(w, main.Label) and "1.299" in str(w.text))
+
+        def natural_width(label):
+            c = CoreLabel(text=label.text, font_name=label.font_name,
+                          font_size=label.font_size, bold=label.bold,
+                          markup=label.markup)
+            c.refresh()
+            return c.texture.size[0]
+
+        check("BOT-SCHUTZ: Hinweis passt bei 246 dp",
+              hint.width >= natural_width(hint), True)
+        check("BOT-SCHUTZ: Preis passt bei 246 dp",
+              price.width >= natural_width(price), True)
 
     def result_list(self):
         basis = {"land": "DE", "zeit": "12:00", "condition": "new",

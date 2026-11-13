@@ -58,7 +58,7 @@ eigenes.
    **Beim ersten Lauf nach einem Toolchain-Wechsel auf `False` lassen.**
 6. Zelle 5: baut die APK. 10–40 Minuten, je nach Cache. Zeilen mit
    `[INFO]: Building ...` sind normal; am Ende steht `Exit-Code: 0` und ein Pfad
-   `bin/ps5prosearchagent-3.3-arm64-v8a-debug.apk`.
+   `bin/ps5prosearchagent-3.3.1-arm64-v8a-debug.apk`.
 7. Zelle 6: lädt die APK herunter.
 
 **Wenn Colab die Sitzung trennt** (Inaktivität, Verbindungsabbruch, 12-Stunden-Limit):
@@ -246,8 +246,8 @@ Nur nötig, wenn die App in den Store soll. Sideloading braucht das nicht.
 4. `bin/*.aab` im Play Console hochladen. Keystore und Passwörter niemals committen.
 
 Für den GitHub-Actions-Weg werden die vier Secrets aus [PLAY_STORE.md](PLAY_STORE.md)
-benötigt. Der v3.3-Stand kann nach dem Setzen der Secrets durch **Actions → Release
-→ v3.3 → Re-run all jobs** als AAB am bestehenden Release ergänzt werden.
+benötigt. Der v3.3.1-Stand kann nach dem Setzen der Secrets durch **Actions → Release
+→ v3.3.1 → Re-run all jobs** als AAB am bestehenden Release ergänzt werden.
 
 ---
 

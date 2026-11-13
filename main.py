@@ -925,11 +925,11 @@ class ResultCard(ButtonBehavior, BoxLayout):
         self._serie=serie or []
         self._down=None; self._moved=False
         self._detail_cb=detail_cb; self._long_event=None; self._long_done=False
-        self.orientation="horizontal"
+        self.orientation="vertical"
         self.size_hint=(1,None)
         self.height=dp(68) if result.get("klass")=="challenge" else dp(52)
         self.padding=(dp(9),dp(6))
-        self.spacing=dp(7)
+        self.spacing=dp(2)
         self._build()
         self.bind(pos=self._redraw,size=self._redraw,state=self._redraw)
         if is_new:
@@ -970,7 +970,8 @@ class ResultCard(ButtonBehavior, BoxLayout):
 
         # Kompakte Zeile: Marke, Haendler/Meta, Preis/Status. Die alte
         # 156-dp-Karte zeigte auf dem Telefon nur einen Treffer pro Wisch.
-        self.add_widget(BrandTile(r["haendler"],size_hint=(None,1),width=dp(28)))
+        content=BoxLayout(orientation="horizontal",spacing=dp(7))
+        content.add_widget(BrandTile(r["haendler"],size_hint=(None,1),width=dp(28)))
 
         info=BoxLayout(orientation="vertical",spacing=dp(0))
         name_str=re.sub(r"\s+(DE|AT)$","",r["haendler"]).strip()
@@ -993,26 +994,16 @@ class ResultCard(ButtonBehavior, BoxLayout):
         m.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         info.add_widget(m)
 
-        # BOT-SCHUTZ ist kein Fehler der App: Der Shop verlangt eine
-        # Challenge. Die App umgeht sie bewusst nicht und sagt das hier klar.
-        if r["klass"]=="challenge":
-            hint=Label(text="SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT",
-                       color=PS1_YELLOW,font_size=sp(7.8),font_name=SST_FONT,
-                       halign="left",valign="middle",
-                       shorten=True,shorten_from="right",
-                       size_hint_y=None,height=dp(14))
-            hint.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-            info.add_widget(hint)
-        self.add_widget(info)
+        content.add_widget(info)
 
         right=BoxLayout(orientation="vertical",size_hint_x=None,
-                        width=dp(100),spacing=dp(0))
+                        width=dp(126),spacing=dp(0))
         if r["preis"] is not None:
             p_txt=format_preis(r["preis"]); p_col=PS1_TEXT
         else:
             p_txt="—"; p_col=PS1_GREY
         p=Label(text=f"[b]{p_txt}[/b]",markup=True,color=p_col,
-                font_size=sp(18),font_name=SST_FONT,
+                font_size=sp(17),font_name=SST_FONT,
                 halign="right",valign="middle",
                 size_hint_y=None,height=dp(26))
         p.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
@@ -1046,7 +1037,21 @@ class ResultCard(ButtonBehavior, BoxLayout):
             d.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             srow.add_widget(d)
         right.add_widget(srow)
-        self.add_widget(right)
+        content.add_widget(right)
+        self.add_widget(content)
+
+        # BOT-SCHUTZ ist kein Fehler der App: Der Shop verlangt eine
+        # Challenge. Die App umgeht sie bewusst nicht. Der Hinweis bekommt
+        # eine eigene Zeile, damit er auch auf schmalen Displays nicht
+        # abgeschnitten wird und die Preisspalte unberuehrt bleibt.
+        if r["klass"]=="challenge":
+            hint=Label(text="SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT",
+                       color=PS1_YELLOW,font_size=sp(7.8),font_name=SST_FONT,
+                       halign="left",valign="middle",
+                       shorten=True,shorten_from="right",
+                       size_hint=(1,None),height=dp(14))
+            hint.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            self.add_widget(hint)
 
     def on_touch_down(self,touch):
         if self.collide_point(*touch.pos):
