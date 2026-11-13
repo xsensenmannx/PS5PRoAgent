@@ -90,6 +90,8 @@ PS1_RED      = get_color_from_hex("#d80000")
 PS1_GREEN    = get_color_from_hex("#00a04a")
 PS1_PINK     = get_color_from_hex("#e83a8a")
 PS1_YELLOW   = get_color_from_hex("#ffcc00")
+PS1_CYAN     = get_color_from_hex("#79d7ff")
+PS1_ICE      = get_color_from_hex("#d8e7f2")
 
 PS_TRIANGLE = (0.11,0.66,0.30,1)
 PS_CIRCLE   = (0.90,0.10,0.10,1)
@@ -475,6 +477,24 @@ class RadarWidget(Widget):
                     size_hint=(None,None),size=(dp(24),dp(10)),opacity=0)
             l.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             self.add_widget(l); self._bls.append((deg,l))
+
+        # HUD unten im sichtbaren Radarbereich: ruhig, aber eindeutig als
+        # Systemanzeige lesbar. Die Labels liegen ueber dem Canvas und werden
+        # bei jedem Frame mit der freien Radarflaeche synchronisiert.
+        self._hud_l=Label(text="",color=RADAR_TICK,font_size=sp(8),
+                          bold=True,font_name=SST_FONT,halign="left",valign="middle",
+                          size_hint=(None,None),size=(dp(170),dp(12)),opacity=0)
+        self._hud_r=Label(text="TARGET · 2 TB",color=RADAR_TXT,font_size=sp(8),
+                          bold=True,font_name=SST_FONT,halign="right",valign="middle",
+                          size_hint=(None,None),size=(dp(120),dp(12)),opacity=0)
+        for _l in (self._hud_l,self._hud_r):
+            _l.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            self.add_widget(_l)
+
+        self._stars=[{"x":random.uniform(0.08,0.92),
+                      "y":random.uniform(0.08,0.92),
+                      "a":random.uniform(0.10,0.34),
+                      "p":random.uniform(0,6.28)} for _ in range(18)]
         self._acc=0.0; self._paused=False
         Clock.schedule_interval(self._tick,1/30)
 
@@ -515,16 +535,22 @@ class RadarWidget(Widget):
         uh=self.height-self.reserve_bottom-self.reserve_top
         if uh<dp(40) or self.width<dp(40):
             for _,l in self._bls: l.opacity=0
+            self._hud_l.opacity=self._hud_r.opacity=0
             return
         cx=self.width/2; cy=self.reserve_bottom+uh/2
         mr=min(self.width/2,uh/2)-dp(16)
         if mr<dp(40):
             for _,l in self._bls: l.opacity=0
+            self._hud_l.opacity=self._hud_r.opacity=0
             return
         now=time.time()
         with self.canvas:
             Color(*RADAR_BG); Rectangle(pos=(0,0),size=(self.width,self.height))
             Color(*RADAR_DISH); Ellipse(pos=(cx-mr,cy-mr),size=(mr*2,mr*2))
+            # Sehr weicher Aussenring; gibt dem Radar Tiefe, ohne den Sweep
+            # oder die Treffer zu ueberstrahlen.
+            Color(0.16,0.38,0.62,0.12)
+            Ellipse(pos=(cx-mr-dp(10),cy-mr-dp(10)),size=(mr*2+dp(20),mr*2+dp(20)))
             Color(RADAR_RING[0],RADAR_RING[1],RADAR_RING[2],0.75)
             Line(circle=(cx,cy,mr+dp(4)),width=dp(1.5))
             Color(RADAR_RING[0],RADAR_RING[1],RADAR_RING[2],0.95)
@@ -542,6 +568,19 @@ class RadarWidget(Widget):
                 Line(points=[cx+inn*math.cos(a),cy+inn*math.sin(a),
                              cx+mr*math.cos(a),cy+mr*math.sin(a)],
                      width=dp(1.8 if mj else (1.2 if md else 0.7)))
+            # Langsame Sonar-Pings: zwei weiche Ringe laufen nach aussen.
+            # Waehrend eines Scans schneller, im Leerlauf kaum merklich.
+            cycle=(now*(2.4 if self.scanning else 0.55))%1.0
+            for off in (0.0,0.5):
+                p=(cycle+off)%1.0
+                rr=mr*(0.12+0.86*p)
+                Color(0.32,0.65,1.0,0.22*(1.0-p))
+                Line(circle=(cx,cy,rr),width=dp(1.1))
+            for st in self._stars:
+                sx=cx+(st["x"]-0.5)*mr*1.55; sy=cy+(st["y"]-0.5)*mr*1.55
+                tw=0.65+0.35*math.sin(now*1.7+st["p"])
+                Color(0.55,0.78,1.0,st["a"]*tw)
+                Ellipse(pos=(sx-dp(1),sy-dp(1)),size=(dp(2),dp(2)))
             for i in range(30):
                 fr=(i+1)/30; a=math.radians(90.0-self.angle+fr*150); k=(1-fr)
                 Color(0.24*k,0.55*k,0.95*k,0.45*k)
@@ -567,6 +606,12 @@ class RadarWidget(Widget):
                     Line(circle=(bx,by,dp(12)+pu*dp(8)),width=dp(1.4))
                     Color(co[0],co[1],co[2],0.18)
                     Ellipse(pos=(bx-dp(10),by-dp(10)),size=(dp(20),dp(20)))
+                    # Zielmarke: vier kurze Winkel um den Treffer.
+                    d=dp(11); arm=dp(4)
+                    for sx,sy in ((1,1),(-1,1),(1,-1),(-1,-1)):
+                        Color(co[0],co[1],co[2],0.75)
+                        Line(points=[bx+sx*d,by+sy*d,bx+sx*(d-arm),by+sy*d],width=dp(1.1))
+                        Line(points=[bx+sx*d,by+sy*d,bx+sx*d,by+sy*(d-arm)],width=dp(1.1))
                     r=dp(6)
                 else: r=dp(4)
                 Color(co[0],co[1],co[2],b.get("intensity",1.0))
@@ -581,10 +626,21 @@ class RadarWidget(Widget):
             Ellipse(pos=(cx-dp(10)*pu,cy-dp(10)*pu),size=(dp(20)*pu,dp(20)*pu))
             Color(*PS1_SILVER); Ellipse(pos=(cx-dp(3),cy-dp(3)),size=(dp(6),dp(6)))
             Color(*PS1_TEXT); Ellipse(pos=(cx-dp(1.5),cy-dp(1.5)),size=(dp(3),dp(3)))
+            # Reticle um das Zentrum: klar, technisch, nicht verspielt.
+            for sx,sy in ((1,1),(-1,1),(1,-1),(-1,-1)):
+                Color(0.62,0.82,1.0,0.55)
+                Line(points=[cx+sx*dp(16),cy+sx*0+sy*dp(16),
+                             cx+sx*dp(9),cy+sy*dp(9)],width=dp(1.0))
         for deg,l in self._bls:
             a=math.radians(90-deg)
             l.pos=(cx+(mr+dp(11))*math.cos(a)-l.width/2,
                     cy+(mr+dp(11))*math.sin(a)-l.height/2); l.opacity=1
+        self._hud_l.text=(f"SCANNING · {len(self.blips)}/{len(HAENDLER)}"
+                          if self.scanning else f"{len(HAENDLER)} HÄNDLER · DE + AT")
+        self._hud_l.pos=(self.x+dp(14), self.reserve_bottom+dp(8))
+        self._hud_r.pos=(self.right-dp(14)-self._hud_r.width,
+                         self.reserve_bottom+dp(8))
+        self._hud_l.opacity=1; self._hud_r.opacity=1
 # ══════════ PS1 BUTTON ══════════
 class PS1Button(Button):
     """Flat 90s console button with a bevel instead of Kivy's pillow theme."""
@@ -715,7 +771,7 @@ class LogoWidget(FloatLayout):
                          color=PS1_SILVER,font_size=sp(18),font_name=SST_FONT,
                          halign="left",valign="middle",
                          shorten=True,shorten_from="right")
-        self.sub=Label(text="S E A R C H   A G E N T",color=PS1_GREY,
+        self.sub=Label(text="S E A R C H   A G E N T   ·   2 T B",color=PS1_GREY,
                        font_size=sp(8.5),font_name=SST_FONT,bold=True,
                        halign="left",valign="middle")
         self.title.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
@@ -801,24 +857,24 @@ class Sparkline(Widget):
             Line(points=pts,width=dp(1.2))
 
 class ResultCard(ButtonBehavior, BoxLayout):
-    def __init__(self,result,is_new,prev,serie=None,detail_cb=None,**kw):
+    def __init__(self,result,is_new,prev,serie=None,detail_cb=None,best=False,**kw):
         super().__init__(**kw)
         self.result=result
-        self._is_new=is_new; self._prev=prev
+        self._is_new=is_new; self._prev=prev; self._best=best
         self._serie=serie or []
         self._down=None; self._moved=False
         self._detail_cb=detail_cb; self._long_event=None; self._long_done=False
         challenge=result.get("klass")=="challenge"
         self.orientation="vertical" if challenge else "horizontal"
         self.size_hint=(1,None)
-        self.height=dp(69) if challenge else dp(52)
+        self.height=dp(69) if challenge else dp(56)
         self.padding=(dp(9),dp(6))
         self.spacing=dp(2 if challenge else 7)
         self._build()
         self.bind(pos=self._redraw,size=self._redraw,state=self._redraw)
-        if is_new:
+        if is_new or result.get("_restock"):
             self.opacity=0
-            Animation(opacity=1,d=0.25).start(self)
+            Animation(opacity=1,d=0.28).start(self)
         Clock.schedule_once(self._redraw,0)
 
     def _redraw(self,*_):
@@ -827,20 +883,30 @@ class ResultCard(ButtonBehavior, BoxLayout):
         r=self.result
         co=CARD_STATUS.get(r["klass"],PS1_GREY)
         pressed=(getattr(self,"state","normal")=="down")
-        bg=PS1_CARD_HI if pressed else PS1_CARD
+        top=PS1_CARD_HI
         with self.canvas.before:
-            # drop shadow
+            # Drop shadow plus a two-step metal gradient instead of a flat
+            # rectangle. The contrast stays subtle, so the price remains king.
             Color(0,0,0,0.55)
             Rectangle(pos=(self.x-dp(1),self.y-dp(1)),
                       size=(self.width+dp(2),self.height+dp(2)))
-            Color(*bg); Rectangle(pos=self.pos,size=self.size)
+            Color(*top); Rectangle(pos=(self.x,self.y+self.height*0.46),
+                                   size=(self.width,self.height*0.54))
+            Color(*PS1_CARD); Rectangle(pos=(self.x,self.y),
+                                        size=(self.width,self.height*0.46))
             # 90s bevel
-            Color(1,1,1,0.12 if not pressed else 0.18)
+            Color(1,1,1,0.18 if self._best else 0.12)
             Line(points=[self.x,self.top-dp(1),self.right,self.top-dp(1)],width=dp(1))
             Color(0,0,0,0.55)
             Line(points=[self.x,self.y+dp(1),self.right,self.y+dp(1)],width=dp(1))
             # status edge
             Color(*co); Rectangle(pos=(self.x,self.y),size=(dp(3),self.height))
+            if self._best:
+                Color(*PS1_CYAN); Rectangle(pos=(self.x+dp(3),self.top-dp(2)),
+                                             size=(self.width-dp(3),dp(2)))
+            elif r.get("_restock"):
+                Color(*PS1_CYAN); Rectangle(pos=(self.x+dp(3),self.top-dp(2)),
+                                             size=(self.width-dp(3),dp(1)))
             if r["klass"]=="hit":
                 Color(co[0],co[1],co[2],0.55)
                 Line(rectangle=(self.x,self.y,self.width,self.height),width=dp(1))
@@ -889,13 +955,13 @@ class ResultCard(ButtonBehavior, BoxLayout):
         right=BoxLayout(orientation="vertical",size_hint_x=None,
                         width=dp(134),spacing=dp(0))
         if r["preis"] is not None:
-            p_txt=format_preis(r["preis"]); p_col=PS1_TEXT
+            p_txt=format_preis(r["preis"]); p_col=PS1_ICE if self._best else PS1_TEXT
         else:
             p_txt="—"; p_col=PS1_GREY
         p=Label(text=f"[b]{p_txt}[/b]",markup=True,color=p_col,
                 font_size=sp(16.5),font_name=SST_FONT,
                 halign="right",valign="middle",
-                size_hint_y=None,height=dp(26))
+                size_hint_y=None,height=dp(28))
         p.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         right.add_widget(p)
 
@@ -910,6 +976,12 @@ class ResultCard(ButtonBehavior, BoxLayout):
                 shorten=True,shorten_from="right")
         s.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         srow.add_widget(s)
+        if self._best:
+            b=Label(text="BEST",color=PS1_CYAN,font_size=sp(7.5),bold=True,
+                    font_name=SST_FONT,halign="right",valign="middle",
+                    size_hint_x=None,width=dp(30))
+            b.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            srow.add_widget(b)
 
         d_txt=""; d_col=PS1_GREY
         if r["preis"] is not None and self._prev is not None:
@@ -1135,6 +1207,29 @@ class MainUI(FloatLayout):
         self.radar=RadarWidget(size_hint=(1,1),pos_hint={"x":0,"y":0})
         self.add_widget(self.radar)
 
+        # Radar-HUD: liegt bewusst ausserhalb des Radar-Canvas, damit es auf
+        # jeder Displayhoehe lesbar bleibt und nicht hinter der Trefferleiste
+        # verschwindet.
+        self.radar_hud=BoxLayout(orientation="horizontal",size_hint=(None,None),
+                                 height=dp(17),padding=(dp(5),0),spacing=dp(4))
+        with self.radar_hud.canvas.before:
+            Color(0.025,0.045,0.075,0.82); self._rhud_bg=Rectangle(pos=(0,0),size=(1,1))
+            Color(RADAR_RING[0],RADAR_RING[1],RADAR_RING[2],0.55)
+            self._rhud_line=Rectangle(pos=(0,0),size=(1,1))
+        self.radar_hud.bind(pos=self._sync_radar_hud,size=self._sync_radar_hud)
+        self.radar_hud_left=Label(text="",color=RADAR_TICK,font_size=sp(7.8),
+                                  bold=True,font_name=SST_FONT,halign="left",
+                                  valign="middle",shorten=True,shorten_from="right")
+        self.radar_hud_right=Label(text="TARGET · 2 TB",color=RADAR_TXT,
+                                   font_size=sp(7.8),bold=True,font_name=SST_FONT,
+                                   halign="right",valign="middle",
+                                   size_hint_x=None,width=dp(92))
+        for _l in (self.radar_hud_left,self.radar_hud_right):
+            _l.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        self.radar_hud.add_widget(self.radar_hud_left)
+        self.radar_hud.add_widget(self.radar_hud_right)
+        self.add_widget(self.radar_hud)
+
         # PS1 title bar
         self.logo=LogoWidget(); self.logo.pos_hint={"x":0,"top":1}
         self.add_widget(self.logo)
@@ -1262,6 +1357,12 @@ class MainUI(FloatLayout):
 
         self.chip_scroll.add_widget(chips)
         self.controls.add_widget(self.chip_scroll)
+
+        self.setup_btn=PS1Button(text="SETUP",accent=PS1_CYAN,
+                                  size_hint=(None,1),width=dp(62),
+                                  font_size=sp(9))
+        self.setup_btn.bind(on_release=lambda *_:self._open_setup())
+        self.controls.add_widget(self.setup_btn)
         self.add_widget(self.controls)
 
         mp_txt="offen" if self.max_preis is None else f"{int(self.max_preis)} €"
@@ -1300,6 +1401,21 @@ class MainUI(FloatLayout):
         self._ctrl_top.size=(self.controls.width,dp(1))
         self._ctrl_bot.pos=(self.controls.x,self.controls.y)
         self._ctrl_bot.size=(self.controls.width,dp(1))
+    def _sync_radar_hud(self,*_):
+        if not hasattr(self,"_rhud_bg"): return
+        self._rhud_bg.pos=self.radar_hud.pos
+        self._rhud_bg.size=self.radar_hud.size
+        self._rhud_line.pos=(self.radar_hud.x,self.radar_hud.y)
+        self._rhud_line.size=(self.radar_hud.width,dp(1))
+    def _update_radar_hud(self):
+        if not hasattr(self,"radar_hud_left"): return
+        if self.scanning:
+            self.radar_hud_left.text=(f"SCANNING · {self._scan_done}/{self._scan_total}"
+                                      if self._scan_total else "SCANNING")
+            self.radar_hud_left.color=PS1_CYAN
+        else:
+            self.radar_hud_left.text=f"{len(HAENDLER)} HÄNDLER · DE + AT"
+            self.radar_hud_left.color=RADAR_TICK
 
     def _on_window_size(self,*_):
         if self._resize_event is not None: Clock.unschedule(self._resize_event)
@@ -1347,6 +1463,13 @@ class MainUI(FloatLayout):
             self.controls.size=(g["usable_w"],g["controls_h"])
             self.results_panel.pos=(g["panel_x"],g["panel_y"])
             self.results_panel.size=(g["panel_w"],g["results_h"])
+            if g["wide"]:
+                self.radar_hud.pos=(left_in+dp(8),g["panel_y"]+dp(2))
+                self.radar_hud.size=(max(dp(80),g["panel_x"]-dp(16)),dp(17))
+            else:
+                self.radar_hud.pos=(left_in+dp(8),g["panel_y"]+g["results_h"])
+                self.radar_hud.size=(max(dp(80),g["usable_w"]-dp(16)),dp(17))
+            self._update_radar_hud()
             if g["wide"]:
                 self.radar.size_hint=(None,None)
                 self.radar.pos=(0,0); self.radar.size=(max(dp(1),g["radar_w"]),h)
@@ -1468,17 +1591,22 @@ class MainUI(FloatLayout):
     def _show_onboarding(self,*_):
         """Einmalige kurze Erklaerung der drei wichtigsten Gesten."""
         self.settings.set("onboarded",True)
-        box=BoxLayout(orientation="vertical",spacing=dp(7),padding=dp(13))
-        box.add_widget(Label(text="[b]WILLKOMMEN[/b]",markup=True,color=PS1_YELLOW,
-                             font_size=sp(18),font_name=SST_FONT,
-                             size_hint_y=None,height=dp(28)))
-        box.add_widget(Label(text="PS5 PRO 2 TB RADAR",color=PS1_SILVER,
-                             font_size=sp(10),font_name=SST_FONT,
-                             size_hint_y=None,height=dp(18)))
-        text=("• [b]SCAN[/b] fragt alle Shops ab.\n"
-              "• [b]LANGES TIPPEN[/b] auf eine Karte zeigt Preisverlauf, Zustand und Verkäufer.\n"
-              "• [b]SHOPS[/b] zeigt, welcher Händler gerade nicht erreichbar ist.\n"
-              "• [b]REGELN[/b] steuert Tiefstpreis, Ruhezeit und Händler-Stummschaltung.")
+        box=BoxLayout(orientation="vertical",spacing=dp(6),padding=dp(14))
+        head=BoxLayout(size_hint_y=None,height=dp(38),spacing=dp(9))
+        head.add_widget(PSMark(size_hint=(None,None),size=(dp(30),dp(30))))
+        ht=BoxLayout(orientation="vertical",spacing=0)
+        ht.add_widget(Label(text="[b]SYSTEM BEREIT[/b]",markup=True,color=PS1_ICE,
+                            font_size=sp(17),font_name=SST_FONT,
+                            size_hint_y=None,height=dp(22)))
+        ht.add_widget(Label(text="PS5 PRO 2 TB  ·  LIMITED SEARCH AGENT",color=PS1_CYAN,
+                            font_size=sp(7.8),bold=True,font_name=SST_FONT,
+                            size_hint_y=None,height=dp(13)))
+        head.add_widget(ht); box.add_widget(head)
+        box.add_widget(PSShapesWidget(size=(dp(100),dp(18))))
+        text=("[b]SCAN[/b]  fragt alle Shops gleichzeitig ab.\n"
+              "[b]LANGES TIPPEN[/b]  zeigt Preisverlauf, Zustand und Verkäufer.\n"
+              "[b]SHOPS[/b]  zeigt, welcher Händler gerade nicht erreichbar ist.\n"
+              "[b]REGELN[/b]  steuert Tiefstpreis, Ruhezeit und Stummschaltung.")
         m=Label(text=text,markup=True,color=PS1_GREY,font_size=sp(9.5),
                 font_name=SST_FONT,halign="left",valign="top")
         m.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); box.add_widget(m)
@@ -1487,8 +1615,8 @@ class MainUI(FloatLayout):
         rules=PS1Button(text="ALARM EINRICHTEN",accent=PS1_PINK,font_size=sp(9.5))
         later=PS1Button(text="SPÄTER",accent=PS1_SILVER,font_size=sp(9.5))
         p=Popup(title="",content=box,size_hint=(None,None),
-                width=min(dp(520),Window.width*0.93),height=dp(300),
-                background_color=(0.08,0.08,0.09,1),separator_height=0)
+                width=min(dp(520),Window.width*0.93),height=dp(330),
+                background_color=(0.045,0.05,0.062,0.99),separator_height=0)
         def go(start_scan=False,open_rules=False):
             p.dismiss()
             if start_scan and not self.scanning: self._scan_start()
@@ -1498,6 +1626,97 @@ class MainUI(FloatLayout):
         later.bind(on_release=lambda *_:go())
         row.add_widget(start); row.add_widget(rules); row.add_widget(later)
         box.add_widget(row); p.open()
+
+    def _open_setup(self):
+        """Zentrale Systemkonfiguration - die ruhige Schaltzentrale."""
+        haptic(0.02)
+        box=BoxLayout(orientation="vertical",spacing=dp(6),padding=dp(10))
+        head=BoxLayout(size_hint_y=None,height=dp(38),spacing=dp(8))
+        mark=PSMark(size_hint=(None,None),size=(dp(30),dp(30)))
+        head.add_widget(mark)
+        titles=BoxLayout(orientation="vertical",spacing=0)
+        t=Label(text="[b]SYSTEM CONFIG[/b]",markup=True,color=PS1_ICE,
+                font_size=sp(15),font_name=SST_FONT,halign="left",valign="middle",
+                size_hint_y=None,height=dp(22))
+        sub=Label(text="PS5 PRO 2 TB · FINAL EDITION",color=PS1_CYAN,
+                  font_size=sp(8),bold=True,font_name=SST_FONT,
+                  halign="left",valign="middle",size_hint_y=None,height=dp(14))
+        for x in (t,sub): x.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        titles.add_widget(t); titles.add_widget(sub); head.add_widget(titles)
+        box.add_widget(head)
+
+        summ=Label(text=(f"{len(self.active_haendler)}/{len(HAENDLER)} HÄNDLER AKTIV   ·   "
+                          f"{self._max_text()}   ·   {self._sort_text()}"),
+                   color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
+                   halign="left",valign="middle",shorten=True,shorten_from="right",
+                   size_hint_y=None,height=dp(16))
+        summ.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); box.add_widget(summ)
+
+        def section(title):
+            l=Label(text=title,color=PS1_CYAN,font_size=sp(8.5),bold=True,
+                    font_name=SST_FONT,halign="left",valign="middle",
+                    size_hint_y=None,height=dp(18))
+            l.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            box.add_widget(l)
+
+        def action(label,value,cb,accent):
+            b=PS1Button(text="",accent=accent,font_size=sp(9.5),
+                        size_hint_y=None,height=dp(34))
+            def sync():
+                try: b.text=f"{label}   ·   {value()}"
+                except Exception: b.text=label
+            def go(*_):
+                try: cb()
+                except Exception as e: print("[Setup]",e)
+                sync()
+            b.bind(on_release=go); sync(); box.add_widget(b)
+            return b
+
+        ref={"p":None}
+        section("SCAN")
+        action("AUTO-SCAN",lambda: "AN" if self.auto_scan else "AUS",
+               self._toggle_auto,PS1_GREEN)
+        action("INTERVALL",self._interval_text,self._cycle_interval,PS1_PINK)
+        action("ALARM",lambda: "AN" if self.notify_enabled else "AUS",
+               self._toggle_notify,PS1_PINK)
+
+        section("TREFFER")
+        action("MAX-PREIS",lambda: ("OFFEN" if self.max_preis is None
+                                     else f"{int(self.max_preis)} €"),
+               self._cycle_max_preis,PS1_RED)
+        action("SORTIERUNG",lambda: self.sort_mode.upper(),self._cycle_sort,PS1_BLUE)
+
+        section("SYSTEM")
+        action("HÄNDLER",lambda: str(len(self.active_haendler)),
+               lambda: (ref["p"] and ref["p"].dismiss(),
+                        Clock.schedule_once(lambda dt:self._open_haendler_picker(),0.16)),
+               PS1_BLUE)
+        action("ALARM-REGELN",lambda: "ÖFFNEN",
+               lambda: (ref["p"] and ref["p"].dismiss(),
+                        Clock.schedule_once(lambda dt:self._open_alarm_rules(),0.16)),
+               PS1_YELLOW)
+        action("SHOP-HEALTH",lambda: "ÖFFNEN",
+               lambda: (ref["p"] and ref["p"].dismiss(),
+                        Clock.schedule_once(lambda dt:self._open_health(),0.16)),
+               PS1_BLUE)
+        action("TESTALARM",lambda: "SENDEN",self._send_test_alarm,PS1_CYAN)
+
+        box.size_hint=(1,None)
+        box.bind(minimum_height=box.setter("height"))
+        sv=ScrollView(bar_width=dp(4),do_scroll_x=False)
+        sv.add_widget(box)
+        root=BoxLayout(orientation="vertical",spacing=dp(4),padding=dp(2))
+        root.add_widget(sv)
+        close=PS1Button(text="SCHLIESSEN",accent=PS1_SILVER,font_size=sp(10),
+                        size_hint_y=None,height=dp(36))
+        root.add_widget(close)
+        p=Popup(title="",content=root,size_hint=(None,None),
+                width=min(dp(560),Window.width*0.94),
+                height=min(dp(620),Window.height*0.88),
+                background_color=(0.045,0.05,0.062,0.99),separator_height=0)
+        ref["p"]=p
+        close.bind(on_release=lambda *_:p.dismiss())
+        p.open()
 
     def _open_alarm_rules(self):
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(9))
@@ -1897,12 +2116,18 @@ class MainUI(FloatLayout):
         sx=self.results_scroll.scroll_x; sy=self.results_scroll.scroll_y
         self._clear_results()
         self._last_sig=sig
+        preise=[self.scanned[n]["preis"] for n in namen
+                if self.scanned[n]["klass"]=="hit" and
+                self.scanned[n]["preis"] is not None]
+        best=min(preise) if preise else None
         for n in namen:
             r=self.scanned[n]
             card=ResultCard(r,r.get("_is_new",False),r.get("_prev"),
-                            self.history.get_serie(n),detail_cb=self._open_detail)
+                            self.history.get_serie(n),detail_cb=self._open_detail,
+                            best=(r["klass"]=="hit" and best is not None and
+                                  r["preis"]==best))
             card.size_hint=(1,None)
-            card.height=dp(68) if r["klass"]=="challenge" else dp(52)
+            card.height=dp(68) if r["klass"]=="challenge" else dp(56)
             self.results_row.add_widget(card)
         if sx>0 or sy<1:
             Clock.schedule_once(lambda dt:(setattr(self.results_scroll,"scroll_x",sx),
@@ -1942,7 +2167,10 @@ class MainUI(FloatLayout):
         self.scan_btn.text="STOP"
         self._scan_t0=time.time(); self._scan_done=0
         self._scan_total=len(aktive)
+        self._update_radar_hud()
         self.results_count.text=f"0/{len(aktive)}"
+        self.results_count.color=PS1_GREY
+        self.results_status.color=PS1_SILVER
         self.results_status.text=scan_fortschritt(0,len(aktive),0,0)
         threading.Thread(target=self._scan_worker,args=(aktive,tok,cancel),daemon=True).start()
         if self._drain_event is not None: Clock.unschedule(self._drain_event)
@@ -1996,6 +2224,7 @@ class MainUI(FloatLayout):
     def _process(self,r):
         if not self.scanning: return
         self._scan_done+=1; name=r.get("haendler","?")
+        self._update_radar_hud()
         try:
             if r["klass"] not in ("error","challenge","unavail"):
                 r["klass"]=classify(True,r["preis"],self.max_preis)
@@ -2027,6 +2256,7 @@ class MainUI(FloatLayout):
     def _scan_end(self,abgebrochen=False):
         if not self.scanning: return
         self.scanning=False; self.radar.scanning=False
+        self._update_radar_hud()
         self.scan_btn.text="SCAN"
         d=time.time()-self._scan_t0
         hits=[x for x in self.scanned.values() if x["klass"]=="hit"
@@ -2044,15 +2274,21 @@ class MainUI(FloatLayout):
         if abgebrochen:
             self.results_status.text=(f"ABGEBROCHEN · {self._scan_done}/{self._scan_total}"
                                       f" GEPRÜFT · {ts}")
+            self.results_status.color=PS1_YELLOW
             self._toast("SCAN ABGEBROCHEN",color=PS1_YELLOW)
         elif hits:
-            self.results_status.text=f"{len(hits)} TREFFER · {d:.0f}s · {ts}"
+            preise=[x["preis"] for x in hits if x.get("preis") is not None]
+            best_txt=(f" · BEST {int(min(preise))} €" if preise else "")
+            self.results_status.text=f"{len(hits)} TREFFER{best_txt} · {ts}"
+            self.results_status.color=CARD_STATUS["hit"]
+            self.results_count.color=CARD_STATUS["hit"]
             haptic(0.12)
             if new>0: self._toast(f"{new} NEUE TREFFER",color=PS1_YELLOW)
             elif back>0: self._toast(f"{back} WIEDER VERFÜGBAR",color=CARD_STATUS["hit"])
             else: self._toast(f"{len(hits)} TREFFER",color=CARD_STATUS["hit"])
         else:
             self.results_status.text=f"KEINE TREFFER · {d:.0f}s · {ts}"
+            self.results_status.color=PS1_GREY
             blk=sum(1 for x in self.scanned.values() if x["klass"]=="challenge")
             err=sum(1 for x in self.scanned.values() if x["klass"]=="error")
             teile=[f"{len(self.scanned)} GEPRÜFT"]

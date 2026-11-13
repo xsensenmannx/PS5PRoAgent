@@ -119,6 +119,7 @@ class SmokeApp(App):
             self.shop_health()
             self.challenge_hint()
             self.result_list()
+            self.setup_center()
             self.detail()
             self.no_popup()
         except Exception:
@@ -265,6 +266,16 @@ class SmokeApp(App):
               hint.width >= hint_size[0] and hint.height >= hint_size[1], True)
         check("BOT-SCHUTZ: Preis passt bei 246 dp",
               price.width >= price_size[0] and price.height >= price_size[1], True)
+
+    def setup_center(self):
+        self.ui._open_setup()
+        p = self.popup("System Config")
+        text = " ".join(self.texts(p))
+        check("Setup: Titel", "SYSTEM CONFIG" in text, True)
+        check("Setup: Scan-Aktionen", "AUTO-SCAN" in text and "INTERVALL" in text, True)
+        check("Setup: Filter-Aktionen", "MAX-PREIS" in text and "SORTIERUNG" in text, True)
+        check("Setup: System-Aktionen", "SHOP-HEALTH" in text and "ALARM-REGELN" in text, True)
+        self.close(p, "SCHLIESSEN")
 
     def result_list(self):
         basis = {"land": "DE", "zeit": "12:00", "condition": "new",

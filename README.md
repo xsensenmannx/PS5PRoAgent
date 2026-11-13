@@ -163,6 +163,14 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionen
 
+* **v5.0 Final** – Das aufgeräumte Gesamtsystem (versionCode 17): Das Radar
+  zeigt jetzt ein ruhiges HUD mit Scan-Fortschritt, Zielmarken für Treffer,
+  Sonar-Pings und einem `TARGET · 2 TB`-Status. Die Trefferliste bekommt einen
+  Metall-Verlauf, eine cyanfarbene `BEST`-Markierung für den günstigsten Treffer
+  und eine feinere Statuskante. `SETUP` öffnet eine zentrale Systemkonfiguration
+  für Scan, Alarme, Preisgrenze, Sortierung, Händler, Regeln und Shop-Health.
+  Enthält v4.0 Beta 2, den v3.3.2-Layout-Fix und alle älteren Parser-, Alarm-
+  und Hintergrunddienste. 572 Zusicherungen.
 * **v4.0 Beta 2** – Länderflagge in der Trefferliste (versionCode 15): Die
   Flagge steht klein in der Meta-Zeile vor `DE · 12:00` und zeigt die Herkunft
   des Treffers; vor dem Händlernamen bleibt die Zeile symbolfrei. Keine
