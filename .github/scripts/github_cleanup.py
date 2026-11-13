@@ -23,6 +23,14 @@ HEADERS = {
     "User-Agent": "PS5PRoAgent-cleanup",
 }
 errors = []
+summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+
+
+def summary(line):
+    print(line)
+    if summary_path:
+        with open(summary_path, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
 
 
 def request(method, path, payload=None):
@@ -92,9 +100,11 @@ for cache in list_all("/actions/caches", "actions_caches"):
     print("LOESCHE Cache", cache.get("key"), cache.get("id"))
     delete("/actions/caches/%s" % cache["id"])
 
-print("Fertig. Verbleibende Fehler:", len(errors))
+summary("## GitHub-Aufraeumung")
+summary("")
+summary("Verbleibende Fehler: %s" % len(errors))
 for error in errors:
-    print("FEHLER:", error)
+    summary("- FEHLER: `%s`" % error.replace("`", "'"))
 # Ein einzelner nicht loeschbarer Lauf soll den Aufraeumlauf nicht rot machen;
 # die Zusammenfassung zeigt trotzdem jeden Fehler.
 sys.exit(0)

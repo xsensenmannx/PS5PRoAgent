@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/cleanup.yml
+      - .github/scripts/github_cleanup.py
   workflow_dispatch:
 
 permissions:
