@@ -6,22 +6,22 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ![Icon](icon.png)
 
-## Welche Version brauche ich?
+## Direkt herunterladen
+
+**[PS5 Pro Search Agent v5.0 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v5.0/ps5prosearchagent-5.0-arm64-v8a-debug.apk)**
+
+Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
+die Datei antippen und die Installation aus dieser Quelle erlauben.
 
 | Stand | Bedeutung |
 |---|---|
-| **v5.0** | Aktueller veröffentlichter Release. Für die normale Installation und Updates nehmen. |
-| **v1.0beta** | Beta-Alias auf Basis von v5.0; gleicher Code wie v5.0, nur als zusätzlicher Test-Release. |
-| **v5.1** | In Vorbereitung, noch **kein GitHub-Release**. Enthält den lokalen Radar-/Lesbarkeits-Fix. |
-| **v3.3.2** | Letzter 3.x-Hotfix. Nur als Fallback für die alte 3.x-Oberfläche. |
-| **v4.0-beta / beta2** | Historische Testversionen. Nicht mehr für Neuinstallationen verwenden. |
-| **v1.0–v3.3.1** | Archiv der frühen Versionen; nur zur Nachvollziehbarkeit. |
+| **v5.0** | Aktueller Release. Für die normale Installation und Updates nehmen. |
+| **v3.3.2** | Älterer 3.x-Fallback mit dem Preis-Layout-Fix. |
+| **v1.0** | Archiv-Release; bleibt wegen des ursprünglichen App-Bildes erhalten. |
 
-Die Release-APK liegt unter **[Releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**.
-Die vollständige Historie bleibt erhalten; neue 3.x-Releases nach v4/v5 wird es nicht
-mehr geben. v1.0beta ist keine neue 3.x-Entwicklung, sondern nur ein Beta-Alias auf
-dem v5.0-Code. Die Versionscodes sind chronologisch, auch wenn v3.3.2 nach den
-v4.0-Betas veröffentlicht wurde.
+Es gibt nur noch diese drei Releases. Die älteren Versionen und Test-Releases
+wurden entfernt, damit die Download-Seite übersichtlich bleibt. Alle Releases:
+**[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
 ## Was die App kann
 
@@ -140,7 +140,7 @@ python3 tools/validate_shop_config.py
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
-responsive Layout-Geometrie und Boot-Manifest — 584 Zusicherungen, ohne Kivy
+responsive Layout-Geometrie und Boot-Manifest — 572 Zusicherungen, ohne Kivy
 und ohne Android. Der Workflow führt sie vor jedem Build aus. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät.
 `tools/validate_shop_config.py` prüft die echte `shop_config.json` mit genau
@@ -185,84 +185,17 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 ## Versionshistorie
 
-Die Liste ist nach Veröffentlichung sortiert, nicht nach Versionsnummer. Für neue
-Installationen zählt nur der aktuelle Release oben; die älteren Einträge sind Archiv.
+Es bleiben nur diese drei Releases:
 
-* **v5.1 Lesbarkeit** – **in Vorbereitung, noch kein Release** (versionCode 18): Der BOT-SCHUTZ-Hinweis nutzt jetzt
-  10,0 sp statt 8,2 sp und ist auf `BOT-SCHUTZ · APP UMGEHT SIE NICHT` gekürzt,
-  damit er bei 246×156 dp vollständig lesbar bleibt. Die Karten-Schrift lässt
-  sich in `SETUP → SCHRIFT` auf 100 %, 110 % oder 120 % skalieren; der
-  120-%-Fall ist im 246-dp-Stresstest abgesichert. HTTP-200-Seiten ohne Preis
-  werden jetzt als **PARSER** von echtem **NICHT VERFÜGBAR** getrennt;
-  Shop-Health zählt aufeinanderfolgende Parserfehler und zeigt sie pro Shop.
-  Die echte `shop_config.json` wird vor jedem CI-Build validiert. Der Radar
-  hält außerdem 12 dp Abstand zur Trefferleiste, damit seine unteren
-  Markierungen nicht mehr angeschnitten werden. Enthält v5.0 Final.
-* **v1.0beta** – Beta-Alias auf v5.0 (versionCode 17): gleicher Code wie v5.0,
-  nur als zusätzlicher Test-Release. Kein eigener Entwicklungsstand.
-* **v5.0 Final** – Das aufgeräumte Gesamtsystem (versionCode 17): Das Radar
-  zeigt jetzt ein ruhiges HUD mit Scan-Fortschritt, Zielmarken für Treffer,
-  Sonar-Pings und einem `TARGET · 2 TB`-Status. Die Trefferliste bekommt einen
-  Metall-Verlauf, eine cyanfarbene `BEST`-Markierung für den günstigsten Treffer
-  und eine feinere Statuskante. `SETUP` öffnet eine zentrale Systemkonfiguration
-  für Scan, Alarme, Preisgrenze, Sortierung, Händler, Regeln und Shop-Health.
-  Enthält v4.0 Beta 2, den im v4-Zweig nachgebauten v3.3.2-Layout-Fix und alle
-  älteren Parser-, Alarm- und Hintergrunddienste. 572 Zusicherungen.
-* **v3.3.2** – Preis-Layout-Hotfix (versionCode 16): Die Preisspalte wuchs auf
-  134 dp, die Preis-Schrift auf 16,5 sp; damit passt `1.299,00 €` auch mit den
-  Linux-Schriftmetriken. Der Release-Lauf prüft Kivy vor dem APK-Build. Der
-  Stand wurde nach v4.0 Beta 2 veröffentlicht; der gleiche Fix wurde im
-  v4-Zweig separat nachgebaut.
-* **v4.0 Beta 2** – Länderflagge in der Trefferliste (versionCode 15): Die
-  Flagge steht klein in der Meta-Zeile vor `DE · 12:00` und zeigt die Herkunft
-  des Treffers; vor dem Händlernamen bleibt die Zeile symbolfrei. Keine
-  Händler-Kachel und keine Pfeil-Buttons mehr vor der Liste; der Händlername
-  bekommt die freie Breite. Der BOT-SCHUTZ-Hinweis ist mit 8,2 sp lesbarer und
-  bleibt auf 246 dp vollständig sichtbar.
-* **v4.0 Beta** – Aufgeräumte Trefferliste (versionCode 14): keine Händler-Kachel
-  und keine Pfeil-Buttons mehr vor der Liste; der Händlername bekommt die freie
-  Breite. Der BOT-SCHUTZ-Hinweis ist mit 8,2 sp lesbarer und bleibt auf 246 dp
-  vollständig sichtbar. Vordergrund und Hintergrund nutzen dieselbe Alarmlogik:
-  Wieder-Verfügbarkeit wird auch bei gleichem Preis gemeldet, Preiserhöhungen
-  lösen keinen Alarm aus. Der Preisverlauf speichert jetzt alle plausiblen
-  Preise und die Verfuegbarkeit. 572 Zusicherungen. Enthält v3.3.1.
-* **v3.3.1** – Layout-Patch (versionCode 13): Der BOT-SCHUTZ-Hinweis steht
-  auf einer eigenen vollbreiten Zeile und bleibt auch auf schmalen Displays
-  vollständig sichtbar. Die Preisspalte war hier noch zu schmal; v3.3.2
-  behebt abgeschnittene Beträge wie `1.299,00 €`. Enthält den vollständigen
-  Stand aus v3.3.
-* **v3.3** – Kompakte Trefferliste (versionCode 12): vertikale Zeilen statt
-  breiter Karten, dadurch mehrere Treffer gleichzeitig sichtbar; Preis, Status
-  und Preisänderung stehen rechts. Der BOT-SCHUTZ-Hinweis bleibt sichtbar.
-  Benachrichtigungen laufen außerhalb des UI-Threads, und der Karten-Neubau am
-  Scan-Ende wird entzerrt, damit das Radar bei Treffern flüssiger bleibt.
-  Enthält den vollständigen Stand aus v3.2.
-* **v3.2** – Robustere Treffer (versionCode 11): verschachtelte JSON-LD-Angebote,
-  Angebotslisten mit „neu vor gebraucht“, Meta-/Microdata-Preise, Punkt-Dezimalpreise
-  und Meta-Verfügbarkeit. Enthält den vollständigen Stand aus v3.1.
-* **v3.1** – Fairer Scan (versionCode 10): 429 wartet gemäß `Retry-After` und
-  wird höchstens einmal wiederholt; 403/CAPTCHA wird ohne weitere Versuche als
-  Bot-Schutz gemeldet. Enthält den vollständigen Stand aus v3.0.
-* **v3.0** – Finaler Feinschliff (versionCode 9): STOP und App-Pause brechen
-  laufende Retry-Schleifen kooperativ ab; die Kopfzeile zeigt Fortschritt und
-  eine geschätzte Restzeit. Enthält den vollständigen Stand aus v2.0.
-* **v2.0** – Vorheriger Abschluss-Release (versionCode 8); enthält den
-  vollständigen Stand aus v1.6.
-* **v1.6** – Effizienterer Scan: HTTP-Cache wird einmal pro Lauf statt pro
-  Shop geschrieben, und der letzte fehlgeschlagene Versuch wartet nicht mehr
-  unnötig (versionCode 7).
-* **v1.5** – Sicher validierte Remote-Konfiguration für Shop-URLs und
-  deklarative Parser-Regeln (versionCode 6).
-* **v1.4** – Boot-Receiver für den Hintergrund-Service und adaptives
-  Querformat-Layout für Tablets/Foldables (versionCode 5).
-* **v1.3** – Remote-Shop-Liste, Onboarding und tägliche URL-Aktualisierung
-  (versionCode 4).
-* **v1.2** – Shop-Health, Fixtures, Treffer-Metadaten (Zustand/Verkäufer/
-  Vorbestellung), Alarm-Regeln, Detailansicht und Crash-Log (versionCode 3).
-* **v1.1** – HTTP-Cache/304, Preisverlauf mit Sparkline, Heartbeat-Warnung,
-  Notification-Deep-Links und Gruppierung (versionCode 2).
-* **v1.0** – erster Play-vorbereiteter Build (targetSdk 36, signierbares AAB);
-  bleibt als eigenes Release erhalten.
+* **v5.0** – Aktueller Release (versionCode 17): Radar-HUD mit Scan-Fortschritt
+  und Zielmarken, Bestpreis-Markierung, Metall-Verlauf der Trefferliste und
+  zentrale `SETUP`-Systemkonfiguration. Enthält den nachgebauten v3.3.2-Layout-Fix
+  und alle älteren Parser-, Alarm- und Hintergrunddienste.
+* **v3.3.2** – Letzter 3.x-Hotfix (versionCode 16): 134 dp breite Preisspalte
+  und 16,5 sp Preis-Schrift, damit `1.299,00 €` auch mit Linux-Schriftmetriken
+  vollständig sichtbar bleibt. Nur als Fallback für die alte 3.x-Oberfläche.
+* **v1.0** – Erster Play-vorbereiteter Build (targetSdk 36, signierbares AAB).
+  Bleibt wegen des ursprünglichen App-Bildes als Archiv-Release erhalten.
 
 ## Grenzen
 
