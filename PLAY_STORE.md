@@ -14,7 +14,7 @@ Release-Keystore baut er nur ein Smoke-Test-AAB, das als Workflow-Artefakt
 geeignet** ist; in diesem Fall fehlt das Release-Asset
 `ps5prosearchagent-5.1-arm64-v8a-release.aab`.
 
-Die Releases v3.3.1, v3.3 und v3.2 bleiben als eigene, unveraenderte Staende erhalten.
+Der aktuelle Release ist **v5.0**; **v3.3.2** und **v1.0** bleiben als ältere Stände erhalten. Weitere Alt-Releases wurden entfernt.
 
 ## 1. Release-Keystore erzeugen (einmalig, auf deinem Rechner)
 
