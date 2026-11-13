@@ -30,6 +30,10 @@ P.add_argument("--size", required=True, help="Breite x Hoehe in Pixeln, z. B. 62
 P.add_argument("--out", required=True, help="Ziel-Datei (.png oder .gif)")
 P.add_argument("--frames", type=int, default=16, help="Frames fuer das Scan-GIF")
 P.add_argument("--interval", type=float, default=0.14, help="Sekunden pro GIF-Frame")
+P.add_argument("--gif-width", type=int, default=0,
+               help="GIF auf diese Breite skalieren (0 = Aufnahmebreite)")
+P.add_argument("--gif-colors", type=int, default=128,
+               help="Farben pro GIF-Frame (256 = volle Palette)")
 ARGS = P.parse_args()
 
 W, H = (int(v) for v in ARGS.size.lower().split("x"))
@@ -124,6 +128,14 @@ def grab(path):
 def frames_to_gif(frames, out):
     from PIL import Image
     bilder = [Image.open(p).convert("RGB") for p in frames]
+    if ARGS.gif_width and bilder[0].width != ARGS.gif_width:
+        hoehe = round(bilder[0].height * ARGS.gif_width / bilder[0].width)
+        bilder = [b.resize((ARGS.gif_width, hoehe), Image.LANCZOS) for b in bilder]
+    if 2 <= ARGS.gif_colors < 256:
+        # 128 Farben sind bei der kleinen Anzeige nicht zu unterscheiden und
+        # sparen rund ein Fuenftel der Dateigroesse.
+        bilder = [b.quantize(colors=ARGS.gif_colors, method=Image.MEDIANCUT)
+                  for b in bilder]
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     bilder[0].save(out, save_all=True, append_images=bilder[1:],
                    duration=int(ARGS.interval * 1000), loop=0, optimize=True)
