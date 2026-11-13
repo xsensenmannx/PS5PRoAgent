@@ -12,7 +12,10 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.2 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.2/ps5prosearchagent-1.2-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.2 herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
+
+Die APK heißt `ps5prosearchagent-1.2-arm64-v8a.apk` und liegt beim Release **v1.2**.
+Sobald der Tag-Build durch ist, führt derselbe Link direkt zur Datei.
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
