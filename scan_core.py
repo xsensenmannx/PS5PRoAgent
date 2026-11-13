@@ -539,12 +539,25 @@ def pruefe_nur_konsole(html, st):
     if not any(rx.search(html) for rx in PRODUKT_MUSTER): return False
     return bool(PRODUKT_2TB.search(html))
 
-def pruefe_verfuegbar(html, st):
-    if st.get("verfuegbar") is not None: return st["verfuegbar"]
-    low=html.lower()
+def _verfuegbarkeit_aus_text(html):
+    """(verfuegbar, explizit) aus sichtbaren Stock-Markern.
+
+    Der bisherige Fallback lieferte ohne jeden Marker pauschal ``True``.
+    Fuer die Unterscheidung "echt ausverkauft" vs. "Parser kaputt" ist das
+    zu grob: Nur ein gefundener Negativ- oder Positivmarker ist Evidenz.
+    ``explizit=False`` bedeutet deshalb "keine Aussage auf der Seite", nicht
+    "verfuegbar".
+    """
+    low=(html or "").lower()
     neg=sum(1 for kw in AUSVERKAUFT if kw in low)
     pos=sum(1 for kw in POSITIV if kw in low)
-    return False if neg>pos else True
+    if neg>pos: return False,True
+    if pos>neg: return True,True
+    return True,False
+
+def pruefe_verfuegbar(html, st):
+    if st.get("verfuegbar") is not None: return st["verfuegbar"]
+    return _verfuegbarkeit_aus_text(html)[0]
 
 def _remote_preis(html, parser):
     """Holt einen Preis zwischen zwei literalen Markern aus der Remote-Regel.
@@ -912,12 +925,26 @@ def scan_einen(h, cancel=None):
         v=remote.get("verfuegbar")
         # Strukturierte Daten (JSON-LD) haben Vorrang vor einem eventuell
         # veralteten Meta-Tag; erst danach greifen Meta und Text-Fallback.
-        if v is None: v=s.get("verfuegbar")
-        if v is None: v=meta_v
-        if v is None: v=pruefe_verfuegbar(html,s)
+        v_explizit=v is not None
+        if v is None:
+            v=s.get("verfuegbar"); v_explizit=v is not None
+        if v is None:
+            v=meta_v; v_explizit=v is not None
+        if v is None:
+            v,v_explizit=_verfuegbarkeit_aus_text(html)
         p=remote.get("preis")
         if p is None: p=s.get("preis")
         if p is None: p=extract_meta_preis(html)
+        # HTTP 200, Produkt erkannt, aber kein Preis: Das ist ein Parserfehler,
+        # solange die Seite nicht ausdruecklich "nicht verfuegbar" sagt. Eine
+        # ausverkaufte Produktseite bleibt damit unavail und wird nicht als
+        # kaputter Parser gezaehlt.
+        if p is None and not (v_explizit and v is False):
+            return _res(h,None,"parser",d,"Parser: kein Preis",fu,
+                        signal="parser",condition=s.get("condition"),
+                        seller=s.get("seller"),
+                        verfuegbarkeit=s.get("verfuegbarkeit"),
+                        sofort=s.get("sofort"))
         signal=("remote" if remote else
                 "jsonld" if s.get("preis") is not None else
                 "meta" if p is not None else "text")
@@ -930,7 +957,9 @@ def scan_einen(h, cancel=None):
                  signal=signal,condition=s.get("condition"),seller=s.get("seller"),
                  verfuegbarkeit=s.get("verfuegbarkeit"),sofort=sofort)
         # Auch "nicht verfuegbar" cachen: der naechste 304 spart die Seite
-        # komplett, und die Verfuegbarkeit stammt aus demselben Abruf.
+        # komplett, und die Verfuegbarkeit stammt aus demselben Abruf. Parser-
+        # Fehler werden nicht gecacht, sonst wuerde ein 304 den Fehler als
+        # vermeintlich gueltiges Ergebnis konservieren.
         try:
             http_cache().put(fu or h["urls"][0],
                              {"preis":p,"verfuegbar":bool(v),"signal":signal,
@@ -985,7 +1014,7 @@ def scan_alle(haendler, max_preis=None, fortschritt=None, cancel=None):
                 break
             r = f.result()
             if r is None: continue
-            if r.get("klass") not in ("error", "challenge", "unavail"):
+            if r.get("klass") not in ("error", "challenge", "unavail", "parser"):
                 r["klass"] = classify(True, r.get("preis"), mp)
             ergebnisse.append(r)
             if fortschritt is not None:
@@ -1170,7 +1199,7 @@ class Health:
         name=r.get("haendler")
         if not name: return
         ts=time.time(); status=r.get("klass") or "unknown"
-        fehler=bool(status in ("error","challenge"))
+        fehler=bool(status in ("error","challenge","parser"))
         with self._lock:
             e=dict(self.data.get(name) or {})
             e["last_ts"]=ts; e["last_status"]=status
@@ -1178,9 +1207,15 @@ class Health:
             e["checks"]=int(e.get("checks") or 0)+1
             if fehler:
                 e["fail_streak"]=int(e.get("fail_streak") or 0)+1
+                if status == "parser":
+                    e["parser_streak"]=int(e.get("parser_streak") or 0)+1
+                    e["parser_total"]=int(e.get("parser_total") or 0)+1
+                else:
+                    e["parser_streak"]=0
             else:
                 e["ok_ts"]=ts; e["fail_streak"]=0
                 e["successes"]=int(e.get("successes") or 0)+1
+                e["parser_streak"]=0
             self.data[name]=e
     def save(self):
         """Einmal pro Scan schreiben statt 42-mal (Flash/Akku)."""

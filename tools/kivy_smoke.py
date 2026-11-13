@@ -179,15 +179,19 @@ class SmokeApp(App):
         # Retry-Pfad, alle anderen erfolgreich fuer die 42-Zeilen-Pruefung.
         jetzt = time.time()
         fehler_name = scan_core.HAENDLER[0]["name"]
+        parser_name = scan_core.HAENDLER[1]["name"]
         daten = scan_core.Health()
         daten.data = {}
         for h in scan_core.HAENDLER:
             name = h["name"]
             daten.data[name] = {
-                "last_status": "error" if name == fehler_name else "hit",
+                "last_status": ("error" if name == fehler_name else
+                                "parser" if name == parser_name else "hit"),
                 "last_ts": jetzt,
-                "ok_ts": jetzt if name != fehler_name else None,
+                "ok_ts": jetzt if name not in (fehler_name, parser_name) else None,
             }
+        daten.data[parser_name]["parser_streak"] = 2
+        daten.data[parser_name]["parser_total"] = 2
         # _open_health() liest Health() neu von Platte, nicht den Singleton.
         daten.save()
 
@@ -196,7 +200,9 @@ class SmokeApp(App):
         text = " ".join(self.texts(p))
         check("Health: Titel", "SHOP-HEALTH" in text, True)
         check("Health: 42 Shops", f"{len(scan_core.HAENDLER)} SHOPS" in text, True)
-        check("Health: auffaelliger Shop", "1 AUFFAELLIG" in text, True)
+        check("Health: zwei auffaellige Shops", "2 AUFFAELLIG" in text, True)
+        check("Health: wiederholte Parserfehler", "PARSER 2x" in text, True)
+        check("Health: Parser-Serie", "PARSER-SERIE 2" in text, True)
         labels = [w for w in p.content.walk()
                   if isinstance(w, main.Label) and str(w.text) in
                   {h["name"] for h in scan_core.HAENDLER}]
@@ -211,7 +217,7 @@ class SmokeApp(App):
             self.button(p, "FEHLER PRUEFEN").dispatch("on_release")
             self.pump()
             check("Health: Retry schliesst Popup", not self.popups(), True)
-            check("Health: Retry nur Fehler-Shop", calls, [[fehler_name]])
+            check("Health: Retry nur Fehler-Shops", calls, [[fehler_name, parser_name]])
         finally:
             self.ui._scan_start = echt_scan
 
@@ -230,7 +236,7 @@ class SmokeApp(App):
         card = main.ResultCard(result, False, None)
         text = " ".join(str(getattr(w, "text", "")) for w in card.walk())
         check("BOT-SCHUTZ: Hinweis auf Challenge",
-              "SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT" in text, True)
+              "BOT-SCHUTZ · APP UMGEHT SIE NICHT" in text, True)
         check("Trefferliste: kein Haendler-Symbol",
               not any(type(w).__name__ == "BrandTile" for w in card.walk()), True)
         check("Trefferliste: Flagge vorhanden",
@@ -249,7 +255,7 @@ class SmokeApp(App):
         for layout in [w for w in card.walk() if isinstance(w, Layout)]:
             layout.do_layout()
         hint = next(w for w in card.walk()
-                    if isinstance(w, main.Label) and "SHOP-CHALLENGE" in str(w.text))
+                    if isinstance(w, main.Label) and "BOT-SCHUTZ · APP" in str(w.text))
         price = next(w for w in card.walk()
                      if isinstance(w, main.Label) and "1.299" in str(w.text))
 
@@ -267,6 +273,24 @@ class SmokeApp(App):
         check("BOT-SCHUTZ: Preis passt bei 246 dp",
               price.width >= price_size[0] and price.height >= price_size[1], True)
 
+        # Die Karten-Schrift muss auch skaliert lesbar bleiben. 120 % ist die
+        # groesste Stufe; der Text wird dabei bewusst nicht abgeschnitten.
+        scaled = main.ResultCard(result, False, None, font_scale=1.2)
+        scaled.size_hint = (None, None)
+        scaled.width = main.dp(246)
+        scaled.height = main.dp(156)
+        scaled.do_layout()
+        for layout in [w for w in scaled.walk() if isinstance(w, Layout)]:
+            layout.do_layout()
+        scaled_hint = next(w for w in scaled.walk()
+                           if isinstance(w, main.Label) and "BOT-SCHUTZ · APP" in str(w.text))
+        check("BOT-SCHUTZ: Schrift skaliert",
+              scaled_hint.font_size > hint.font_size, True)
+        scaled_size = natural_size(scaled_hint)
+        check("BOT-SCHUTZ: 120%-Hinweis passt bei 246 dp",
+              scaled_hint.width >= scaled_size[0] and
+              scaled_hint.height >= scaled_size[1], True)
+
     def setup_center(self):
         self.ui._open_setup()
         p = self.popup("System Config")
@@ -274,6 +298,7 @@ class SmokeApp(App):
         check("Setup: Titel", "SYSTEM CONFIG" in text, True)
         check("Setup: Scan-Aktionen", "AUTO-SCAN" in text and "INTERVALL" in text, True)
         check("Setup: Filter-Aktionen", "MAX-PREIS" in text and "SORTIERUNG" in text, True)
+        check("Setup: Schrift-Skalierung", "SCHRIFT" in text and "100 %" in text, True)
         check("Setup: System-Aktionen", "SHOP-HEALTH" in text and "ALARM-REGELN" in text, True)
         self.close(p, "SCHLIESSEN")
 

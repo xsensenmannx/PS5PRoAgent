@@ -45,6 +45,11 @@ from scan_core import (
 PRICE_OPTIONS = [700.0, 800.0, 900.0, None]
 SORT_OPTIONS = ["Preis","H\u00e4ndler","Zeit"]
 AUTO_INTERVALS = [(300,"5m"),(600,"10m"),(900,"15m"),(1800,"30m"),(3600,"60m")]
+FONT_SCALES = [1.0,1.1,1.2]
+# Abstand zwischen dem sichtbaren Radar und der darunterliegenden Trefferliste.
+# Ohne diesen Puffer lagen die unteren Gradzahlen/der äußere Radarring genau
+# auf der oberen Panelkante und wurden von ihr angeschnitten.
+RADAR_PANEL_GAP = dp(12)
 
 FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 try: os.makedirs(FONT_DIR, exist_ok=True)
@@ -100,12 +105,12 @@ PS_SQUARE   = (0.85,0.11,0.46,1)
 
 STATUS_COLORS = {"hit":get_color_from_hex("#3ddc84"),"expensive":C_ORANGE,
                  "unknown":C_YELLOW,"unavail":C_GRAY,"error":C_RED,
-                 "challenge":C_YELLOW}
+                 "challenge":C_YELLOW,"parser":PS1_RED}
 CARD_STATUS = {"hit":get_color_from_hex("#3ddc84"),"expensive":PS1_YELLOW,
                "unknown":get_color_from_hex("#9aa3ad"),
                "unavail":get_color_from_hex("#6b7280"),
                "error":get_color_from_hex("#ff5c5c"),
-               "challenge":PS1_YELLOW}
+               "challenge":PS1_YELLOW,"parser":PS1_RED}
 
 # Radar (PS1 BIOS blue instead of phosphor green)
 RADAR_BG    = get_color_from_hex("#05070c")
@@ -857,17 +862,20 @@ class Sparkline(Widget):
             Line(points=pts,width=dp(1.2))
 
 class ResultCard(ButtonBehavior, BoxLayout):
-    def __init__(self,result,is_new,prev,serie=None,detail_cb=None,best=False,**kw):
+    def __init__(self,result,is_new,prev,serie=None,detail_cb=None,best=False,
+                 font_scale=1.0,**kw):
         super().__init__(**kw)
         self.result=result
         self._is_new=is_new; self._prev=prev; self._best=best
+        try: self._font_scale=max(0.9,min(1.2,float(font_scale)))
+        except (TypeError,ValueError): self._font_scale=1.0
         self._serie=serie or []
         self._down=None; self._moved=False
         self._detail_cb=detail_cb; self._long_event=None; self._long_done=False
         challenge=result.get("klass")=="challenge"
         self.orientation="vertical" if challenge else "horizontal"
         self.size_hint=(1,None)
-        self.height=dp(69) if challenge else dp(56)
+        self.height=dp(80)*self._font_scale if challenge else dp(56)*self._font_scale
         self.padding=(dp(9),dp(6))
         self.spacing=dp(2 if challenge else 7)
         self._build()
@@ -917,6 +925,8 @@ class ResultCard(ButtonBehavior, BoxLayout):
     def _build(self):
         r=self.result
         co=CARD_STATUS.get(r["klass"],PS1_GREY)
+        s=self._font_scale
+        fs=lambda base: sp(base*s)
 
         # Kompakte Zeile: Haendler/Meta, Preis/Status. Die alte
         # 156-dp-Karte zeigte auf dem Telefon nur einen Treffer pro Wisch.
@@ -927,9 +937,9 @@ class ResultCard(ButtonBehavior, BoxLayout):
         info=BoxLayout(orientation="vertical",spacing=dp(0))
         name_str=re.sub(r"\s+(DE|AT)$","",r["haendler"]).strip()
         n=Label(text=f"[b]{name_str}[/b]",markup=True,color=PS1_TEXT,
-                font_size=sp(12.5),font_name=SST_FONT,
+                font_size=fs(12.5),font_name=SST_FONT,
                 halign="left",valign="middle",
-                size_hint_y=None,height=dp(17),
+                size_hint_y=None,height=dp(17)*s,
                 shorten=True,shorten_from="right")
         n.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         info.add_widget(n)
@@ -940,11 +950,11 @@ class ResultCard(ButtonBehavior, BoxLayout):
         elif ist_gebraucht(r.get("condition")): meta_txt="GEBRAUCHT · "+meta_txt
         elif r.get("sofort") is False: meta_txt="VORBEST. · "+meta_txt
         meta_row=BoxLayout(orientation="horizontal",size_hint_y=None,
-                           height=dp(12),spacing=dp(3))
-        meta_row.add_widget(FlagWidget(r["land"],size=(dp(18),dp(12))))
-        m=Label(text=meta_txt,color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
+                           height=dp(12)*s,spacing=dp(3))
+        meta_row.add_widget(FlagWidget(r["land"],size=(dp(18)*s,dp(12)*s)))
+        m=Label(text=meta_txt,color=PS1_GREY,font_size=fs(8.5),font_name=SST_FONT,
                 halign="left",valign="middle",
-                size_hint_y=None,height=dp(12),
+                size_hint_y=None,height=dp(12)*s,
                 shorten=True,shorten_from="right")
         m.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         meta_row.add_widget(m)
@@ -953,33 +963,34 @@ class ResultCard(ButtonBehavior, BoxLayout):
         holder.add_widget(info)
 
         right=BoxLayout(orientation="vertical",size_hint_x=None,
-                        width=dp(134),spacing=dp(0))
+                        width=dp(134)*s,spacing=dp(0))
         if r["preis"] is not None:
             p_txt=format_preis(r["preis"]); p_col=PS1_ICE if self._best else PS1_TEXT
         else:
             p_txt="—"; p_col=PS1_GREY
         p=Label(text=f"[b]{p_txt}[/b]",markup=True,color=p_col,
-                font_size=sp(16.5),font_name=SST_FONT,
+                font_size=fs(16.5),font_name=SST_FONT,
                 halign="right",valign="middle",
-                size_hint_y=None,height=dp(28))
+                size_hint_y=None,height=dp(28)*s)
         p.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         right.add_widget(p)
 
         st_map={"hit":"VERFÜGBAR","expensive":"ZU TEUER","unknown":"PREIS OFFEN",
-                "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ"}
+                "unavail":"NICHT VERFÜGBAR","error":"FEHLER","challenge":"BOT-SCHUTZ",
+                "parser":"PARSER-FEHLER"}
         st=st_map.get(r["klass"],"?")
         srow=BoxLayout(orientation="horizontal",size_hint_y=None,
-                       height=dp(14),spacing=dp(2))
-        s=Label(text=f"[b]{st}[/b]",markup=True,color=co,
-                font_size=sp(8.5),font_name=SST_FONT,
-                halign="left",valign="middle",
-                shorten=True,shorten_from="right")
-        s.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-        srow.add_widget(s)
+                       height=dp(14)*s,spacing=dp(2))
+        st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
+                     font_size=fs(8.5),font_name=SST_FONT,
+                     halign="left",valign="middle",
+                     shorten=True,shorten_from="right")
+        st_lbl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        srow.add_widget(st_lbl)
         if self._best:
-            b=Label(text="BEST",color=PS1_CYAN,font_size=sp(7.5),bold=True,
+            b=Label(text="BEST",color=PS1_CYAN,font_size=fs(7.5),bold=True,
                     font_name=SST_FONT,halign="right",valign="middle",
-                    size_hint_x=None,width=dp(30))
+                    size_hint_x=None,width=dp(30)*s)
             b.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             srow.add_widget(b)
 
@@ -993,9 +1004,9 @@ class ResultCard(ButtonBehavior, BoxLayout):
             else:
                 d_txt="STABIL"; d_col=PS1_GREY
         if d_txt:
-            d=Label(text=d_txt,color=d_col,font_size=sp(8),bold=True,
+            d=Label(text=d_txt,color=d_col,font_size=fs(8),bold=True,
                     font_name=SST_FONT,halign="right",valign="middle",
-                    size_hint_x=None,width=dp(44))
+                    size_hint_x=None,width=dp(44)*s)
             d.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             srow.add_widget(d)
         right.add_widget(srow)
@@ -1007,11 +1018,11 @@ class ResultCard(ButtonBehavior, BoxLayout):
         # abgeschnitten wird und die Preisspalte unberuehrt bleibt.
         if challenge:
             self.add_widget(holder)
-            hint=Label(text="SHOP-CHALLENGE · APP UMGEHT SIE BEWUSST NICHT",
-                       color=PS1_YELLOW,font_size=sp(8.2),font_name=SST_FONT,
+            hint=Label(text="BOT-SCHUTZ · APP UMGEHT SIE NICHT",
+                       color=PS1_YELLOW,font_size=fs(10.0),font_name=SST_FONT,
                        halign="left",valign="middle",
                        shorten=True,shorten_from="right",
-                       size_hint_y=None,height=dp(15))
+                       size_hint_y=None,height=dp(18)*s)
             hint.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             self.add_widget(hint)
 
@@ -1137,12 +1148,16 @@ def layout_geometrie(w,h,top_in=0.0,bottom_in=0.0,left_in=0.0,right_in=0.0):
             wide=True; panel_w=kandidat; panel_x=kandidat_x
             results_h=kandidat_h; logo_w=kandidat_logo
 
+    # Nur im Hochformat liegt die Trefferleiste unter dem Radar. Der kleine
+    # Puffer haelt Gradzahlen und Aussenring frei von der Panelkante; im
+    # Querformat steht die Liste rechts und der Radar nutzt die volle Hoehe.
+    radar_bottom=ch+bottom if wide else ch+results_h+bottom+RADAR_PANEL_GAP
     return {
         "wide":wide,"logo_h":lh,"logo_w":logo_w,"controls_h":ch,
         "results_h":results_h,"panel_w":panel_w,"panel_x":panel_x,
         "panel_y":panel_y,"usable_w":usable_w,
         "radar_w":panel_x if wide else w,
-        "radar_bottom":ch+bottom if wide else ch+results_h+bottom,
+        "radar_bottom":radar_bottom,
         "radar_top":lh+top,
     }
 
@@ -1178,6 +1193,9 @@ class MainUI(FloatLayout):
         self.notify_low_only=bool(self.settings.get("notify_low_only",False))
         self.notify_sofort=bool(self.settings.get("notify_sofort",True))
         self.quiet_hours=bool(self.settings.get("quiet_hours",False))
+        try: self.font_scale=float(self.settings.get("font_scale",1.0))
+        except (TypeError,ValueError): self.font_scale=1.0
+        if self.font_scale not in FONT_SCALES: self.font_scale=1.0
         self._known_hits=set(); self.queue=queue.Queue()
         self._bg_seen_ts=0.0; self._insets=(0.0,0.0,0.0,0.0)
         self._wide=False; self._results_mode_set=False
@@ -1502,7 +1520,7 @@ class MainUI(FloatLayout):
         self._reclassify_all(); self._rerender()
     def _reclassify_all(self):
         for r in self.scanned.values():
-            if r["klass"] in ("error","challenge","unavail"): continue
+            if r["klass"] in ("error","challenge","unavail","parser"): continue
             if r["preis"] is None: r["klass"]="unknown"
             elif self.max_preis is None or r["preis"]<=self.max_preis: r["klass"]="hit"
             else: r["klass"]="expensive"
@@ -1540,6 +1558,13 @@ class MainUI(FloatLayout):
             bg=self._bg_last_text()
             self.results_status.text=txt+(f" · BG {bg}" if bg else "")
         return True
+    def _cycle_font_scale(self):
+        try: i=FONT_SCALES.index(self.font_scale)
+        except ValueError: i=0
+        self.font_scale=FONT_SCALES[(i+1)%len(FONT_SCALES)]
+        self.settings.set("font_scale",self.font_scale)
+        self._clear_results(); self._last_sig=None; self._rerender()
+
     def _cycle_interval(self):
         iv=[x[0] for x in AUTO_INTERVALS]
         try: i=iv.index(self.auto_interval)
@@ -1685,6 +1710,8 @@ class MainUI(FloatLayout):
                                      else f"{int(self.max_preis)} €"),
                self._cycle_max_preis,PS1_RED)
         action("SORTIERUNG",lambda: self.sort_mode.upper(),self._cycle_sort,PS1_BLUE)
+        action("SCHRIFT",lambda: f"{int(self.font_scale*100)} %",
+               self._cycle_font_scale,PS1_CYAN)
 
         section("SYSTEM")
         action("HÄNDLER",lambda: str(len(self.active_haendler)),
@@ -1795,13 +1822,18 @@ class MainUI(FloatLayout):
 
     def _open_health(self):
         daten=Health().all()
-        fehler=[]
+        fehler=[]; parser_fehler=[]
         for h in HAENDLER:
             e=daten.get(h["name"]) or {}
-            if e.get("last_status") in ("error","challenge","unknown"):
+            if e.get("last_status") in ("error","challenge","unknown","parser"):
                 fehler.append(h["name"])
+            try: p_streak=int(e.get("parser_streak") or 0)
+            except (TypeError,ValueError): p_streak=0
+            if p_streak>0: parser_fehler.append((h["name"],p_streak))
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(8))
         titel=f"SHOP-HEALTH · {len(HAENDLER)} SHOPS · {len(fehler)} AUFFAELLIG"
+        if parser_fehler:
+            titel+=f" · PARSER-SERIE {max(n for _,n in parser_fehler)}"
         box.add_widget(Label(text=f"[b]{titel}[/b]",markup=True,color=PS1_SILVER,
                              font_size=sp(12),font_name=SST_FONT,
                              size_hint_y=None,height=dp(26)))
@@ -1812,7 +1844,9 @@ class MainUI(FloatLayout):
         for h in order:
             e=daten.get(h["name"]) or {}; status=e.get("last_status") or "NOCH NICHT GEPRUEFT"
             ok=e.get("ok_ts"); last=e.get("last_ts")
-            if ok: age=self._age_text(ok)
+            if status in ("error","challenge","parser","unknown"):
+                age=("seit "+self._age_text(last)) if last else ""
+            elif ok: age=self._age_text(ok)
             elif last: age="seit "+self._age_text(last)
             else: age=""
             row=BoxLayout(size_hint_y=None,height=dp(26),spacing=dp(4))
@@ -1822,7 +1856,12 @@ class MainUI(FloatLayout):
             lb=Label(text=h["name"],color=PS1_TEXT,font_size=sp(9.5),font_name=SST_FONT,
                      halign="left",valign="middle",shorten=True,shorten_from="right")
             lb.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); row.add_widget(lb)
-            st=Label(text=f"{status.upper()} {age}",color=farbe,font_size=sp(8),
+            try: p_streak=int(e.get("parser_streak") or 0)
+            except (TypeError,ValueError): p_streak=0
+            status_txt=status.upper()
+            if status=="parser":
+                status_txt=f"PARSER {max(1,p_streak)}x"
+            st=Label(text=f"{status_txt} {age}",color=farbe,font_size=sp(8),
                      font_name=SST_FONT,halign="right",valign="middle",
                      size_hint_x=None,width=dp(120))
             st.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); row.add_widget(st)
@@ -1969,7 +2008,7 @@ class MainUI(FloatLayout):
         for r in d.get("results") or []:
             if not isinstance(r,dict) or not r.get("haendler"): continue
             try:
-                if r.get("klass") not in ("error","challenge","unavail"):
+                if r.get("klass") not in ("error","challenge","unavail","parser"):
                     r["klass"]=classify(True,r.get("preis"),self.max_preis)
                 self.scanned[r["haendler"]]=r
             except Exception: continue
@@ -2125,9 +2164,10 @@ class MainUI(FloatLayout):
             card=ResultCard(r,r.get("_is_new",False),r.get("_prev"),
                             self.history.get_serie(n),detail_cb=self._open_detail,
                             best=(r["klass"]=="hit" and best is not None and
-                                  r["preis"]==best))
+                                  r["preis"]==best),
+                            font_scale=self.font_scale)
             card.size_hint=(1,None)
-            card.height=dp(68) if r["klass"]=="challenge" else dp(56)
+            card.height=(dp(80) if r["klass"]=="challenge" else dp(56))*self.font_scale
             self.results_row.add_widget(card)
         if sx>0 or sy<1:
             Clock.schedule_once(lambda dt:(setattr(self.results_scroll,"scroll_x",sx),
@@ -2226,7 +2266,7 @@ class MainUI(FloatLayout):
         self._scan_done+=1; name=r.get("haendler","?")
         self._update_radar_hud()
         try:
-            if r["klass"] not in ("error","challenge","unavail"):
+            if r["klass"] not in ("error","challenge","unavail","parser"):
                 r["klass"]=classify(True,r["preis"],self.max_preis)
             prev=self.history.get_last(name)
             vorher_av=self.history.get_verfuegbar(name)
@@ -2291,9 +2331,11 @@ class MainUI(FloatLayout):
             self.results_status.color=PS1_GREY
             blk=sum(1 for x in self.scanned.values() if x["klass"]=="challenge")
             err=sum(1 for x in self.scanned.values() if x["klass"]=="error")
+            prs=sum(1 for x in self.scanned.values() if x["klass"]=="parser")
             teile=[f"{len(self.scanned)} GEPRÜFT"]
             if blk: teile.append(f"{blk} BOT-SCHUTZ")
             if err: teile.append(f"{err} FEHLER")
+            if prs: teile.append(f"{prs} PARSER")
             self._show_placeholder("KEINE TREFFER"," · ".join(teile))
         if self.auto_scan: self.next_scan_at=time.time()+self.auto_interval
 # ══════════ ROOT + APP ══════════

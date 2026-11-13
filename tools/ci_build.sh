@@ -21,10 +21,11 @@ export PYTHONIOENCODING=utf-8
 
 say "Pflichtdateien pruefen"
 missing=0
-for f in main.py scan_core.py service.py buildozer.spec icon.png \
+for f in main.py scan_core.py service.py shop_config.json buildozer.spec icon.png \
          assets/icon_fg.png assets/icon_bg.png assets/notify_icon.png tools/selftest.py \
          tools/kivy_smoke.py tools/ci_fix_cache.sh tools/ci_licenses.sh tools/ci_check_apk.sh \
          tools/ci_check_apk_aapt2.sh tools/ci_check_aab.sh \
+         tools/validate_shop_config.py \
          tools/p4a_hook.py tools/ci_log_failure.sh \
          android_src/de/ps5pro/ps5prosearchagent/BootReceiver.java; do
     if [ ! -f "$f" ]; then
@@ -90,6 +91,9 @@ fi
 
 echo "Host-Python: $(.venv/bin/python -V 2>&1)"
 .venv/bin/buildozer --version
+
+say "Shop-Konfiguration pruefen"
+.venv/bin/python tools/validate_shop_config.py
 
 say "SDK/NDK-Cache pruefen"
 bash tools/ci_fix_cache.sh

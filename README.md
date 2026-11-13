@@ -15,12 +15,16 @@ die Datei antippen und die Installation aus dieser Quelle erlauben.
 
 | Stand | Bedeutung |
 |---|---|
-| **v5.0 Final** | Die aktuelle, fertige Version. Für Installation und Updates nehmen. |
+| **v5.0 Final** | Die aktuelle **veröffentlichte** Version. Für Installation und Updates nehmen. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
 
-Es gibt nur noch diese zwei Releases. Alle Zwischenstände, Beta-Versionen und
-Test-Releases wurden entfernt. Alle Downloads:
+Es gibt nur noch diese zwei **veröffentlichten** Releases. Alle Zwischenstände,
+Beta-Versionen und Test-Releases wurden entfernt. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
+
+> **Projektstand:** Der `main`-Branch enthält den **v5.1-Code** (Radar-Abstand,
+> Schrift-Skalierung und Parser-Status). v5.1 ist noch **nicht veröffentlicht**;
+> die Downloads oben sind **v5.0 Final** und **v1.0**.
 
 ## Was die App kann
 
@@ -129,7 +133,7 @@ python3 tools/validate_shop_config.py
 Prüft Preis-Parsing, JSON-LD, Verfügbarkeit, Parserfehler vs. echte
 Nicht-Verfügbarkeit, Bot-Schutz-Erkennung, Klassifizierung, HTTP-Cache,
 Preisverlauf, Alarm-Regeln, Shop-Health, Remote-Config inklusive Parser-Regeln,
-responsive Layout-Geometrie und Boot-Manifest — 572 Zusicherungen, ohne Kivy
+responsive Layout-Geometrie und Boot-Manifest — 584 Zusicherungen, ohne Kivy
 und ohne Android. Der Release-Workflow führt sie vor jedem Release aus. Der Kivy-Smoke-Test
 ist ebenfalls ein eigenes CI-Gate und braucht kein Android-Gerät.
 `tools/validate_shop_config.py` prüft die echte `shop_config.json` mit genau

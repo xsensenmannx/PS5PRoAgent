@@ -139,6 +139,11 @@ def check(name, got, want):
         FAILS.append(name)
 
 
+HTML_PARSER = ("<html><head><title>PlayStation 5 Pro 2 TB</title></head>"
+               "<body>PlayStation 5 Pro 2 TB · Auf Lager</body></html>")
+HTML_UNAVAIL = ("<html><head><title>PlayStation 5 Pro 2 TB</title></head>"
+                 "<body>PlayStation 5 Pro 2 TB · derzeit nicht verfügbar</body></html>")
+
 HTML_OK = """<html><head>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Product",
@@ -269,6 +274,8 @@ def main_tests():
         "nicht verfügbar ausverkauft", {"verfuegbar": None}), False)
     check("verfuegbar positiv", core.pruefe_verfuegbar(
         "in den warenkorb jetzt kaufen", {"verfuegbar": None}), True)
+    check("verfuegbarkeit ohne Marker explizit",
+          core._verfuegbarkeit_aus_text("<html>Produktseite</html>"), (True, False))
 
     # Haendlerdaten
     names = [h["name"] for h in core.HAENDLER]
@@ -457,6 +464,27 @@ def scan_status_tests():
                                       "urls": ["https://example.invalid/challenge"]})
         check("scan_einen HTML-Challenge ist challenge",
               (rchallenge or {}).get("klass"), "challenge")
+
+        # HTTP 200 mit erkannter PS5-Pro-Seite, aber ohne Preis: Das ist ein
+        # Parserfehler, nicht automatisch "nicht verfuegbar".
+        core.reset_http_cache()
+        core._try_url = lambda u, a, p=None: (HTML_PARSER, None, {})
+        rparser = core.scan_einen({"name": "Test Parser", "land": "DE",
+                                   "urls": ["https://example.invalid/parser"]})
+        check("scan_einen HTTP 200 Parserfehler",
+              (rparser or {}).get("klass"), "parser")
+        check("scan_einen Parserfehler meldet Grund",
+              (rparser or {}).get("fehler"), "Parser: kein Preis")
+        check("scan_einen Parserfehler nicht gecacht",
+              core.http_cache().get("https://example.invalid/parser"), None)
+
+        # Ausdruecklich ausverkauft bleibt echte Nicht-Verfuegbarkeit.
+        core.reset_http_cache()
+        core._try_url = lambda u, a, p=None: (HTML_UNAVAIL, None, {})
+        runavail = core.scan_einen({"name": "Test Unavail", "land": "DE",
+                                    "urls": ["https://example.invalid/unavail"]})
+        check("scan_einen ausverkauft ist unavail",
+              (runavail or {}).get("klass"), "unavail")
     finally:
         core._try_url = alt
 
@@ -573,8 +601,8 @@ def spec_tests():
     # Play verlangt seit 31.08.2026 API 36 fuer neue Apps und Updates.
     check("spec api 36", c.get("app", "android.api"), "36")
     check("spec release aab", c.get("app", "android.release_artifact"), "aab")
-    check("spec version", c.get("app", "version"), "5.0")
-    check("spec versionCode", c.get("app", "android.numeric_version"), "17")
+    check("spec version", c.get("app", "version"), "5.1")
+    check("spec versionCode", c.get("app", "android.numeric_version"), "18")
     check("spec cutout", c.get("app", "android.display_cutout"), "shortEdges")
     # Hintergrund-Scan: ohne foregroundServiceType startet Android 14 den
     # Dienst nicht, ohne die Rechte schon gar nicht.
@@ -674,8 +702,20 @@ def feature_tests():
         hh.record({"haendler": "Shop A", "klass": "challenge", "fehler": "Bot"})
         hh.record({"haendler": "Shop A", "klass": "error", "fehler": "Timeout"})
         check("Health Fehlerzaehler", hh.all()["Shop A"]["fail_streak"], 2)
+        check("Health Parserzaehler anfangs leer",
+              hh.all()["Shop A"].get("parser_streak", 0), 0)
+        hh.record({"haendler": "Shop A", "klass": "parser", "fehler": "Parser"})
+        hh.record({"haendler": "Shop A", "klass": "parser", "fehler": "Parser"})
+        check("Health wiederholte Parserfehler",
+              hh.all()["Shop A"]["parser_streak"], 2)
+        check("Health Parserfehler gesamt",
+              hh.all()["Shop A"]["parser_total"], 2)
+        check("Health Parser zaehlt als Fehler",
+              hh.all()["Shop A"]["fail_streak"], 4)
         hh.record({"haendler": "Shop A", "klass": "hit", "preis": 799.0})
         check("Health Erfolg setzt zurueck", hh.all()["Shop A"]["fail_streak"], 0)
+        check("Health Parser-Serie nach Erfolg",
+              hh.all()["Shop A"]["parser_streak"], 0)
         core._crash_schreiben("test", "Traceback: Testfehler")
         check("Crash-Log schreibbar", "Testfehler" in core.read_crash_log(), True)
         core.clear_crash_log()
@@ -943,6 +983,15 @@ def adaptive_boot_tests():
     check("Layout Hochformat", g["wide"], False)
     check("Layout Hochformat Panel", g["panel_w"], 420)
     check("Layout Hochformat Panel-Position", g["panel_x"], 0)
+    check("Layout Radar-Abstand zur Trefferliste",
+          g["radar_bottom"] - (g["panel_y"] + g["results_h"]),
+          main.RADAR_PANEL_GAP)
+
+    # Auch auf einem kurzen Telefon muss der Puffer erhalten bleiben.
+    g_kurz = main.layout_geometrie(420, 480)
+    check("Layout Radar-Abstand kurz",
+          g_kurz["radar_bottom"] - (g_kurz["panel_y"] + g_kurz["results_h"]),
+          main.RADAR_PANEL_GAP)
 
     g = main.layout_geometrie(1280, 800)
     check("Layout Tablet quer", g["wide"], True)
