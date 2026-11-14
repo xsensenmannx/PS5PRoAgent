@@ -1,13 +1,14 @@
-# Baut das Debug-APK der Offline-Hilfe (support_app/).
+# Baut das Debug-APK und die Windows-EXE der Offline-Hilfe (support_app/).
 #
 # Bewusst getrennt von release.yml und play-aab.yml: Die Radar-App und ihre
-# Releases bleiben unberuehrt, das Hilfe-APK ist ein eigenes Artefakt.
+# Releases bleiben unberuehrt. Bei einem Tag hilfe-v1.2.3 entsteht ein Release
+# mit APK und EXE an derselben Stelle.
 name: Support APK
 
 on:
   workflow_dispatch:
   push:
-    # Tag-Push hilfe-v1.2.3 baut das APK und legt automatisch ein Release an.
+    # Tag-Push hilfe-v1.2.3 baut APK und EXE und legt automatisch ein Release an.
     # Bei Tag-Pushes wertet GitHub paths-Filter nicht aus, der Build laeuft also
     # immer; Branch-Pushes bleiben auf support_app/ beschraenkt.
     tags:
@@ -18,13 +19,14 @@ on:
       - "support_app/**"
       - ".github/workflows/support-apk.yml"
 
-# Release anlegen und APK hochladen braucht Schreibrechte auf contents.
+# Release anlegen und Dateien hochladen braucht Schreibrechte auf contents.
 # Gilt nur fuer diesen Workflow; release.yml (Radar) bleibt unberuehrt.
 permissions:
   contents: write
 
 jobs:
   apk:
+    name: Android-APK
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
@@ -116,19 +118,82 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # Nur bei Tag-Pushes: Release anlegen und APK anhaengen. Ein erneuter
-      # Lauf zum selben Tag ersetzt die APK, statt abzubrechen.
+  windows:
+    name: Windows-EXE
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Gleiche Versionen wie im lokalen Windows-Build; Kivy liefert fuer
+      # Windows fertige Wheels, es wird nichts kompiliert.
+      - name: Abhaengigkeiten
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "kivy[base]==2.3.2" "pyinstaller==6.22.3" "pillow==11.3.0"
+
+      - name: EXE bauen
+        working-directory: support_app
+        run: >-
+          python -m PyInstaller --noconfirm --clean --onefile --windowed
+          --name "PS5ProSearchAgent-Hilfe" --icon icon.ico main.py
+
+      # --selftest braucht kein Fenster (siehe README); er prueft den Kern
+      # im gepackten Einzeldatei-Build.
+      - name: Selftest
+        working-directory: support_app
+        shell: pwsh
+        run: |
+          ./dist/PS5ProSearchAgent-Hilfe.exe --selftest
+          if ($LASTEXITCODE -ne 0) { throw "Selftest fehlgeschlagen ($LASTEXITCODE)" }
+
+      - name: EXE sichern
+        uses: actions/upload-artifact@v7
+        with:
+          name: ps5pro-search-agent-hilfe-win
+          path: support_app/dist/PS5ProSearchAgent-Hilfe.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Release
+    # Nur bei Tag-Pushes, und erst wenn beide Builds durch sind.
+    if: startsWith(github.ref, 'refs/tags/hilfe-v')
+    needs: [apk, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # Legt je Artefakt einen Unterordner an:
+      #   dist/ps5pro-search-agent-hilfe-apk/bin/*.apk
+      #   dist/ps5pro-search-agent-hilfe-win/PS5ProSearchAgent-Hilfe.exe
+      - name: Artefakte holen
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+
+      # Ein erneuter Lauf zum selben Tag ersetzt beide Dateien, statt
+      # mit "asset already exists" abzubrechen.
       - name: Release veroeffentlichen
-        if: startsWith(github.ref, 'refs/tags/hilfe-v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#hilfe-v}"
-          APK=$(ls -1 support_app/bin/*.apk | head -n 1)
-          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
-          SIZE=$(wc -c < "$APK" | tr -d ' ')
+          APK=$(ls -1 dist/*/bin/*.apk | head -n 1)
+          EXE=$(ls -1 dist/*/*.exe | head -n 1)
+          APK_NAME=$(basename "$APK")
+          EXE_NAME=$(basename "$EXE")
+          APK_SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          EXE_SHA=$(sha256sum "$EXE" | cut -d' ' -f1)
+          APK_SIZE=$(wc -c < "$APK" | tr -d ' ')
+          EXE_SIZE=$(wc -c < "$EXE" | tr -d ' ')
           cat > "$RUNNER_TEMP/notes.md" <<EOF
           ## PS5 Pro Search Agent – Hilfe $VERSION
 
@@ -136,28 +201,32 @@ jobs:
           Eigenes Paket (de.konsolenradar.support), unabhängig von der Radar-App
           und deren Releases.
 
-          ### Installation
+          ### Android
 
           - Android 7.0 oder neuer, arm64-v8a und armeabi-v7a
           - Debug-signiert: „Unbekannte Quellen“ erlauben; nicht für Google Play
           - Keine Internet-Berechtigung, keine Telemetrie
           - Parallel zur Radar-App installierbar
+          - \`$APK_NAME\` ($APK_SIZE Bytes)
 
-          ### Datei
+          ### Windows
 
-          - \`$(basename "$APK")\` ($SIZE Bytes)
+          - Portable EXE, kein Installer
+          - Nicht signiert: SmartScreen warnt beim ersten Start
+          - \`$EXE_NAME\` ($EXE_SIZE Bytes)
 
-          ### Prüfsumme
+          ### Prüfsummen
 
           \`\`\`
-          SHA-256  $SHA
+          SHA-256  $APK_SHA  $APK_NAME
+          SHA-256  $EXE_SHA  $EXE_NAME
           \`\`\`
           EOF
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG existiert - APK wird ersetzt"
-            gh release upload "$TAG" "$APK" --clobber
+            echo "Release $TAG existiert - Dateien werden ersetzt"
+            gh release upload "$TAG" "$APK" "$EXE" --clobber
           else
-            gh release create "$TAG" "$APK" \
+            gh release create "$TAG" "$APK" "$EXE" \
               --title "PS5 Pro Search Agent – Hilfe $VERSION" \
               --notes-file "$RUNNER_TEMP/notes.md" \
               --latest=false
