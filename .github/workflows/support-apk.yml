@@ -59,8 +59,8 @@ jobs:
           path: |
             ~/.buildozer
             support_app/.buildozer
-          key: support-buildozer-${{ hashFiles('support_app/buildozer.spec') }}
-          restore-keys: support-buildozer-
+          key: support-buildozer-v2-${{ hashFiles('support_app/buildozer.spec') }}
+          restore-keys: support-buildozer-v2-
 
       - name: APK bauen
         working-directory: support_app
@@ -68,6 +68,8 @@ jobs:
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
           PYTHONUTF8: "1"
+          # Neutralisiert p4as "pip install -U pip" im Build-venv (p4a #3339).
+          PIP_CONSTRAINT: ${{ github.workspace }}/support_app/pip-constraints.txt
         run: buildozer -v android debug
 
       - name: Manifest pruefen
