@@ -163,9 +163,12 @@ jobs:
         env:
           KIVY_GL_BACKEND: mock
           KIVY_NO_ARGS: "1"
+        # PowerShell wartet bei GUI-Programmen nicht und laesst LASTEXITCODE
+        # leer; Start-Process -Wait liefert den echten Exitcode der EXE.
         run: |
-          ./dist/PS5ProSearchAgent-Hilfe.exe --selftest
-          if ($LASTEXITCODE -ne 0) { throw "Selftest fehlgeschlagen ($LASTEXITCODE)" }
+          $p = Start-Process -FilePath ".\dist\PS5ProSearchAgent-Hilfe.exe" `
+            -ArgumentList "--selftest" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Selftest fehlgeschlagen ($($p.ExitCode))" }
 
       - name: EXE sichern
         uses: actions/upload-artifact@v7
