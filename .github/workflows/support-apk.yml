@@ -7,12 +7,19 @@ name: Support APK
 on:
   workflow_dispatch:
   push:
+    # Tag-Push hilfe-v1.2.3 baut das APK und legt automatisch ein Release an.
+    # Bei Tag-Pushes wertet GitHub paths-Filter nicht aus, der Build laeuft also
+    # immer; Branch-Pushes bleiben auf support_app/ beschraenkt.
+    tags:
+      - "hilfe-v*"
     paths:
       - "support_app/**"
       - ".github/workflows/support-apk.yml"
 
+# Release anlegen und APK hochladen braucht Schreibrechte auf contents.
+# Gilt nur fuer diesen Workflow; release.yml (Radar) bleibt unberuehrt.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apk:
@@ -20,6 +27,16 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v5
+
+      # Tag hilfe-v1.2.3 -> version=1.2.3, versionCode=10203. Das Skript ist
+      # dasselbe wie im Radar-Release; nur der Tag-Praefix wird abgeschnitten.
+      - name: Version aus Tag
+        if: startsWith(github.ref, 'refs/tags/hilfe-v')
+        run: |
+          set -euo pipefail
+          bash tools/set_version_from_tag.sh "v${GITHUB_REF_NAME#hilfe-v}" \
+            support_app/buildozer.spec
+          grep -E '^(version|android\.numeric_version)' support_app/buildozer.spec
 
       - name: Java 17
         uses: actions/setup-java@v6
@@ -94,3 +111,50 @@ jobs:
             support_app/buildozer.log
           if-no-files-found: warn
           retention-days: 14
+
+      # Nur bei Tag-Pushes: Release anlegen und APK anhaengen. Ein erneuter
+      # Lauf zum selben Tag ersetzt die APK, statt abzubrechen.
+      - name: Release veroeffentlichen
+        if: startsWith(github.ref, 'refs/tags/hilfe-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#hilfe-v}"
+          APK=$(ls -1 support_app/bin/*.apk | head -n 1)
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          SIZE=$(wc -c < "$APK" | tr -d ' ')
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          ## PS5 Pro Search Agent – Hilfe $VERSION
+
+          Eigenständige Offline-Hilfe für den PS5 Pro Search Agent.
+          Eigenes Paket (de.konsolenradar.support), unabhängig von der Radar-App
+          und deren Releases.
+
+          ### Installation
+
+          - Android 7.0 oder neuer, arm64-v8a und armeabi-v7a
+          - Debug-signiert: „Unbekannte Quellen“ erlauben; nicht für Google Play
+          - Keine Internet-Berechtigung, keine Telemetrie
+          - Parallel zur Radar-App installierbar
+
+          ### Datei
+
+          - \`$(basename "$APK")\` ($SIZE Bytes)
+
+          ### Prüfsumme
+
+          \`\`\`
+          SHA-256  $SHA
+          \`\`\`
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG existiert - APK wird ersetzt"
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            gh release create "$TAG" "$APK" \
+              --title "PS5 Pro Search Agent – Hilfe $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --latest=false
+          fi
