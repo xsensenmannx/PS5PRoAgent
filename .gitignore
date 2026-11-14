@@ -17,6 +17,11 @@ buildozer.log
 *.keystore
 *.jks
 
+# Windows-Build der Hilfe-App (support_app/): nicht ins Repository
+support_app/.venv-win/
+support_app/build/
+support_app/dist/
+
 # Betriebssystem-Kram
 .DS_Store
 Thumbs.db

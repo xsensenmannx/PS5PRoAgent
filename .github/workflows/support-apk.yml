@@ -1,0 +1,82 @@
+# Baut das Debug-APK der Offline-Hilfe (support_app/).
+#
+# Bewusst getrennt von release.yml und play-aab.yml: Die Radar-App und ihre
+# Releases bleiben unberuehrt, das Hilfe-APK ist ein eigenes Artefakt.
+name: Support APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "support_app/**"
+      - ".github/workflows/support-apk.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Python 3.11.9
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11.9"
+
+      # Der Kern ist Kivy-frei, die Tests laufen in Sekunden und brauchen kein SDK.
+      - name: Kerntests
+        run: python -m unittest discover -s support_app/tests -v
+
+      - name: Buildozer installieren
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "git+https://github.com/kivy/buildozer" "cython==0.29.37" legacy-cgi
+
+      - name: Build-Cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.buildozer
+            support_app/.buildozer
+          key: support-buildozer-${{ hashFiles('support_app/buildozer.spec') }}
+          restore-keys: support-buildozer-
+
+      - name: APK bauen
+        working-directory: support_app
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          PYTHONUTF8: "1"
+        run: buildozer -v android debug
+
+      - name: Manifest pruefen
+        run: |
+          set -euo pipefail
+          APK=$(ls -1 support_app/bin/*.apk | head -n 1)
+          AAPT2=$(ls -1 "$HOME"/.buildozer/android/platform/android-sdk/build-tools/*/aapt2 | tail -n 1)
+          "$AAPT2" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission)" || true
+          "$AAPT2" dump badging "$APK" | grep -q "package: name='de.konsolenradar.support'" \
+            || { echo "::error::Falsches Paket im APK"; exit 1; }
+          sha256sum "$APK" | tee support_app/bin/SHA256SUMS
+
+      - name: APK sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps5pro-search-agent-hilfe-apk
+          path: |
+            support_app/bin/*.apk
+            support_app/bin/SHA256SUMS
+            support_app/buildozer.log
+          if-no-files-found: warn
+          retention-days: 14

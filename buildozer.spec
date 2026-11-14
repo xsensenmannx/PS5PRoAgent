@@ -27,7 +27,7 @@ source.include_exts = py,png,jpg,kv,atlas,json,ttf
 #source.exclude_exts = spec
 
 # (list) List of directory to exclude (leave empty to not exclude anything)
-source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .venv, fonts, tools
+source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .venv, fonts, tools, support_app
 
 # (list) List of exclusions using pattern matching
 # Do not prefix with './'
