@@ -144,6 +144,11 @@ jobs:
       # modale Messagebox und der Job haengt bis zum Timeout. Das Mock-Backend
       # ueberspringt die GL-Pruefung. Es gilt nur fuer den Build, nicht fuer die
       # gebaute EXE.
+      #
+      # Software-Renderer wurden geprueft (Branch gl-experiment, 2026-11-14):
+      # Mesa 26.2.6/llvmpipe neben der Onedir-EXE wird nicht geladen, es bleibt
+      # bei GDI/OpenGL 1.1. ANGLE (angle_sdl2) liefert GL ES 2.0 ueber D3D11
+      # WARP, der Prozess stuerzt aber mit 0xC0000409 ab. Deshalb bleibt Mock.
       - name: EXE bauen
         working-directory: support_app
         env:
