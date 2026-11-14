@@ -111,7 +111,9 @@ jobs:
             support_app/bin/*.apk
             support_app/bin/SHA256SUMS
             support_app/buildozer.log
-          if-no-files-found: warn
+          # Bei einem Fehlschlag existiert oft keine APK. Der Job ist dann
+          # bereits rot; eine zweite Warnung ueber fehlende Dateien hilft nie.
+          if-no-files-found: ignore
           retention-days: 14
 
       # Nur bei Tag-Pushes: Release anlegen und APK anhaengen. Ein erneuter
