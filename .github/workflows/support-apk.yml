@@ -84,7 +84,8 @@ jobs:
 
       - name: APK sichern
         if: always()
-        uses: actions/upload-artifact@v4
+        # v7 laeuft auf Node 24; v4 wird von GitHub als veraltet gemeldet.
+        uses: actions/upload-artifact@v7
         with:
           name: ps5pro-search-agent-hilfe-apk
           path: |
