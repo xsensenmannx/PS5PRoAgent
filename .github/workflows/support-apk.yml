@@ -12,6 +12,8 @@ on:
     # immer; Branch-Pushes bleiben auf support_app/ beschraenkt.
     tags:
       - "hilfe-v*"
+    # Ohne branches wuerde ein tags-Filter Branch-Pushes komplett abschalten.
+    branches: ["**"]
     paths:
       - "support_app/**"
       - ".github/workflows/support-apk.yml"
