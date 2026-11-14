@@ -55,7 +55,10 @@ support_app/
 ├── shops.py                   Die 42 Shops des Radars
 ├── knowledge.py               Wissensbasis
 ├── buildozer.spec             Android-Build, Paket de.konsolenradar.support
-├── icon.png                   App-Icon
+├── make_icon.py               erzeugt Icon, adaptive Ebenen und ICO
+├── icon.png                   512er Icon (Store/Launcher)
+├── icon_fg.png / icon_bg.png  adaptives Icon (432er Ebenen)
+├── icon.ico                   Windows-Icon
 └── tests/test_support_core.py Tests ohne Kivy
 ```
 
