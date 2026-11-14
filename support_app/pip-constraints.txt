@@ -1,0 +1,8 @@
+# python-for-android legt für die Pure-Python-Abhängigkeiten ein eigenes venv
+# an und führt dort "pip install -U pip" aus. Ein Sprung auf pip 26 hinterlässt
+# gemischte Dateien aus zwei Versionen und bricht mit
+# "ImportError: cannot import name 'open_rich_spinner'" ab (p4a #3339).
+#
+# Diese Bindung hält pip auf der Version, die ensurepip mitbringt; das
+# Selbst-Upgrade wird damit zum No-op. Über PIP_CONSTRAINT im Workflow gesetzt.
+pip==24.0
