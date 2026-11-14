@@ -18,7 +18,12 @@ version = 1.0.0
 # hostpython3 muessen identisch sein, sonst bricht p4a den Build ab.
 requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.1
 
+# Legacy-Icon 512 plus adaptives Icon (432er Ebenen, vom Launcher maskiert).
+# Beide Ebenen sind Pflicht, sobald eine gesetzt ist.
 icon.filename = %(source.dir)s/icon.png
+icon.adaptive_foreground.filename = %(source.dir)s/icon_fg.png
+icon.adaptive_background.filename = %(source.dir)s/icon_bg.png
+
 orientation = portrait
 fullscreen = 0
 
