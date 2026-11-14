@@ -130,12 +130,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Gleiche Versionen wie im lokalen Windows-Build; Kivy liefert fuer
-      # Windows fertige Wheels, es wird nichts kompiliert.
+      # Gleiche Kivy-/PyInstaller-Versionen wie im lokalen Windows-Build.
+      # Pillow bewusst nicht pinnen: kivy[base] 2.3.2 verlangt pillow<11 und
+      # loest die passende Version selbst auf. Die App braucht Pillow nicht,
+      # nur make_icon.py.
       - name: Abhaengigkeiten
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "kivy[base]==2.3.2" "pyinstaller==6.22.3" "pillow==11.3.0"
+          python -m pip install "kivy[base]==2.3.2" "pyinstaller==6.22.3"
 
       - name: EXE bauen
         working-directory: support_app
