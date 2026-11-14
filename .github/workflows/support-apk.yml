@@ -158,6 +158,11 @@ jobs:
       - name: Selftest
         working-directory: support_app
         shell: pwsh
+        # Auch die fertige EXE baut beim Start Kivys Fenster auf; ohne Mock
+        # beendet sie sich auf dem Runner wegen OpenGL 1.1.
+        env:
+          KIVY_GL_BACKEND: mock
+          KIVY_NO_ARGS: "1"
         run: |
           ./dist/PS5ProSearchAgent-Hilfe.exe --selftest
           if ($LASTEXITCODE -ne 0) { throw "Selftest fehlgeschlagen ($LASTEXITCODE)" }
