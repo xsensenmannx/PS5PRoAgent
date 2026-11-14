@@ -1,29 +1,34 @@
 """Erzeugt das Icon der Hilfe-App.
 
-Ein Motiv, drei Ausgaben:
-  icon.png       512x512, vollflächig (Store/Launcher-Fallback)
+Motiv: Sprechblase (Hilfe/Antwort) mit Radar-Ping und bernsteinfarbenem
+Treffer-Punkt (Alarm). Drei Ausgaben aus einer Zeichnung:
+
+  icon.png       512x512, vollflaechig (Store/Launcher-Fallback)
   icon_fg.png    432x432, transparente Vorderebene (adaptives Icon)
   icon_bg.png    432x432, Verlauf als Hintergrund (adaptives Icon)
   icon.ico       Windows-Symbole 16-256 px
 
-Gezeichnet wird vierfach vergrößert und danach verkleinert; dadurch sind die
-Kanten glatt, ohne dass eine SVG-Abhängigkeit nötig wäre.
+Gezeichnet wird vierfach vergroessert und danach verkleinert; dadurch sind die
+Kanten glatt, ohne dass eine SVG-Abhaengigkeit noetig waere.
 
     python make_icon.py
 """
-import math
 import os
 
 from PIL import Image, ImageDraw, ImageFilter
 
-S = 2048  # Arbeitsfläche, 4x der Zielgröße 512
+S = 2048  # Arbeitsflaeche, 4x der Zielgroesse 512
 HIER = os.path.dirname(os.path.abspath(__file__))
+NEIGUNG = -7  # Grad; gibt dem Motiv Sticker-Charakter statt Stock-Optik
 
-BLAU = (59, 130, 246, 255)
-BLAU_HELL = (110, 168, 255, 255)
+# Sprechblase: hell oben links, satt unten rechts.
+BLAU_OBEN = (118, 176, 255)
+BLAU_UNTEN = (40, 102, 232)
+# Hintergrund: fast schwarzes Navy mit blauem Schimmer.
+BG_OBEN = (8, 13, 26)
+BG_UNTEN = (24, 41, 70)
 WEISS = (255, 255, 255, 255)
-BG_OBEN = (9, 16, 30)
-BG_UNTEN = (23, 42, 68)
+AMBER = (255, 176, 46, 255)
 
 
 def verlauf(w, h, oben, unten):
@@ -38,88 +43,98 @@ def verlauf(w, h, oben, unten):
     return spalte.resize((w, h))
 
 
+def blasenmaske(px):
+    """Sprechblase mit Schwanz unten links als Maske."""
+    maske = Image.new("L", (px, px), 0)
+    d = ImageDraw.Draw(maske)
+
+    bw, bh = px * 0.615, px * 0.465
+    x0, y0 = (px - bw) / 2, px * 0.205
+    x1, y1 = x0 + bw, y0 + bh
+    radius = bh * 0.30
+    d.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=255)
+
+    # Schwanz: breite Basis in der Blase, Spitze unten links.
+    basis_links, basis_rechts = x0 + bw * 0.17, x0 + bw * 0.37
+    spitze = (x0 + bw * 0.10, y1 + bh * 0.26)
+    d.polygon([(basis_links, y1 - 2), (basis_rechts, y1 - 2), spitze], fill=255)
+    return maske, (x0, y0, x1, y1, bw, bh)
+
+
 def marke(px, mit_schatten=True):
-    """Lupe mit Euro-Zeichen, zentriert auf transparenter Fläche."""
+    """Sprechblase mit Ping, zentriert auf transparenter Flaeche."""
     bild = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-    cx = cy = px / 2
-    r = px * 0.285          # Ringradius
-    strich = px * 0.080     # Ringstärke
+    maske, (x0, y0, x1, y1, bw, bh) = blasenmaske(px)
 
     if mit_schatten:
         schatten = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-        sd = ImageDraw.Draw(schatten)
-        sd.ellipse(
-            (cx - r * 1.1, cy - r * 0.95, cx + r * 1.15, cy + r * 1.25),
-            fill=(0, 0, 0, 120),
-        )
-        schatten = schatten.filter(ImageFilter.GaussianBlur(px * 0.045))
-        bild.alpha_composite(schatten, (0, int(px * 0.02)))
+        schatten.paste((0, 0, 0, 135), (0, int(px * 0.022)), maske)
+        schatten = schatten.filter(ImageFilter.GaussianBlur(px * 0.035))
+        bild.alpha_composite(schatten)
 
+    # Blasenflaeche im Verlauf, dazu ein sehr weiches Licht oben links.
+    bild.paste(verlauf(px, px, BLAU_OBEN, BLAU_UNTEN).convert("RGBA"), (0, 0), maske)
+    licht = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(licht)
+    ld.ellipse(
+        (x0 - bw * 0.10, y0 - bh * 0.55, x1 - bw * 0.20, y0 + bh * 0.55),
+        fill=(255, 255, 255, 46),
+    )
+    licht = licht.filter(ImageFilter.GaussianBlur(px * 0.055))
+    licht.putalpha(Image.composite(licht.getchannel("A"), Image.new("L", (px, px), 0), maske))
+    bild.alpha_composite(licht)
+
+    # Zielscheibe: zwei Ringe, in der Mitte der amberne Treffer.
+    cx = (x0 + x1) / 2
+    cy = y0 + bh * 0.50
+    dot = px * 0.043
+    strich = int(px * 0.024)
+    z = ImageDraw.Draw(bild)
+    # Aussenring als vier Radar-Segmente, innen ein geschlossener Ring.
+    r_aussen = px * 0.158
+    for start in (0, 90, 180, 270):
+        z.arc(
+            (cx - r_aussen, cy - r_aussen, cx + r_aussen, cy + r_aussen),
+            start=start + 10, end=start + 70,
+            fill=(255, 255, 255, 150), width=strich,
+        )
+    r_innen = px * 0.092
+    z.ellipse(
+        (cx - r_innen, cy - r_innen, cx + r_innen, cy + r_innen),
+        outline=(255, 255, 255, 250), width=strich,
+    )
+
+    gluehen = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(gluehen)
+    gr = dot * 1.55
+    gd.ellipse((cx - gr, cy - gr, cx + gr, cy + gr), fill=(255, 176, 46, 95))
+    gluehen = gluehen.filter(ImageFilter.GaussianBlur(px * 0.013))
+    bild.alpha_composite(gluehen)
+
+    # Der Punkt sitzt auf den Boegen und bleibt auch bei 16 px sichtbar.
     d = ImageDraw.Draw(bild)
-
-    # Angedeutete Radar-Schleife oben rechts, bewusst blass.
-    for faktor, alpha in ((1.22, 80), (1.38, 45)):
-        rr = r * faktor
-        d.arc(
-            (cx - rr, cy - rr, cx + rr, cy + rr),
-            start=-40, end=30,
-            fill=(110, 168, 255, alpha),
-            width=max(int(px * 0.010), 2),
-        )
-
-    # Glasfläche dezent aufhellen, dann der Ring im Verlauf.
-    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(59, 130, 246, 30))
-    ring_maske = Image.new("L", (px, px), 0)
-    ImageDraw.Draw(ring_maske).ellipse(
-        (cx - r, cy - r, cx + r, cy + r),
-        outline=255, width=int(strich),
-    )
-    bild.paste(verlauf(px, px, (124, 178, 255), (37, 99, 235)).convert("RGBA"),
-               (0, 0), ring_maske)
-
-
-    # Euro-Zeichen
-    h = r * 1.08
-    w = r * 0.72
-    lw = max(int(px * 0.044), 3)
-    d.arc(
-        (cx - w * 0.58, cy - h / 2, cx + w * 0.58, cy + h / 2),
-        start=40, end=320, fill=WEISS, width=lw,
-    )
-    for versatz, breite in ((-h * 0.11, 1.02), (h * 0.15, 0.92)):
-        d.line(
-            (cx - w * 0.60, cy + versatz, cx - w * 0.60 + w * breite, cy + versatz),
-            fill=WEISS, width=lw,
-        )
-
-    # Griff, nach dem Ring gezeichnet, damit er sauber anschließt.
-    winkel = math.radians(45)
-    start = r * 0.92
-    ende = r + px * 0.115
-    x1, y1 = cx + start * math.cos(winkel), cy + start * math.sin(winkel)
-    x2, y2 = cx + ende * math.cos(winkel), cy + ende * math.sin(winkel)
-    griff_maske = Image.new("L", (px, px), 0)
-    gm = ImageDraw.Draw(griff_maske)
-    gm.line((x1, y1, x2, y2), fill=255, width=int(strich))
-    for x, y in ((x1, y1), (x2, y2)):
-        gm.ellipse(
-            (x - strich / 2, y - strich / 2, x + strich / 2, y + strich / 2),
-            fill=255,
-        )
-    bild.paste(verlauf(px, px, (90, 150, 245), (37, 99, 235)).convert("RGBA"),
-               (0, 0), griff_maske)
-
+    d.ellipse((cx - dot, cy - dot, cx + dot, cy + dot), fill=AMBER)
     return bild
 
 
 def icon_png():
     grund = verlauf(S, S, BG_OBEN, BG_UNTEN).convert("RGBA")
-    grund.alpha_composite(marke(S))
+
+    # Blauer Schimmer hinter dem Motiv, damit das Icon nicht flach wirkt.
+    schimmer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(schimmer)
+    r = S * 0.40
+    sd.ellipse((S / 2 - r, S * 0.44 - r, S / 2 + r, S * 0.44 + r), fill=(58, 118, 214, 74))
+    schimmer = schimmer.filter(ImageFilter.GaussianBlur(S * 0.10))
+    grund.alpha_composite(schimmer)
+
+    grund.alpha_composite(marke(S).rotate(NEIGUNG, resample=Image.BICUBIC))
     return grund.convert("RGB").resize((512, 512), Image.LANCZOS)
 
 
 def adaptive():
     vorn = marke(S, mit_schatten=False)
+    vorn = vorn.rotate(NEIGUNG, resample=Image.BICUBIC)
     vorn = vorn.crop((int(S * 0.08), int(S * 0.08), int(S * 0.92), int(S * 0.92)))
     vorn = vorn.resize((432, 432), Image.LANCZOS)
     hinten = verlauf(432, 432, BG_OBEN, BG_UNTEN).convert("RGBA")
