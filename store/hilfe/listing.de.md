@@ -22,8 +22,10 @@ ohne Telemetrie.
   nur der Radar.
 • Diagnose: Diagnose-Block aus dem Radar einfügen, die App findet 403/429,
   Webhook-Fehler, auffällige Konfidenz und fehlende Treffer.
-• Optional KI: mit deinem eigenen Freebuff-API-Key für freie Fragen. Ohne Key
-  bleibt alles offline; jede KI-Frage kostet Guthaben deines Accounts.
+• Optional KI: mit deinem eigenen Freebuff-API-Key für freie Fragen. Die KI
+  bekommt die passenden Hilfe-Karten als Beleg mitgeschickt und antwortet kurz,
+  damit sie keine Einstellungen erfindet. Ohne Key bleibt alles offline; jede
+  KI-Frage kostet Guthaben deines Accounts.
 
 **Was die App nicht macht**
 

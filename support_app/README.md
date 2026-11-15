@@ -23,7 +23,7 @@ und der Key bleibt im privaten App-Speicher.
 | Suche | Wunsch wie „unter 700, nur Amazon, nur neu“ wird zu Einstellungen, Schritten und Hinweisen — mit den echten Schlüsseln des Radars |
 | Diagnose | Füge den Diagnose-Text aus dem Radar ein: Shops, letzter Scan, Treffer, Konfidenz, Webhook-Fehler, 403/429 |
 | Themen | Alle Karten als Liste, ein Tipp öffnet die Antwort im Chat |
-| KI | Optional: Freitext an ein Modell der Freebuff-API, mit eigenem Key |
+| KI | Optional: Freitext an ein Modell der Freebuff-API, mit eigenem Key; passende Karten gehen als Beleg mit, Antworten sind kurz |
 
 ## Was sie nicht kann
 
@@ -42,6 +42,11 @@ Reiter „KI“, oben rechts „KEY“:
 1. Freebuff-API-Key eintragen (bleibt lokal, wird nur maskiert angezeigt).
 2. „MODELLE“ lädt die verfügbaren Modelle des Accounts, eines auswählen.
 3. Speichern. Fragen gehen direkt an `https://freebuff.com/api/v1/paid`.
+
+Zu jeder Frage schickt die App zwei bis drei passende Karten aus
+`knowledge.py` als Kontext mit (`support_core.kontext_text`), damit das Modell
+keine Einstellungen erfindet. Die Antwort ist auf `max_tokens = 450` begrenzt
+und wird zur Sicherheit bei 1.400 Zeichen gekürzt.
 
 Ohne Key oder ohne Verbindung fällt die App auf die Offline-Karten zurück;
 ein Fehler wird angezeigt, nicht verschluckt. Jede Anfrage kostet Guthaben
@@ -66,7 +71,7 @@ steht als Hinweis im Plan, nicht als erfundener Schalter.
 
 ```
 support_app/
-├── main.py                    Kivy-Oberfläche (vier Reiter)
+├── main.py                    Kivy-Oberfläche (fünf Reiter)
 ├── support_core.py            Fragen, Berichtsparser, Diagnose (ohne Kivy)
 ├── search_assistant.py        Suchwunsch → Einstellungen (ohne Kivy)
 ├── ai_client.py               KI-Aufruf und Key-Speicher (ohne Kivy)
@@ -77,7 +82,7 @@ support_app/
 ├── icon.png                   512er Icon (Store/Launcher)
 ├── icon_fg.png / icon_bg.png  adaptives Icon (432er Ebenen)
 ├── icon.ico                   Windows-Icon
-└── tests/test_support_core.py Tests ohne Kivy
+└── tests/                     79 Tests ohne Kivy (Kern, Suche, KI-Client)
 ```
 
 ## Tests
@@ -86,7 +91,7 @@ support_app/
 python -m unittest discover -s support_app/tests -v
 ```
 
-Die Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
+Die 79 Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
 
 ## Signierung (Release-APK)
 
@@ -158,9 +163,10 @@ Gebaut wird für `arm64-v8a` und `armeabi-v7a`, also 64- und 32-Bit-ARM ab
 Android 7 (API 24). Emulator/Chromebooks (x86_64) lassen sich in
 `android.archs` ergänzen.
 
-Auf diesem Windows-Rechner ist kein Buildozer/Java/SDK installiert. Der
-vorgesehene Weg ist der Workflow `.github/workflows/support-apk.yml`
-(manuell startbar, baut ein Debug-APK und lädt es als Artefakt hoch).
+Auf diesem Windows-Rechner ist kein Buildozer/Java/SDK installiert. Gebaut wird
+über `.github/workflows/support-apk.yml`: Bei einem Push entsteht ein
+release-signiertes APK als Artefakt, bei einem Tag `hilfe-v*` zusätzlich das
+GitHub-Release mit APK und EXE. Ohne Keystore baut der Job bewusst kein APK.
 
 ## Windows-Version bauen
 
@@ -182,6 +188,12 @@ deshalb eine Warnung. Ein Selbsttest ohne Fenster:
 ```bash
 dist/PS5ProSearchAgent-Hilfe.exe --selftest   # Exitcode 0 = ok
 ```
+
+## Store-Paket
+
+Beschreibung, Screenshots, Icon, Feature-Grafik, Datenschutztext und
+Data-Safety-Antworten liegen unter `store/hilfe/`; die Upload-Reihenfolge steht
+in `store/hilfe/README.md`. Veröffentlicht ist davon nichts.
 
 ## Grenzen der Hilfe
 
