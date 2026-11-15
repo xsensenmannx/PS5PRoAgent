@@ -93,6 +93,7 @@ support_app/
 ├── shops.py                   Die 42 Shops des Radars
 ├── knowledge.py               Wissensbasis
 ├── buildozer.spec             Android-Build, Paket de.konsolenradar.support
+├── buildozer.play.spec        AAB-Variante (nur Artefakt unterscheidet sich)
 ├── make_icon.py               erzeugt Icon, adaptive Ebenen und ICO
 ├── icon.png                   512er Icon (Store/Launcher)
 ├── icon_fg.png / icon_bg.png  adaptives Icon (432er Ebenen)
@@ -187,6 +188,32 @@ Auf diesem Windows-Rechner ist kein Buildozer/Java/SDK installiert. Gebaut wird
 über `.github/workflows/support-apk.yml`: Bei einem Push entsteht ein
 release-signiertes APK als Artefakt, bei einem Tag `hilfe-v*` zusätzlich das
 GitHub-Release mit APK und EXE. Ohne Keystore baut der Job bewusst kein APK.
+
+### Android-AAB für Google Play
+
+`.github/workflows/support-aab.yml` baut auf Knopfdruck ein signiertes Android
+App Bundle. Der Lauf lädt **nichts** in die Play Console hoch und legt kein
+GitHub-Release an; das AAB bleibt ein Artefakt im Actions-Lauf.
+
+1. Actions → **Support AAB** → **Run workflow** (Branch `main`).
+2. Nach dem Lauf das Artefakt `ps5pro-search-agent-hilfe-aab` herunterladen.
+3. Enthalten sind `*.aab`, `*.apks`, `hilfe-universal.apk`, Prüfsummen und
+   `buildozer.log`.
+
+Der Workflow nutzt denselben Hilfe-Keystore wie die APK
+(`HILFE_KEYSTORE_BASE64`, `HILFE_KEYSTORE_PASSWORD`, `HILFE_KEY_ALIAS`,
+`HILFE_KEY_PASSWORD` optional) und prüft:
+
+- `jarsigner -verify` und den Zertifikat-Fingerabdruck gegen
+  `HILFE_CERT_SHA256`,
+- `bundletool validate` sowie den Bau einer Universal-APK,
+- Paket `de.konsolenradar.support`, `versionCode`, `versionName`, `minSdk`,
+  `targetSdk`, `INTERNET` und fehlendes Debug-Flag in der Universal-APK.
+
+Die Play-Spec `buildozer.play.spec` unterscheidet sich nur bei
+`android.release_artifact = aab`; Paketname, Titel und Icons bleiben identisch
+zur Sideload-APK. Eine Veröffentlichung bei Play ist damit ausdrücklich nicht
+verbunden.
 
 ## Windows-Version bauen
 

@@ -1,0 +1,246 @@
+# Baut auf Knopfdruck ein signiertes Android App Bundle (AAB) der Hilfe-App.
+#
+# Bewusst getrennt von support-apk.yml: Die GitHub-APK und ihre Releases
+# bleiben unveraendert. Das AAB ist ein reines Artefakt; dieser Workflow laedt
+# nichts in die Play Console hoch und legt kein Release an.
+name: Support AAB
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aab:
+    name: Android-AAB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 210
+    steps:
+      - uses: actions/checkout@v5
+
+      # Die Play-Spec unterscheidet sich nur beim Artefakt (aab statt apk).
+      # Paketname, Titel, Icons und Berechtigungen bleiben identisch zur APK.
+      - name: Play-Spec aktivieren
+        run: |
+          set -euo pipefail
+          cp support_app/buildozer.play.spec support_app/buildozer.spec
+          grep -E '^(title|package\.(name|domain)|version|android\.numeric_version|android\.release_artifact)' \
+            support_app/buildozer.spec
+
+      - name: Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Python 3.11.9
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11.9"
+
+      - name: Kerntests
+        run: python -m unittest discover -s support_app/tests -v
+
+      # Wie im APK-Workflow: libtool/autoconf werden fuer das libffi-Recipe
+      # gebraucht; aidl fehlt auf manchen Images.
+      - name: Systempakete
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential autoconf automake libtool pkg-config zlib1g-dev \
+            libncurses-dev libffi-dev libssl-dev liblzma-dev cmake unzip zip \
+            ccache git libltdl-dev
+          sudo apt-get install -y -qq --no-install-recommends aidl || true
+
+      - name: Buildozer installieren
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "git+https://github.com/kivy/buildozer" "cython==0.29.37" legacy-cgi certifi
+
+      # Eigener Cache-Key: Ein fuer die APK gebauter Dist darf nicht
+      # wiederverwendet werden, sonst entsteht still wieder eine APK.
+      - name: Build-Cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.buildozer
+            support_app/.buildozer
+          key: support-aab-buildozer-v1-${{ hashFiles('support_app/buildozer.play.spec') }}
+          restore-keys: support-aab-buildozer-v1-
+
+      # Fuer Play ist ein Upload-Key Pflicht. Fehlt das Secret, bricht der Job
+      # mit einer klaren Meldung ab, statt ein unsigniertes AAB zu erzeugen.
+      - name: Keystore bereitstellen
+        env:
+          KEYSTORE_B64: ${{ secrets.HILFE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.HILFE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ] || [ -z "${KEYSTORE_PASS:-}" ]; then
+            echo "::error::Secrets HILFE_KEYSTORE_BASE64 und HILFE_KEYSTORE_PASSWORD fehlen; ohne Upload-Key entsteht kein AAB."
+            exit 1
+          fi
+          KS="$RUNNER_TEMP/hilfe-aab.p12"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
+          chmod 600 "$KS"
+          ALIAS="${KEY_ALIAS:-hilfe}"
+          keytool -list -keystore "$KS" -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASS -alias "$ALIAS" > /dev/null
+          echo "Keystore in Ordnung: $(wc -c < "$KS") Bytes, Alias $ALIAS"
+
+      - name: AAB bauen
+        working-directory: support_app
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          PYTHONUTF8: "1"
+          # Neutralisiert p4as "pip install -U pip" im Build-venv (p4a #3339).
+          PIP_CONSTRAINT: ${{ github.workspace }}/support_app/pip-constraints.txt
+        run: |
+          set -euo pipefail
+          # Ein Dist aus einem APK-Lauf wuerde die Artefakt-Umstellung nicht
+          # mitbekommen. SDK/NDK liegen in ~/.buildozer und bleiben erhalten.
+          rm -rf .buildozer/android/platform/build-*
+          rm -f bin/*.aab
+          buildozer -v android release 2>&1 | tee buildozer.log
+          ls -l bin/*.aab
+
+      - name: AAB signieren und Signatur pruefen
+        env:
+          KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.HILFE_KEY_ALIAS }}
+          CERT_SHA256: ${{ secrets.HILFE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          AAB=$(ls -1 support_app/bin/*.aab | head -n 1)
+          KS="$RUNNER_TEMP/hilfe-aab.p12"
+          ALIAS="${KEY_ALIAS:-hilfe}"
+          if [ -z "${CERT_SHA256:-}" ]; then
+            echo "::error::Secret HILFE_CERT_SHA256 fehlt; Signatur nicht pruefbar."
+            exit 1
+          fi
+
+          # Alte Signaturbloecke entfernen, damit genau eine Signatur bleibt.
+          zip -q -d "$AAB" "META-INF/*.SF" "META-INF/*.RSA" "META-INF/*.DSA" \
+            >/dev/null 2>&1 || true
+          jarsigner -keystore "$KS" -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASS -keypass:env KEYSTORE_PASS \
+            -sigalg SHA256withRSA -digestalg SHA-256 \
+            "$AAB" "$ALIAS"
+          VERIFY=$(jarsigner -verify "$AAB" 2>&1)
+          printf '%s\n' "$VERIFY"
+          printf '%s\n' "$VERIFY" | grep -q "jar verified" \
+            || { echo "::error::jarsigner meldet keine gueltige Signatur"; exit 1; }
+
+          keytool -printcert -jarfile "$AAB" > "$RUNNER_TEMP/aab-certs.txt"
+          cat "$RUNNER_TEMP/aab-certs.txt"
+          ACTUAL=$(grep -i "SHA256:" "$RUNNER_TEMP/aab-certs.txt" | head -n 1 \
+            | sed 's/.*SHA256:[[:space:]]*//' | tr -d ':\r ' | tr 'A-F' 'a-f')
+          EXPECTED=$(printf '%s' "$CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
+          [ -n "$ACTUAL" ] || { echo "::error::Kein Zertifikat im AAB gefunden"; exit 1; }
+          [ "$ACTUAL" = "$EXPECTED" ] \
+            || { echo "::error::AAB-Zertifikat weicht ab: $ACTUAL"; exit 1; }
+          echo "AAB signiert mit $ACTUAL"
+
+      - name: bundletool laden
+        run: |
+          set -euo pipefail
+          BT="$RUNNER_TEMP/bundletool-all-1.18.3.jar"
+          curl -fsSL -o "$BT" \
+            https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $BT" \
+            | sha256sum -c -
+          java -jar "$BT" version
+
+      - name: AAB validieren und Universal-APK pruefen
+        env:
+          KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.HILFE_KEY_ALIAS }}
+          CERT_SHA256: ${{ secrets.HILFE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          BT="$RUNNER_TEMP/bundletool-all-1.18.3.jar"
+          AAB=$(ls -1 support_app/bin/*.aab | head -n 1)
+          ALIAS="${KEY_ALIAS:-hilfe}"
+          echo "Bundle: $AAB"
+          java -jar "$BT" validate --bundle="$AAB"
+
+          printf '%s' "$KEYSTORE_PASS" > "$RUNNER_TEMP/aab-store.pass"
+          printf '%s' "$KEYSTORE_PASS" > "$RUNNER_TEMP/aab-key.pass"
+          chmod 600 "$RUNNER_TEMP/aab-store.pass" "$RUNNER_TEMP/aab-key.pass"
+          trap 'rm -f "$RUNNER_TEMP/aab-store.pass" "$RUNNER_TEMP/aab-key.pass"' EXIT
+
+          java -jar "$BT" build-apks \
+            --bundle="$AAB" \
+            --output="$RUNNER_TEMP/hilfe-universal.apks" \
+            --mode=universal \
+            --ks="$RUNNER_TEMP/hilfe-aab.p12" \
+            --ks-key-alias="$ALIAS" \
+            --ks-pass="file:$RUNNER_TEMP/aab-store.pass" \
+            --key-pass="file:$RUNNER_TEMP/aab-key.pass"
+          unzip -o -q "$RUNNER_TEMP/hilfe-universal.apks" universal.apk -d "$RUNNER_TEMP"
+          UNIV="$RUNNER_TEMP/universal.apk"
+          cp "$RUNNER_TEMP/hilfe-universal.apks" support_app/bin/
+          cp "$UNIV" support_app/bin/hilfe-universal.apk
+
+          spec_wert() {
+            sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" \
+              support_app/buildozer.spec | head -n 1 | tr -d '\r' \
+              | sed 's/[[:space:]]*$//'
+          }
+          VERSION=$(spec_wert version)
+          CODE=$(spec_wert android.numeric_version)
+          SDK=$(spec_wert android.api)
+          MIN_SDK=$(spec_wert android.minapi)
+
+          AAPT2=$(ls -1 "$HOME"/.buildozer/android/platform/android-sdk/build-tools/*/aapt2 | tail -n 1)
+          APKSIGNER=$(ls -1 "$HOME"/.buildozer/android/platform/android-sdk/build-tools/*/apksigner | tail -n 1)
+          BADGING=$("$AAPT2" dump badging "$UNIV")
+          printf '%s\n' "$BADGING" | grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission)" || true
+          printf '%s\n' "$BADGING" | grep -q "package: name='de.konsolenradar.support'" \
+            || { echo "::error::Falsches Paket im AAB"; exit 1; }
+          printf '%s\n' "$BADGING" | grep -q "versionCode='$CODE'" \
+            || { echo "::error::versionCode ist nicht $CODE"; exit 1; }
+          printf '%s\n' "$BADGING" | grep -q "versionName='$VERSION'" \
+            || { echo "::error::versionName ist nicht $VERSION"; exit 1; }
+          printf '%s\n' "$BADGING" | grep -q "targetSdkVersion:'$SDK'" \
+            || { echo "::error::targetSdkVersion ist nicht $SDK"; exit 1; }
+          printf '%s\n' "$BADGING" | grep -q "sdkVersion:'$MIN_SDK'" \
+            || { echo "::error::minSdkVersion ist nicht $MIN_SDK"; exit 1; }
+          printf '%s\n' "$BADGING" | grep -q "android.permission.INTERNET" \
+            || { echo "::error::INTERNET-Berechtigung fehlt"; exit 1; }
+          if printf '%s\n' "$BADGING" | grep -q "application-debuggable"; then
+            echo "::error::AAB ist debuggable - Release-Build erwartet"
+            exit 1
+          fi
+
+          "$APKSIGNER" verify --print-certs "$UNIV" | tee "$RUNNER_TEMP/univ-certs.txt"
+          if grep -qi "Android Debug" "$RUNNER_TEMP/univ-certs.txt"; then
+            echo "::error::Universal-APK ist debug-signiert"; exit 1
+          fi
+          ACTUAL=$(grep -i "SHA-256 digest" "$RUNNER_TEMP/univ-certs.txt" | head -n 1 \
+            | sed 's/.*: //' | tr -d ':\r ' | tr 'A-F' 'a-f')
+          EXPECTED=$(printf '%s' "$CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
+          [ "$ACTUAL" = "$EXPECTED" ] \
+            || { echo "::error::Universal-APK-Zertifikat weicht ab: $ACTUAL"; exit 1; }
+
+          sha256sum "$AAB" "$UNIV" "$RUNNER_TEMP/hilfe-universal.apks" \
+            | tee support_app/bin/AAB-SHA256SUMS
+          ls -lh "$AAB" "$UNIV" "$RUNNER_TEMP/hilfe-universal.apks"
+
+      - name: AAB sichern
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ps5pro-search-agent-hilfe-aab
+          path: |
+            support_app/bin/*.aab
+            support_app/bin/*.apks
+            support_app/bin/hilfe-universal.apk
+            support_app/bin/AAB-SHA256SUMS
+            support_app/buildozer.log
+          if-no-files-found: warn
+          retention-days: 14

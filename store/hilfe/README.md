@@ -36,9 +36,10 @@ python tools/hilfe_store_assets.py    # Icon 512 + Feature-Grafik
 
 ## Noch offen vor dem ersten Upload
 
-- **AAB statt APK:** Play verlangt ein Android App Bundle. Für den Radar
-  existiert `buildozer.play.spec` + `play-aab.yml`; für die Hilfe fehlt das
-  Gegenstück (eigener Upload-Key, eigenes Paket).
+- **AAB:** Die Hilfe hat jetzt `buildozer.play.spec` und
+  `.github/workflows/support-aab.yml`; der Lauf erzeugt ein signiertes AAB als
+  Artefakt. Der Upload in die Play Console und die Zuordnung des Upload-Keys
+  stehen noch aus.
 - **Öffentliche Datenschutz-URL:** `PRIVACY.md` muss gehostet werden
   (GitHub Pages oder eine eigene Seite); die URL kommt in Listing und Console.
 - **Play-Entwicklerkonto:** Konto, Identitätsprüfung und Testphase liegen beim

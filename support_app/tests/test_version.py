@@ -28,6 +28,33 @@ class VersionTest(unittest.TestCase):
             "https://github.com/xsensenmannx/PS5PRoAgent/releases")
 
 
+class PlaySpecTest(unittest.TestCase):
+    """Die AAB-Spec darf nicht von Paket und Version der APK abweichen."""
+
+    def _wert(self, datei, schluessel):
+        with open(os.path.join(HIER, datei), encoding="utf-8") as f:
+            text = f.read()
+        treffer = re.search(
+            r"^" + re.escape(schluessel) + r"\s*=\s*(\S+)", text, re.M)
+        return treffer.group(1) if treffer else None
+
+    def test_play_spec_ist_ein_aab_mit_gleichem_paket(self):
+        self.assertEqual(
+            self._wert("buildozer.play.spec", "android.release_artifact"),
+            "aab")
+        self.assertEqual(self._wert("buildozer.spec",
+                                    "android.release_artifact"), "apk")
+        for schluessel in ("package.name", "package.domain", "version",
+                           "android.numeric_version"):
+            self.assertEqual(
+                self._wert("buildozer.play.spec", schluessel),
+                self._wert("buildozer.spec", schluessel), schluessel)
+
+    def test_play_spec_version_passt_zur_anzeige(self):
+        self.assertEqual(self._wert("buildozer.play.spec", "version"),
+                         version.VERSION)
+
+
 class LinksTest(unittest.TestCase):
     def test_nur_https(self):
         # Kein Browserstart im Test: http und leer werden vorher abgelehnt.
