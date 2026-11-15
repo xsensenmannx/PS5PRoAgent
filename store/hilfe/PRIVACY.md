@@ -42,7 +42,6 @@ Im Reiter „KI“ wählst du den Anbieter und trägst dort deinen eigenen Key e
 Erst wenn du eine Frage sendest, überträgt die App an **genau diesen Anbieter**:
 
 - den Text deiner Frage,
-- den bisherigen Gesprächsverlauf dieses Reiters (nur zur Laufzeit),
 - zwei bis drei passende Hilfe-Karten als Kontext,
 - den Namen des gewählten Modells,
 - deinen API-Key als `Authorization: Bearer …`.

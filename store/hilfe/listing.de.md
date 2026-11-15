@@ -23,8 +23,9 @@ ohne Telemetrie.
 • Diagnose: Diagnose-Block aus dem Radar einfügen, die App findet 403/429,
   Webhook-Fehler, auffällige Konfidenz und fehlende Treffer.
 • Optional KI: mit deinem eigenen Key bei Freebuff, OpenRouter, Groq, Google
-  AI Studio oder Mistral. OpenRouter hat einen kostenlosen Free-Router, die
-  anderen Anbieter kostenlose Kontingente. Die KI bekommt zwei bis drei
+  AI Studio oder Mistral. Freebuff rechnet über dein Guthaben ab; OpenRouter
+  hat einen kostenlosen Free-Router, Groq, Google AI Studio und Mistral
+  haben kostenlose Kontingente. Die KI bekommt zwei bis drei
   passende Hilfe-Karten als Beleg mitgeschickt und antwortet kurz, damit sie
   keine Einstellungen erfindet. Anbieter und Modell wählst du selbst; jeder Key
   bleibt auf dem Gerät. Ohne Key bleibt alles offline.

@@ -7,10 +7,11 @@ und der tatsächliche KI-Code. **Kein Upload, kein Rollout, kein Play-Upload.**
 
 Die formalen Textgrenzen und die Pflicht-Assets sind vorhanden; Titel, Kurz-
 und Vollbeschreibung passen. **Store-reif ist das Paket noch nicht.** Es gibt
-noch sieben harte Blocker und mehrere operative Punkte. Die wichtigsten sind
-die fehlende In-App-Meldung für KI-Inhalte und der Markenname im Play-Titel
-und in den Grafiken. Die PNG-Formate von Icon und Screenshots sowie der
-Ollama-Hinweis in Screenshot 05 wurden am 15.11.2026 behoben.
+noch vier harte Blocker und mehrere operative Punkte. Die wichtigsten sind
+die fehlende In-App-Meldung für KI-Inhalte, der Markenname im Play-Titel und
+die finale Content-Rating-/Zielgruppenentscheidung. Die PNG-Formate, der
+Ollama-Hinweis in Screenshot 05 sowie die Freebuff-, Data-Safety- und
+Privacy-Widersprüche wurden am 15.11.2026 behoben.
 
 Die Data-Safety-Angaben sind für einen reinen **internen** Testtrack laut Play
 nicht verpflichtend; für geschlossenen Test und Produktion müssen sie korrekt
@@ -23,35 +24,30 @@ sein. Der interne Test ist also kein Freibrief für die übrigen Blocker.
 | Listing-Titel | `PS5 Pro Search Agent – Hilfe`, **28 Zeichen** | 30 | Länge ok; Marke offen |
 | App-Label | `PS5 Pro Search Agent - Hilfe`, **28 Zeichen** | – | Länge ok; Bindestrich statt Gedankenstrich |
 | Kurzbeschreibung | **74 Zeichen** | 80 | ok |
-| Vollbeschreibung | **2.689 Zeichen** | 4.000 | ok |
+| Vollbeschreibung | **2.751 Zeichen** | 4.000 | ok |
 | Icon | 512×512, **80.695 B, 32-bit RGBA (color_type 6)** | 32-bit PNG **mit Alpha**, max. 1.024 KB | **behoben (B3)** |
 | Feature-Grafik | 1024×500, 24-bit RGB, 88.481 B | JPEG oder 24-bit PNG ohne Alpha | Format ok; Marke in der Grafik |
 | Screenshots | 5× 1620×2880, 9:16, **24-bit RGB**, 79–250 KB | 2–8, je Seite 320–3.840 px, max. 8 MB, **24-bit PNG/JPEG ohne Alpha** | **behoben (B4)** |
 | Tablet-/Chromebook-Shots | nicht vorhanden | optional | kein Blocker |
 
-Die Angaben in `README.md` (74 / 2.689 Zeichen, fünf Screenshots) stimmen mit
+Die Angaben in `README.md` (74 / 2.751 Zeichen, fünf Screenshots) stimmen mit
 den Dateien überein. Icon und Screenshots wurden am 15.11.2026 auf die
 geforderten Formate umgestellt: `icon-512.png` ist jetzt RGBA, die fünf
 Screenshots sind RGB.
 
 ## 2. Inhaltliche Widersprüche
 
-### 2.1 Freebuff-Kosten
+### 2.1 Freebuff-Kosten (behoben)
 
-`listing.de.md` sagt nach der Anbieterliste:
+`listing.de.md` bezeichnete Freebuff indirekt als kostenlos, obwohl der
+Standardanbieter laut `PRIVACY.md` und `support_app/ai_client.py` über das
+**Guthaben des Freebuff-Accounts** abgerechnet wird. Das Listing nennt jetzt
+Freebuff ausdrücklich guthabenpflichtig und nur OpenRouter, Groq, Google AI
+Studio und Mistral als Anbieter mit kostenlosen Kontingenten.
 
-> „OpenRouter hat einen kostenlosen Free-Router, die anderen Anbieter
-> kostenlose Kontingente.“
+### 2.2 Gesprächsverlauf (behoben)
 
-Freebuff ist der Standardanbieter, wird aber laut `PRIVACY.md` und
-`support_app/ai_client.py` über das **Guthaben des Freebuff-Accounts**
-abgerechnet. Die Aussage ist damit falsch bzw. mindestens missverständlich.
-Korrektur: Freebuff ausdrücklich als guthabenpflichtig nennen; nur OpenRouter,
-Groq, Google AI Studio und Mistral als kostenlose Kontingente bezeichnen.
-
-### 2.2 Gesprächsverlauf
-
-`PRIVACY.md` und `DATA_SAFETY.md` behaupten, der bisherige Gesprächsverlauf
+`PRIVACY.md` und `DATA_SAFETY.md` behaupteten, der bisherige Gesprächsverlauf
 werde mitgesendet. Der einzige Aufruf in `support_app/main.py` übergibt aber
 nur `frage` und `kontext`; `verlauf` bleibt `None`:
 
@@ -59,10 +55,9 @@ nur `frage` und `kontext`; `verlauf` bleibt `None`:
 ai_client.chat(zustand, frage, kontext=support_core.kontext_text(frage))
 ```
 
-Damit wird aktuell **kein** früherer Verlauf übertragen. Entweder müssen die
-Datenschutztexte den tatsächlichen Code beschreiben, oder der Verlauf muss
-bewusst implementiert und dann korrekt deklariert werden. Bis dahin ist die
-Angabe ein Widerspruch (Blocker B7).
+Damit wird **kein** früherer Verlauf übertragen. Die Datenschutztexte
+beschreiben jetzt den tatsächlichen Code: Die App sendet nur die aktuelle
+Frage, Kontextkarten und den Modellnamen.
 
 ### 2.3 Ollama im Android-Screenshot (behoben)
 
@@ -87,10 +82,10 @@ keinen Ollama-Hinweis mehr. Ein echter Android-Gerätetest bleibt O3.
 
 | Feld | Aktueller Stand | Problem | Nötige Antwort |
 |---|---|---|---|
-| Collected or shared? | **Shared** | Die Frage wird je Datentyp gestellt; Daten verlassen das Gerät **und** gehen an einen Drittanbieter | **Collected + Shared** |
-| Ephemeral? | **Ja**, weil der Entwickler nichts speichert | Play verlangt, dass Daten nur im Speicher und nicht länger als für die Anfrage gehalten werden. Die vom Nutzer gewählten KI-Anbieter können Logs/Retention haben; ohne deren Garantie nicht belegbar | **Nein**, sofern keine Retention-Garantie vorliegt |
-| Gesprächsverlauf | als übertragen dokumentiert | wird vom Code nicht gesendet | Doku korrigieren oder Code erweitern |
-| Linked to identity? | **Nein** | Der API-Key ist ein Zugangs-Token zum Anbieterkonto; das ist kein Konto beim Entwickler, aber die Verknüpfung sollte begründet werden | Prüfen und konservativ beantworten |
+| Collected or shared? | **Collected + Shared** | Daten verlassen das Gerät und gehen an einen Drittanbieter | korrigiert |
+| Ephemeral? | **Nein** | Die KI-Anbieter können Logs/Retention haben; ohne Garantie nicht ephemeral | korrigiert |
+| Gesprächsverlauf | **nicht übertragen** | wird vom Code nicht gesendet; Doku korrigiert | behoben |
+| Linked to identity? | **Nein** | Der API-Key ist ein Zugangs-Token zum Anbieterkonto, kein Konto beim Entwickler | als Nein beantwortet; keine Verknüpfung mit einem Entwicklerkonto |
 | Personal info → Other info | als Datentyp angegeben | Die API-Key-Übertragung ist der einzige Kandidat; Frage und Kontext sind eher „Messages“ | Datentyp begründen; keine unnötigen Angaben |
 | Data sold / Ads / Analytics | Nein | durch Code und fehlende SDKs gedeckt | ok |
 | Encryption in transit | Ja | alle Android-Anbieter nutzen HTTPS; Ollama gibt es auf Android nicht | ok |
@@ -151,9 +146,6 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 |---|---|---|---|
 | B1 | Keine In-App-Meldung/Flag für anstößige KI-Inhalte; keine eigene Output-Moderation | KI-Reiter | Melde-/Flag-Funktion in der App ergänzen, Reports auswerten, Moderation dokumentieren |
 | B2 | Markenname im Play-Titel und in App-Label/Feature/Screenshot | Listing, `buildozer*.spec`, Assets | Titel neutralisieren oder Markenrechte klären; AAB und Assets neu bauen |
-| B6 | Data Safety nur „Shared“ statt „Collected + Shared“ | `DATA_SAFETY.md` | Beide Kategorien für die übertragenen Daten angeben |
-| B7 | „Ephemeral: Ja“ und „Gesprächsverlauf“ nicht durch Code/Anbieter gedeckt | `DATA_SAFETY.md`, `PRIVACY.md` | Ephemeral auf Nein korrigieren; Verlauf aus Doku entfernen oder implementieren |
-| B8 | Listing bezeichnet Freebuff indirekt als kostenlos | `listing.de.md` | Freebuff als guthabenpflichtig, übrige Anbieter als kostenlos formulieren |
 | B9 | Keine finale IARC-Bewertung; KI-Inhalte im Fragebogen nicht abgedeckt | Play Console | Content-Rating-Fragebogen inkl. KI ausfüllen und Ergebnis übernehmen |
 | B10 | Zielgruppe 18+ nur im internen Dokument; Play-Formular und Abstimmung mit Rating fehlen | Play Console | Zielgruppe setzen, 18+ begründen und mit Content Rating abgleichen |
 
@@ -164,6 +156,14 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 | B3 | Icon 24-bit RGB ohne Alpha | `icon-512.png` als 32-bit RGBA neu erzeugt (80.695 B); Generator liefert RGBA |
 | B4 | Screenshots RGBA mit Alpha | Alle fünf Screenshots als 24-bit RGB neu gespeichert (79–250 KB) |
 | B5 | Screenshot 05 zeigte Ollama auf Android | Screenshot 05 mit Android-UI-Pfad neu erzeugt, ohne Ollama-Hinweis |
+
+### Behobene Store-Widersprüche (15.11.2026)
+
+| ID | vorher | jetzt |
+|---|---|---|
+| B6 | Data Safety nur „Shared“ | **Collected + Shared** in `DATA_SAFETY.md`; Kurzfassung in `PLAY_INTERNAL_TEST.md` angepasst |
+| B7 | „Ephemeral: Ja“ und übertragener Gesprächsverlauf | **Ephemeral: Nein**; `PRIVACY.md` und `DATA_SAFETY.md` nennen keinen übertragenen Verlauf mehr |
+| B8 | Listing ließ Freebuff kostenlos erscheinen | Freebuff ist im Listing ausdrücklich guthabenpflichtig; übrige Anbieter behalten die kostenlosen Kontingente |
 
 ### Operative Blocker
 
@@ -199,8 +199,9 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
    AAB, Feature und Screenshots neu bauen (B2, O3).
 3. **Assets:** Die PNG-Formate sind umgesetzt; bei einem Rebranding müssen
    Feature, Screenshot 02 und die Android-Aufnahmen erneut erzeugt werden.
-4. **Texte/Data Safety:** Freebuff-Kosten, Verlauf, Collected + Shared und
-   Ephemeral korrigieren (B6–B8).
+4. **Texte/Data Safety:** Die Widersprüche sind umgesetzt; bei Änderungen an
+   KI-Anbietern oder Payload müssen Listing und Data-Safety-Tabelle erneut
+   abgeglichen werden.
 5. **Konsolenfelder:** Content Rating inkl. KI und Zielgruppe ausfüllen (B9,
    B10).
 6. **Vor Upload:** In-App-Datenschutzlink, Gerätetest, Play-Console-App und

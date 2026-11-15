@@ -15,7 +15,7 @@ Teil dieses Schritts.
 | Store-Texte und Grafiken | **teilweise** | Formate ok; Marken-/Listingblocker siehe `STORE_AUDIT.md` |
 | Öffentliche Datenschutz-URL | **fertig** | GitHub-Link, siehe Abschnitt 2, HTTP 200 ohne Login |
 | Play-Console-App | **offen** | muss einmalig angelegt werden |
-| App-Inhalte / Data Safety | **vorbereitet, zu korrigieren** | Antworten in `DATA_SAFETY.md`; Abweichungen und Blocker siehe `STORE_AUDIT.md` |
+| App-Inhalte / Data Safety | **vorbereitet, korrigiert** | Antworten in `DATA_SAFETY.md`; Formular noch nicht ausgefüllt |
 | KI-Policy / In-App-Meldung | **offen** | keine Melde-/Flag-Funktion für KI-Inhalte; Play-Policy siehe `STORE_AUDIT.md` |
 | Content Rating / Zielgruppe | **vorbereitet** | 18+ vorgesehen; finale IARC-Bewertung und Konsolenfelder fehlen |
 | Datenschutz-Link in der App | **offen** | in 1.2.0 nicht vorhanden; vor Produktion ergänzen |
@@ -88,7 +88,7 @@ werden; die Datenschutz-URL bleibt unabhängig davon ein Pflichtfeld.
 | Feld | Wert / Quelle |
 |---|---|
 | Kurzbeschreibung | 74 Zeichen aus `listing.de.md` |
-| Vollbeschreibung | 2.689 Zeichen aus `listing.de.md` (max. 4.000) |
+| Vollbeschreibung | 2.751 Zeichen aus `listing.de.md` (max. 4.000) |
 | App-Icon | `assets/icon-512.png` (512×512) |
 | Feature-Grafik | `assets/feature-1024x500.png` (1024×500) |
 | Telefon-Screenshots | `assets/phone/01-fragen.png` … `05-ki.png` (1620×2880) |
@@ -113,13 +113,15 @@ werden; die Datenschutz-URL bleibt unabhängig davon ein Pflichtfeld.
 
 Data-Safety-Kurzfassung:
 
-- Es werden Daten **geteilt**: „Personal info → Other info“ und
+- Es werden Daten **erhoben und geteilt**: „Personal info → Other info“ und
   „Messages → Other in-app messages“.
 - Zweck: **App functionality**; nur optional, wenn der Nutzer einen Anbieter
   wählt, einen eigenen Key einträgt und eine Frage sendet.
-- **Ephemeral** ist derzeit nicht belegbar, solange die Retention der
-  KI-Anbieter nicht geklärt ist; nicht mit der Identität verknüpft (zu prüfen),
-  TLS-verschlüsselt, kein Verkauf, keine Werbe- oder Analyse-SDKs.
+- **Ephemeral: Nein** — der Entwickler speichert nichts, die Retention des
+  Anbieters ist aber nicht garantiert; nicht mit einem Entwicklerkonto
+  verknüpft, TLS-verschlüsselt, kein Verkauf, keine Werbe- oder Analyse-SDKs.
+- Der bisherige Gesprächsverlauf wird **nicht** mitgesendet; die App sendet
+  nur die aktuelle Frage, Kontextkarten und den Modellnamen.
 - Keine Konten beim Entwickler; Löschung lokal über Key entfernen oder
   Deinstallation. Beim gewählten KI-Anbieter gelten dessen Fristen.
 
@@ -148,7 +150,9 @@ Data-Safety-Kurzfassung:
 - [x] Icon als 32-bit PNG mit Alpha, Screenshots als 24-bit RGB ohne Alpha
 - [x] Screenshot 05 mit Android-UI-Pfad erzeugt (kein Ollama im Android-Listing)
 - [ ] KI-Melde-/Flag-Funktion und Moderation ergänzen
-- [ ] Listing-Freebuff-Kosten und Data-Safety-/Privacy-Verlauf korrigieren
+- [x] Listing-Freebuff-Kosten korrigiert
+- [x] Data-Safety auf Collected + Shared und Ephemeral = Nein korrigiert
+- [x] Gesprächsverlauf aus Privacy und Data Safety entfernt
 - [ ] Finale IARC-Bewertung inkl. KI und Zielgruppe in der Konsole setzen
 - [ ] Datenschutz-Link in der App ergänzen (vor Produktion, nicht Teil von 1.2.0)
 - [ ] Markenrechtlichen Play-Titel prüfen (siehe Hinweis oben)

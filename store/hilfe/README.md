@@ -7,7 +7,7 @@ Die Datenschutzerklärung ist als Teil des öffentlichen Repositorys abrufbar.
 
 | Datei | Zweck | Vorgabe |
 |---|---|---|
-| `listing.de.md` | Kurz- (74 Zeichen) und Vollbeschreibung (2.689 Zeichen) | 80 / 4.000 |
+| `listing.de.md` | Kurz- (74 Zeichen) und Vollbeschreibung (2.751 Zeichen) | 80 / 4.000 |
 | `STORE_AUDIT.md` | Vollständigkeits- und Widerspruchsprüfung, priorisierte Blocker | Stand 15.11.2026 |
 | `assets/icon-512.png` | App-Icon im Store | 512×512, 32-bit RGBA |
 | `assets/feature-1024x500.png` | Feature-Grafik | 1024×500, PNG/JPEG |
@@ -39,11 +39,11 @@ python tools/hilfe_store_assets.py    # Icon 512 + Feature-Grafik
 
 ## Noch offen vor dem ersten Upload
 
-- **Store-Audit:** Sieben harte Blocker sind in `STORE_AUDIT.md` dokumentiert:
-  fehlende KI-In-App-Meldung, Markenname, Data-Safety-Korrekturen,
-  Listing-Freebuff-Kosten und die fehlende finale
-  Content-Rating-/Zielgruppenentscheidung. Die PNG-Formate und der
-  Ollama-Screenshot sind behoben.
+- **Store-Audit:** Vier harte Blocker sind in `STORE_AUDIT.md` dokumentiert:
+  fehlende KI-In-App-Meldung, Markenname sowie die fehlende finale
+  Content-Rating-/Zielgruppenentscheidung. Die PNG-Formate, der
+  Ollama-Screenshot, die Freebuff-Kosten und die Data-Safety-/Privacy-Angaben
+  sind behoben.
 - **AAB:** Signiertes AAB ist gebaut (Support-AAB-Lauf #4) und als Artefakt
   verfügbar. Der Upload in die Play Console und die Zuordnung des Upload-Keys
   stehen noch aus; die Checkliste steht in `PLAY_INTERNAL_TEST.md`.
