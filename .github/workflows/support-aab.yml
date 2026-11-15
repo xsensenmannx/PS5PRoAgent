@@ -170,6 +170,15 @@ jobs:
           echo "Bundle: $AAB"
           java -jar "$BT" validate --bundle="$AAB"
 
+          # Die Universal-APK von bundletool enthaelt keine sdkVersion-Zeile im
+          # Badging; minSdk wird deshalb direkt am AAB-Manifest geprueft.
+          USES_SDK=$(java -jar "$BT" dump manifest --bundle="$AAB" \
+            --xpath="/manifest/uses-sdk")
+          echo "AAB uses-sdk: $USES_SDK"
+          AAB_MIN_SDK=$(java -jar "$BT" dump manifest --bundle="$AAB" \
+            --xpath="/manifest/uses-sdk/@android:minSdkVersion")
+          echo "AAB minSdkVersion: $AAB_MIN_SDK"
+
           printf '%s' "$KEYSTORE_PASS" > "$RUNNER_TEMP/aab-store.pass"
           printf '%s' "$KEYSTORE_PASS" > "$RUNNER_TEMP/aab-key.pass"
           chmod 600 "$RUNNER_TEMP/aab-store.pass" "$RUNNER_TEMP/aab-key.pass"
@@ -210,8 +219,8 @@ jobs:
             || { echo "::error::versionName ist nicht $VERSION"; exit 1; }
           printf '%s\n' "$BADGING" | grep -q "targetSdkVersion:'$SDK'" \
             || { echo "::error::targetSdkVersion ist nicht $SDK"; exit 1; }
-          printf '%s\n' "$BADGING" | grep -q "sdkVersion:'$MIN_SDK'" \
-            || { echo "::error::minSdkVersion ist nicht $MIN_SDK"; exit 1; }
+          [ "$AAB_MIN_SDK" = "$MIN_SDK" ] \
+            || { echo "::error::minSdkVersion im AAB ist nicht $MIN_SDK"; exit 1; }
           printf '%s\n' "$BADGING" | grep -q "android.permission.INTERNET" \
             || { echo "::error::INTERNET-Berechtigung fehlt"; exit 1; }
           if printf '%s\n' "$BADGING" | grep -q "application-debuggable"; then
