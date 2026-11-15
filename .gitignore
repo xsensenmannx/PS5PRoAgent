@@ -27,6 +27,8 @@ support_app/PS5ProSearchAgent-Hilfe.spec
 *.jks
 *.keystore
 *.b64
+# Lokaler Signierordner: Keystore + Passwort-Backup
+keys/
 
 # Betriebssystem-Kram
 .DS_Store
