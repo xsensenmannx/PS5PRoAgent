@@ -270,8 +270,52 @@ jobs:
       #   dist/ps5pro-search-agent-hilfe-win/PS5ProSearchAgent-Hilfe.exe
       - name: Artefakte holen
         uses: actions/download-artifact@v8
+        # Fehlt jedes Artefakt, soll die Pruefung darunter die Ursache nennen
+        # statt dieser Schritt mit "Unable to find any artifacts".
+        continue-on-error: true
         with:
           path: dist
+
+      # Ohne Keystore baut der APK-Job bewusst kein APK. Dann soll der
+      # Release-Job das klar benennen, statt an einem "ls: cannot access"
+      # abzubrechen.
+      - name: Signiertes APK pruefen
+        id: artefakte
+        run: |
+          set -euo pipefail
+          APK=$(ls -1 dist/*/bin/*.apk 2>/dev/null | head -n 1 || true)
+          EXE=$(ls -1 dist/*/*.exe 2>/dev/null | head -n 1 || true)
+
+          if [ -z "$APK" ]; then
+            {
+              echo "### Release abgebrochen: signiertes APK fehlt"
+              echo ""
+              echo "Der Android-Job hat kein APK gebaut, weil das Secret"
+              echo "\`HILFE_KEYSTORE_BASE64\` nicht gesetzt ist. Ohne Keystore"
+              echo "entsteht bewusst kein Debug-APK."
+              echo ""
+              echo "Hinterlegen unter Settings → Secrets and variables → Actions:"
+              echo "\`HILFE_KEYSTORE_BASE64\` und \`HILFE_KEYSTORE_PASSWORD\`."
+              echo "Anleitung: \`support_app/README.md\`, Abschnitt „Signierung (Release-APK)“."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Kein signiertes APK im Artefakt: Secret HILFE_KEYSTORE_BASE64 fehlt. Anleitung in support_app/README.md, Abschnitt Signierung. Release abgebrochen."
+            exit 1
+          fi
+
+          if [ -z "$EXE" ]; then
+            {
+              echo "### Release abgebrochen: Windows-EXE fehlt"
+              echo ""
+              echo "Der Windows-Job hat keine EXE hochgeladen; siehe dessen Log."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Keine Windows-EXE im Artefakt. Release abgebrochen."
+            exit 1
+          fi
+
+          echo "APK: $APK"
+          echo "EXE: $EXE"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "exe=$EXE" >> "$GITHUB_OUTPUT"
 
       # Ein erneuter Lauf zum selben Tag ersetzt beide Dateien, statt
       # mit "asset already exists" abzubrechen.
@@ -282,8 +326,10 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#hilfe-v}"
-          APK=$(ls -1 dist/*/bin/*.apk | head -n 1)
-          EXE=$(ls -1 dist/*/*.exe | head -n 1)
+          APK="${{ steps.artefakte.outputs.apk }}"
+          EXE="${{ steps.artefakte.outputs.exe }}"
+          [ -f "$APK" ] || { echo "::error::APK fehlt: $APK"; exit 1; }
+          [ -f "$EXE" ] || { echo "::error::EXE fehlt: $EXE"; exit 1; }
           APK_NAME=$(basename "$APK")
           EXE_NAME=$(basename "$EXE")
           APK_SHA=$(sha256sum "$APK" | cut -d' ' -f1)
