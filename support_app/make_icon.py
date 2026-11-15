@@ -1,162 +1,194 @@
-"""Erzeugt das Icon der Hilfe-App.
+"""Erzeugt das Roboter-Icon der Hilfe-App.
 
-Motiv: Sprechblase (Hilfe/Antwort) mit Radar-Ping und bernsteinfarbenem
-Treffer-Punkt (Alarm). Drei Ausgaben aus einer Zeichnung:
-
-  icon.png       512x512, vollflaechig (Store/Launcher-Fallback)
-  icon_fg.png    432x432, transparente Vorderebene (adaptives Icon)
-  icon_bg.png    432x432, Verlauf als Hintergrund (adaptives Icon)
-  icon.ico       Windows-Symbole 16-256 px
-
-Gezeichnet wird vierfach vergroessert und danach verkleinert; dadurch sind die
-Kanten glatt, ohne dass eine SVG-Abhaengigkeit noetig waere.
-
-    python make_icon.py
+Dunkler Squircle, Metallkopf mit Headset und leuchtend blauen Augen.
+Erzeugt icon.png (512), die adaptiven Ebenen icon_fg.png/icon_bg.png (432)
+und icon.ico fuer die Windows-EXE. Nur Pillow, keine externen Dateien.
 """
 import os
 
 from PIL import Image, ImageDraw, ImageFilter
 
-S = 2048  # Arbeitsflaeche, 4x der Zielgroesse 512
+S = 4  # Supersampling gegen Treppenkanten
+
+NAVY_TOP = (9, 15, 27)
+NAVY_BOT = (27, 46, 80)
+METALL_TOP = (248, 251, 255)
+METALL_BOT = (176, 192, 214)
+DARK = (7, 13, 24)
+CYAN = (86, 226, 255)
+BLUE = (28, 74, 132)
+BAND = (78, 122, 172)
+
 HIER = os.path.dirname(os.path.abspath(__file__))
-NEIGUNG = -7  # Grad; gibt dem Motiv Sticker-Charakter statt Stock-Optik
-
-# Sprechblase: hell oben links, satt unten rechts.
-BLAU_OBEN = (118, 176, 255)
-BLAU_UNTEN = (40, 102, 232)
-# Hintergrund: fast schwarzes Navy mit blauem Schimmer.
-BG_OBEN = (8, 13, 26)
-BG_UNTEN = (24, 41, 70)
-WEISS = (255, 255, 255, 255)
-AMBER = (255, 176, 46, 255)
 
 
-def verlauf(w, h, oben, unten):
-    """Senkrechter Verlauf ohne numpy."""
-    spalte = Image.new("RGB", (1, h))
-    for y in range(h):
-        t = y / max(h - 1, 1)
-        spalte.putpixel(
-            (0, y),
-            tuple(int(a + (b - a) * t) for a, b in zip(oben, unten)),
-        )
-    return spalte.resize((w, h))
+def _verlauf(groesse, oben, unten):
+    breite, hoehe = groesse
+    streifen = Image.new("RGB", (1, hoehe))
+    malen = ImageDraw.Draw(streifen)
+    for y in range(hoehe):
+        t = y / max(hoehe - 1, 1)
+        malen.point((0, y), tuple(
+            int(oben[i] + (unten[i] - oben[i]) * t) for i in range(3)))
+    return streifen.resize((breite, hoehe))
 
 
-def blasenmaske(px):
-    """Sprechblase mit Schwanz unten links als Maske."""
-    maske = Image.new("L", (px, px), 0)
-    d = ImageDraw.Draw(maske)
-
-    bw, bh = px * 0.615, px * 0.465
-    x0, y0 = (px - bw) / 2, px * 0.205
-    x1, y1 = x0 + bw, y0 + bh
-    radius = bh * 0.30
-    d.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=255)
-
-    # Schwanz: breite Basis in der Blase, Spitze unten links.
-    basis_links, basis_rechts = x0 + bw * 0.17, x0 + bw * 0.37
-    spitze = (x0 + bw * 0.10, y1 + bh * 0.26)
-    d.polygon([(basis_links, y1 - 2), (basis_rechts, y1 - 2), spitze], fill=255)
-    return maske, (x0, y0, x1, y1, bw, bh)
-
-
-def marke(px, mit_schatten=True):
-    """Sprechblase mit Ping, zentriert auf transparenter Flaeche."""
-    bild = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-    maske, (x0, y0, x1, y1, bw, bh) = blasenmaske(px)
-
-    if mit_schatten:
-        schatten = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-        schatten.paste((0, 0, 0, 135), (0, int(px * 0.022)), maske)
-        schatten = schatten.filter(ImageFilter.GaussianBlur(px * 0.035))
-        bild.alpha_composite(schatten)
-
-    # Blasenflaeche im Verlauf, dazu ein sehr weiches Licht oben links.
-    bild.paste(verlauf(px, px, BLAU_OBEN, BLAU_UNTEN).convert("RGBA"), (0, 0), maske)
-    licht = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-    ld = ImageDraw.Draw(licht)
-    ld.ellipse(
-        (x0 - bw * 0.10, y0 - bh * 0.55, x1 - bw * 0.20, y0 + bh * 0.55),
-        fill=(255, 255, 255, 46),
-    )
-    licht = licht.filter(ImageFilter.GaussianBlur(px * 0.055))
-    licht.putalpha(Image.composite(licht.getchannel("A"), Image.new("L", (px, px), 0), maske))
-    bild.alpha_composite(licht)
-
-    # Zielscheibe: zwei Ringe, in der Mitte der amberne Treffer.
-    cx = (x0 + x1) / 2
-    cy = y0 + bh * 0.50
-    dot = px * 0.043
-    strich = int(px * 0.024)
-    z = ImageDraw.Draw(bild)
-    # Aussenring als vier Radar-Segmente, innen ein geschlossener Ring.
-    r_aussen = px * 0.158
-    for start in (0, 90, 180, 270):
-        z.arc(
-            (cx - r_aussen, cy - r_aussen, cx + r_aussen, cy + r_aussen),
-            start=start + 10, end=start + 70,
-            fill=(255, 255, 255, 150), width=strich,
-        )
-    r_innen = px * 0.092
-    z.ellipse(
-        (cx - r_innen, cy - r_innen, cx + r_innen, cy + r_innen),
-        outline=(255, 255, 255, 250), width=strich,
-    )
-
-    gluehen = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(gluehen)
-    gr = dot * 1.55
-    gd.ellipse((cx - gr, cy - gr, cx + gr, cy + gr), fill=(255, 176, 46, 95))
-    gluehen = gluehen.filter(ImageFilter.GaussianBlur(px * 0.013))
-    bild.alpha_composite(gluehen)
-
-    # Der Punkt sitzt auf den Boegen und bleibt auch bei 16 px sichtbar.
-    d = ImageDraw.Draw(bild)
-    d.ellipse((cx - dot, cy - dot, cx + dot, cy + dot), fill=AMBER)
+def _hintergrund(groesse, rund=False, radius=0.235):
+    bild = _verlauf((groesse, groesse), NAVY_TOP, NAVY_BOT).convert("RGBA")
+    schein = Image.new("RGBA", (groesse, groesse), (0, 0, 0, 0))
+    malen = ImageDraw.Draw(schein)
+    r = groesse * 0.42
+    mitte = groesse * 0.48
+    malen.ellipse([mitte - r, mitte - r * 0.95, mitte + r, mitte + r * 0.95],
+                  fill=(52, 132, 214, 110))
+    schein = schein.filter(ImageFilter.GaussianBlur(groesse * 0.10))
+    bild.alpha_composite(schein)
+    if rund:
+        maske = Image.new("L", (groesse, groesse), 0)
+        ImageDraw.Draw(maske).rounded_rectangle(
+            [0, 0, groesse - 1, groesse - 1],
+            radius=int(groesse * radius), fill=255)
+        bild.putalpha(maske)
     return bild
 
 
-def icon_png():
-    grund = verlauf(S, S, BG_OBEN, BG_UNTEN).convert("RGBA")
+def _roboter(groesse, scale=1.0):
+    """Roboter als transparentes RGBA-Bild, Kopf mittig."""
+    bild = Image.new("RGBA", (groesse, groesse), (0, 0, 0, 0))
+    w = groesse
+    cx, cy = w / 2, w * 0.525
+    hw, hh = w * 0.300 * scale, w * 0.248 * scale
+    ecke = w * 0.118 * scale
+    kopf = [cx - hw, cy - hh, cx + hw, cy + hh]
 
-    # Blauer Schimmer hinter dem Motiv, damit das Icon nicht flach wirkt.
-    schimmer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(schimmer)
-    r = S * 0.40
-    sd.ellipse((S / 2 - r, S * 0.44 - r, S / 2 + r, S * 0.44 + r), fill=(58, 118, 214, 74))
-    schimmer = schimmer.filter(ImageFilter.GaussianBlur(S * 0.10))
-    grund.alpha_composite(schimmer)
+    # Kopfband (liegt hinter dem Kopf)
+    band = Image.new("RGBA", (groesse, groesse), (0, 0, 0, 0))
+    ImageDraw.Draw(band).arc(
+        [kopf[0] - w * 0.010, kopf[1] - w * 0.078,
+         kopf[2] + w * 0.010, kopf[3] - w * 0.010],
+        start=184, end=356, fill=BAND + (255,),
+        width=max(1, int(w * 0.034 * scale)))
+    bild.alpha_composite(band)
 
-    grund.alpha_composite(marke(S).rotate(NEIGUNG, resample=Image.BICUBIC))
-    return grund.convert("RGB").resize((512, 512), Image.LANCZOS)
+    # Ohrmuscheln (halb hinter dem Kopf, wirken so angesetzt)
+    malen = ImageDraw.Draw(bild)
+    cup_w, cup_h = w * 0.080 * scale, hh * 1.02
+    for seite in (-1, 1):
+        ex = kopf[2] + cup_w * 0.05 if seite > 0 else kopf[0] - cup_w * 0.05
+        box = [ex - cup_w / 2, cy - cup_h / 2, ex + cup_w / 2, cy + cup_h / 2]
+        malen.rounded_rectangle(box, radius=cup_w * 0.44, fill=BLUE + (255,),
+                                outline=(122, 196, 240, 170),
+                                width=max(1, int(w * 0.005)))
+        led = w * 0.014 * scale
+        lx = ex + seite * cup_w * 0.26
+        malen.ellipse([lx - led, cy - cup_h * 0.28 - led,
+                       lx + led, cy - cup_h * 0.28 + led],
+                      fill=CYAN + (255,))
+
+    # Schatten unter dem Kopf
+    schatten = Image.new("RGBA", (groesse, groesse), (0, 0, 0, 0))
+    ImageDraw.Draw(schatten).rounded_rectangle(
+        [kopf[0] + w * 0.02, kopf[1] + w * 0.055,
+         kopf[2] + w * 0.02, kopf[3] + w * 0.105],
+        radius=ecke, fill=(0, 0, 0, 125))
+    bild.alpha_composite(schatten.filter(
+        ImageFilter.GaussianBlur(w * 0.032 * scale)))
+
+    # Kopf mit Metallverlauf
+    metall = _verlauf((groesse, groesse), METALL_TOP, METALL_BOT).convert("RGBA")
+    maske = Image.new("L", (groesse, groesse), 0)
+    ImageDraw.Draw(maske).rounded_rectangle(kopf, radius=ecke, fill=255)
+    kopfbild = Image.new("RGBA", (groesse, groesse), (0, 0, 0, 0))
+    kopfbild.paste(metall, (0, 0), maske)
+    bild.alpha_composite(kopfbild)
+    malen = ImageDraw.Draw(bild)
+    malen.rounded_rectangle(kopf, radius=ecke, outline=(255, 255, 255, 120),
+                            width=max(1, int(w * 0.006)))
+
+    # Visier: fast schwarz, damit die Augen auch klein leuchten
+    visier = [kopf[0] + w * 0.052 * scale, kopf[1] + w * 0.068 * scale,
+              kopf[2] - w * 0.052 * scale, kopf[3] - w * 0.075 * scale]
+    malen.rounded_rectangle(visier, radius=w * 0.072 * scale, fill=DARK + (255,))
+
+    # Augen
+    augen = []
+    aug_breite = (visier[2] - visier[0]) * 0.300
+    aug_hoehe = (visier[3] - visier[1]) * 0.380
+    for seite in (-1, 1):
+        ex = cx + seite * (visier[2] - visier[0]) * 0.210
+        ey = cy - w * 0.012 * scale
+        augen.append([ex - aug_breite / 2, ey - aug_hoehe / 2,
+                      ex + aug_breite / 2, ey + aug_hoehe / 2])
+    schein = Image.new("RGBA", (groesse, groesse), (0, 0, 0, 0))
+    malen_s = ImageDraw.Draw(schein)
+    for box in augen:
+        malen_s.rounded_rectangle(
+            [box[0] - w * 0.014, box[1] - w * 0.014,
+             box[2] + w * 0.014, box[3] + w * 0.014],
+            radius=aug_breite * 0.55, fill=CYAN + (185,))
+    bild.alpha_composite(schein.filter(
+        ImageFilter.GaussianBlur(w * 0.017 * scale)))
+    malen = ImageDraw.Draw(bild)
+    for box in augen:
+        malen.rounded_rectangle(box, radius=aug_breite * 0.40,
+                               fill=CYAN + (255,))
+        # kleiner heller Kern
+        kern = aug_breite * 0.30
+        malen.ellipse([box[0] + aug_breite * 0.22, box[1] + aug_hoehe * 0.20,
+                       box[0] + aug_breite * 0.22 + kern,
+                       box[1] + aug_hoehe * 0.20 + kern],
+                      fill=(235, 252, 255, 230))
+
+    # Lautsprecher-Schlitze
+    for i in (-1, 0, 1):
+        bx = cx + i * w * 0.036 * scale
+        malen.rounded_rectangle(
+            [bx - w * 0.008 * scale, visier[3] - w * 0.062 * scale,
+             bx + w * 0.008 * scale, visier[3] - w * 0.028 * scale],
+            radius=w * 0.008 * scale, fill=(112, 146, 180, 255))
+    return bild
 
 
-def adaptive():
-    vorn = marke(S, mit_schatten=False)
-    vorn = vorn.rotate(NEIGUNG, resample=Image.BICUBIC)
-    vorn = vorn.crop((int(S * 0.08), int(S * 0.08), int(S * 0.92), int(S * 0.92)))
-    vorn = vorn.resize((432, 432), Image.LANCZOS)
-    hinten = verlauf(432, 432, BG_OBEN, BG_UNTEN).convert("RGBA")
-    return vorn, hinten
+def _zusammensetzen(groesse, scale):
+    bild = _hintergrund(groesse, rund=True)
+    bild.alpha_composite(_roboter(groesse, scale=scale))
+    return bild
 
 
 def main():
-    bild = icon_png()
-    bild.save(os.path.join(HIER, "icon.png"))
+    gross = 1024 * S
 
-    vorn, hinten = adaptive()
-    vorn.save(os.path.join(HIER, "icon_fg.png"))
-    hinten.save(os.path.join(HIER, "icon_bg.png"))
+    # Legacy-Icon 512 (Store/Launcher)
+    icon = _zusammensetzen(gross, 1.03).resize((512, 512), Image.LANCZOS)
+    icon.save(os.path.join(HIER, "icon.png"))
 
-    bild.save(
-        os.path.join(HIER, "icon.ico"),
-        sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
-    )
+    # Adaptive Ebenen: Vordergrund mit Sicherheitsrand, Hintergrund randlos
+    fg = Image.new("RGBA", (gross, gross), (0, 0, 0, 0))
+    fg.alpha_composite(_roboter(gross, scale=0.80))
+    fg.resize((432, 432), Image.LANCZOS).save(
+        os.path.join(HIER, "icon_fg.png"))
+
+    bg = _hintergrund(gross, rund=False)
+    bg.resize((432, 432), Image.LANCZOS).save(
+        os.path.join(HIER, "icon_bg.png"))
+
+    icon.save(os.path.join(HIER, "icon.ico"),
+              sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
+                     (64, 64), (128, 128), (256, 256)])
+
+    # Vorschau in echten Groessen
+    vorschau = Image.new("RGBA", (512 + 3 * 136, 160), (18, 24, 36, 255))
+    vorschau.alpha_composite(icon.resize((128, 128), Image.LANCZOS), (16, 16))
+    for i, kante in enumerate((16, 32, 48)):
+        klein = icon.resize((kante, kante), Image.LANCZOS)
+        vorschau.alpha_composite(klein, (170 + i * 136, 60))
+    vorschau.convert("RGB").save(
+        os.path.join(os.path.dirname(HIER), "artifacts", "icon-vorschau.png"))
 
     for name in ("icon.png", "icon_fg.png", "icon_bg.png", "icon.ico"):
         pfad = os.path.join(HIER, name)
-        print("%-12s %6d Bytes" % (name, os.path.getsize(pfad)))
+        with Image.open(pfad) as pruefung:
+            print(name, pruefung.size)
 
 
 if __name__ == "__main__":
