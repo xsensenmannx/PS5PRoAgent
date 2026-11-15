@@ -6,7 +6,9 @@
 #   v1.2.3   -> version = 1.2.3, android.numeric_version = 10203
 #
 # Liegt neben der Spec eine version.py, wird deren VERSION mitgeschrieben;
-# die App zeigt sie im Reiter THEMEN an.
+# die App zeigt sie im Reiter THEMEN an. Eine danebenliegende
+# buildozer.play.spec (AAB/Play) bekommt version und versionCode ebenfalls,
+# damit APK- und Play-Spec nicht auseinanderlaufen.
 #
 # Der versionCode muss bei jedem Update steigen; aus dem Tag abgeleitet kann er
 # nicht mehr vergessen werden. Minor und Patch muessen unter 100 bleiben,
@@ -51,16 +53,28 @@ if [ "$CODE" -gt 2100000000 ]; then
     exit 1
 fi
 
-sed -i -E "s/^version[[:space:]]*=.*/version = ${VERSION}/" "$SPEC"
-sed -i -E "s/^android\.numeric_version[[:space:]]*=.*/android.numeric_version = ${CODE}/" "$SPEC"
+schreibe_version() {
+    local datei="$1"
+    sed -i -E "s/^version[[:space:]]*=.*/version = ${VERSION}/" "$datei"
+    sed -i -E "s/^android\.numeric_version[[:space:]]*=.*/android.numeric_version = ${CODE}/" "$datei"
 
-if ! grep -qx "version = ${VERSION}" "$SPEC"; then
-    echo "::error::version konnte in $SPEC nicht gesetzt werden" >&2
-    exit 1
-fi
-if ! grep -qx "android.numeric_version = ${CODE}" "$SPEC"; then
-    echo "::error::android.numeric_version konnte in $SPEC nicht gesetzt werden" >&2
-    exit 1
+    if ! grep -qx "version = ${VERSION}" "$datei"; then
+        echo "::error::version konnte in $datei nicht gesetzt werden" >&2
+        return 1
+    fi
+    if ! grep -qx "android.numeric_version = ${CODE}" "$datei"; then
+        echo "::error::android.numeric_version konnte in $datei nicht gesetzt werden" >&2
+        return 1
+    fi
+}
+
+schreibe_version "$SPEC"
+
+# AAB-/Play-Spec neben der APK-Spec mitziehen, damit der Drift-Test gruen bleibt.
+PLAY_SPEC="$(dirname "$SPEC")/buildozer.play.spec"
+if [ -f "$PLAY_SPEC" ]; then
+    schreibe_version "$PLAY_SPEC"
+    echo "AAB-Spec aktualisiert: $PLAY_SPEC"
 fi
 
 # Die App zeigt ihre Version aus version.py; beim Tag-Build mitziehen.

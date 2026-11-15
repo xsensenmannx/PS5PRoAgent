@@ -1,6 +1,7 @@
 # Store-Paket — PS5 Pro Search Agent – Hilfe
 
-Stand: November 2026. **Nichts davon ist veröffentlicht.**
+Stand: 15. November 2026. **Nichts davon ist im Play Store veröffentlicht.**
+Die Datenschutzerklärung ist als Teil des öffentlichen Repositorys abrufbar.
 
 ## Inhalt
 
@@ -10,8 +11,9 @@ Stand: November 2026. **Nichts davon ist veröffentlicht.**
 | `assets/icon-512.png` | App-Icon im Store | 512×512, 32-bit PNG |
 | `assets/feature-1024x500.png` | Feature-Grafik | 1024×500, PNG/JPEG |
 | `assets/phone/01-fragen.png` … `05-ki.png` | Screenshots | 1620×2880, 9:16, 2–8 Stück |
-| `PRIVACY.md` | Datenschutzerklärung inkl. optionaler KI | öffentliche URL nötig |
+| `PRIVACY.md` | Datenschutzerklärung inkl. optionaler KI | öffentliche URL, siehe Checkliste |
 | `DATA_SAFETY.md` | Antworten für „Data safety" | konservativ, mit KI-Variante |
+| `PLAY_INTERNAL_TEST.md` | Checkliste, Konsolenfelder und Datenschutz-URL für den internen Test | kein Upload enthalten |
 
 Screenshots und Grafiken werden erzeugt, nicht von Hand bearbeitet:
 
@@ -25,7 +27,7 @@ python tools/hilfe_store_assets.py    # Icon 512 + Feature-Grafik
 1. **App anlegen** (Paketname `de.konsolenradar.support`, darf nie wechseln).
 2. **Store-Eintrag:** Kurz-/Vollbeschreibung aus `listing.de.md`, Icon, Feature-Grafik,
    Screenshots in der Reihenfolge 01–05.
-3. **Datenschutz:** URL der veröffentlichten `PRIVACY.md` eintragen; im
+3. **Datenschutz:** öffentliche URL aus `PLAY_INTERNAL_TEST.md` eintragen; im
    Data-Safety-Formular die Tabelle aus `DATA_SAFETY.md` übernehmen (Variante mit KI).
 4. **Content rating:** Fragebogen ausfüllen — keine Gewalt, keine Käufe, keine
    Werbung, Nutzerinteraktion nur mit eigenem API-Anbieter.
@@ -36,12 +38,13 @@ python tools/hilfe_store_assets.py    # Icon 512 + Feature-Grafik
 
 ## Noch offen vor dem ersten Upload
 
-- **AAB:** Die Hilfe hat jetzt `buildozer.play.spec` und
-  `.github/workflows/support-aab.yml`; der Lauf erzeugt ein signiertes AAB als
-  Artefakt. Der Upload in die Play Console und die Zuordnung des Upload-Keys
-  stehen noch aus.
-- **Öffentliche Datenschutz-URL:** `PRIVACY.md` muss gehostet werden
-  (GitHub Pages oder eine eigene Seite); die URL kommt in Listing und Console.
+- **AAB:** Signiertes AAB ist gebaut (Support-AAB-Lauf #4) und als Artefakt
+  verfügbar. Der Upload in die Play Console und die Zuordnung des Upload-Keys
+  stehen noch aus; die Checkliste steht in `PLAY_INTERNAL_TEST.md`.
+- **Öffentliche Datenschutz-URL:** Die GitHub-URL der `PRIVACY.md` ist aktiv und
+  ohne Login erreichbar. Eine eigene Pages-Seite ist bewusst nicht aktiviert.
+- **Datenschutz-Link in der App:** In 1.2.0 nicht vorhanden; vor der Produktion
+  ergänzen, damit die Erklärung auch aus der App erreichbar ist.
 - **Play-Entwicklerkonto:** Konto, Identitätsprüfung und Testphase liegen beim
   Entwickler, nicht im Repo.
 - **Gerätetest:** Die Screenshots stammen vom Desktop-Build; vor dem Upload
