@@ -156,12 +156,17 @@ export P4A_RELEASE_KEYSTORE_PASSWD='…'
 export P4A_RELEASE_KEYALIAS=hilfe
 export P4A_RELEASE_KEYALIAS_PASSWD='…'
 buildozer -v android release
-# Ergebnis: bin/*-release.apk
+# Ergebnis: bin/*arm64-v8a_armeabi-v7a-release.apk (Universal, beide ABIs)
 ```
 
 Gebaut wird für `arm64-v8a` und `armeabi-v7a`, also 64- und 32-Bit-ARM ab
 Android 7 (API 24). Emulator/Chromebooks (x86_64) lassen sich in
 `android.archs` ergänzen.
+
+Der Workflow leitet aus der Universal-APK zusätzlich eine reine
+`arm64-v8a`-Fassung ab (32-Bit-Bibliotheken entfernt, neu signiert). Sie ist
+rund ein Drittel kleiner und reicht für alle Geräte der letzten Jahre; die
+Universal-APK bleibt für alte 32-Bit-Geräte im Release.
 
 Auf diesem Windows-Rechner ist kein Buildozer/Java/SDK installiert. Gebaut wird
 über `.github/workflows/support-apk.yml`: Bei einem Push entsteht ein

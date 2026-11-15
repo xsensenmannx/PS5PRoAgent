@@ -175,6 +175,62 @@ jobs:
           printf '%s\n' "$CERT" > support_app/bin/CERT-SHA256.txt
           sha256sum "$APK" | tee support_app/bin/SHA256SUMS
 
+      # Die Universal-APK enthaelt arm64-v8a und armeabi-v7a. Fuer moderne
+      # Geraete ist die 32-Bit-Haelfte nur Ballast; deshalb zusaetzlich eine
+      # reine arm64-Fassung aus derselben APK ableiten und neu signieren.
+      - name: arm64-only APK ableiten
+        if: steps.keystore.outputs.vorhanden == 'true'
+        env:
+          KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.HILFE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.HILFE_KEY_PASSWORD }}
+          CERT_SHA256: ${{ secrets.HILFE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          UNIVERSAL=$(ls -1 support_app/bin/*arm64-v8a_armeabi-v7a*.apk | head -n 1)
+          V8=$(printf '%s' "$UNIVERSAL" | sed 's/_arm64-v8a_armeabi-v7a/_arm64-v8a/')
+          TOOLS=$(ls -d "$HOME"/.buildozer/android/platform/android-sdk/build-tools/* | tail -n 1)
+          ARBEIT=$(mktemp -d)
+
+          unzip -q "$UNIVERSAL" -d "$ARBEIT/app"
+          rm -rf "$ARBEIT/app/lib/armeabi-v7a"
+          rm -f "$ARBEIT/app"/META-INF/*.SF "$ARBEIT/app"/META-INF/*.RSA \
+                "$ARBEIT/app"/META-INF/*.DSA
+          # .so unkomprimiert lassen, wie im p4a-Original; zipalign richtet sie aus.
+          (cd "$ARBEIT/app" && zip -qr "$ARBEIT/v8-unsigned.apk" . -n .so)
+          "$TOOLS/zipalign" -f 4 "$ARBEIT/v8-unsigned.apk" "$ARBEIT/v8-aligned.apk"
+
+          ALIAS="${KEY_ALIAS:-hilfe}"
+          if [ -n "${KEY_PASS:-}" ]; then KPASS=KEY_PASS; else KPASS=KEYSTORE_PASS; fi
+          "$TOOLS/apksigner" sign --ks "$RUNNER_TEMP/hilfe-release.p12" \
+            --ks-pass env:KEYSTORE_PASS --ks-key-alias "$ALIAS" \
+            --key-pass "env:$KPASS" "$ARBEIT/v8-aligned.apk"
+
+          "$TOOLS/apksigner" verify --print-certs "$ARBEIT/v8-aligned.apk" \
+            | tee "$ARBEIT/certs.txt"
+          if grep -qi "Android Debug" "$ARBEIT/certs.txt"; then
+            echo "::error::arm64-APK ist debug-signiert"; exit 1
+          fi
+          CERT=$(grep -i "SHA-256 digest" "$ARBEIT/certs.txt" | head -n 1 | sed 's/.*: //')
+          if [ -n "${CERT_SHA256:-}" ]; then
+            ERWARTET=$(printf '%s' "$CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
+            IST=$(printf '%s' "$CERT" | tr -d ':\r ' | tr 'A-F' 'a-f')
+            [ "$IST" = "$ERWARTET" ] \
+              || { echo "::error::arm64-APK passt nicht zu HILFE_CERT_SHA256"; exit 1; }
+          fi
+          "$TOOLS/aapt2" dump badging "$ARBEIT/v8-aligned.apk" \
+            | grep -q "package: name='de.konsolenradar.support'" \
+            || { echo "::error::Falsches Paket in der arm64-APK"; exit 1; }
+          if unzip -l "$ARBEIT/v8-aligned.apk" | grep -q "lib/armeabi-v7a/"; then
+            echo "::error::arm64-APK enthaelt noch 32-Bit-Bibliotheken"; exit 1
+          fi
+          unzip -l "$ARBEIT/v8-aligned.apk" | grep -q "lib/arm64-v8a/" \
+            || { echo "::error::arm64-Bibliotheken fehlen"; exit 1; }
+
+          cp "$ARBEIT/v8-aligned.apk" "$V8"
+          sha256sum "$V8" >> support_app/bin/SHA256SUMS
+          ls -l "$UNIVERSAL" "$V8"
+
       - name: APK sichern
         if: steps.keystore.outputs.vorhanden == 'true'
         # v7 laeuft auf Node 24; v4 wird von GitHub als veraltet gemeldet.
@@ -283,7 +339,8 @@ jobs:
         id: artefakte
         run: |
           set -euo pipefail
-          APK=$(ls -1 dist/*/bin/*.apk 2>/dev/null | head -n 1 || true)
+          APK=$(ls -1 dist/*/bin/*arm64-v8a_armeabi-v7a*.apk 2>/dev/null | head -n 1 || true)
+          V8=$(ls -1 dist/*/bin/*arm64-v8a-release.apk 2>/dev/null | head -n 1 || true)
           EXE=$(ls -1 dist/*/*.exe 2>/dev/null | head -n 1 || true)
 
           if [ -z "$APK" ]; then
@@ -302,6 +359,11 @@ jobs:
             exit 1
           fi
 
+          if [ -z "$V8" ]; then
+            echo "::error::Arm64-Variante fehlt im Artefakt. Der Schritt „arm64-only APK ableiten“ muss sie erzeugen. Release abgebrochen."
+            exit 1
+          fi
+
           if [ -z "$EXE" ]; then
             {
               echo "### Release abgebrochen: Windows-EXE fehlt"
@@ -313,8 +375,10 @@ jobs:
           fi
 
           echo "APK: $APK"
+          echo "V8: $V8"
           echo "EXE: $EXE"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "v8=$V8" >> "$GITHUB_OUTPUT"
           echo "exe=$EXE" >> "$GITHUB_OUTPUT"
 
       # Ein erneuter Lauf zum selben Tag ersetzt beide Dateien, statt
@@ -327,14 +391,19 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#hilfe-v}"
           APK="${{ steps.artefakte.outputs.apk }}"
+          V8="${{ steps.artefakte.outputs.v8 }}"
           EXE="${{ steps.artefakte.outputs.exe }}"
           [ -f "$APK" ] || { echo "::error::APK fehlt: $APK"; exit 1; }
+          [ -f "$V8" ] || { echo "::error::arm64-APK fehlt: $V8"; exit 1; }
           [ -f "$EXE" ] || { echo "::error::EXE fehlt: $EXE"; exit 1; }
           APK_NAME=$(basename "$APK")
+          V8_NAME=$(basename "$V8")
           EXE_NAME=$(basename "$EXE")
           APK_SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          V8_SHA=$(sha256sum "$V8" | cut -d' ' -f1)
           EXE_SHA=$(sha256sum "$EXE" | cut -d' ' -f1)
           APK_SIZE=$(wc -c < "$APK" | tr -d ' ')
+          V8_SIZE=$(wc -c < "$V8" | tr -d ' ')
           EXE_SIZE=$(wc -c < "$EXE" | tr -d ' ')
           cat > "$RUNNER_TEMP/notes.md" <<EOF
           ## PS5 Pro Search Agent – Hilfe $VERSION
@@ -345,12 +414,13 @@ jobs:
 
           ### Android
 
-          - Android 7.0 oder neuer, arm64-v8a und armeabi-v7a
+          - Android 7.0 oder neuer
           - Release-signiert mit eigenem Key; Installation aus „Unbekannte Quellen“
           - Offline nutzbar; optionale KI mit eigenem Freebuff-Key
           - Keine Telemetrie, kein eingebauter Key
           - Parallel zur Radar-App installierbar
-          - \`$APK_NAME\` ($APK_SIZE Bytes)
+          - \`$APK_NAME\` ($APK_SIZE Bytes) — arm64-v8a und armeabi-v7a
+          - \`$V8_NAME\` ($V8_SIZE Bytes) — nur arm64-v8a, kleinere Datei
           - Signatur-Zertifikat SHA-256: \`$(cat dist/*/bin/CERT-SHA256.txt 2>/dev/null | head -n 1 || echo unbekannt)\`
 
           ### Windows
@@ -363,14 +433,15 @@ jobs:
 
           \`\`\`
           SHA-256  $APK_SHA  $APK_NAME
+          SHA-256  $V8_SHA  $V8_NAME
           SHA-256  $EXE_SHA  $EXE_NAME
           \`\`\`
           EOF
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG existiert - Dateien werden ersetzt"
-            gh release upload "$TAG" "$APK" "$EXE" --clobber
+            gh release upload "$TAG" "$APK" "$V8" "$EXE" --clobber
           else
-            gh release create "$TAG" "$APK" "$EXE" \
+            gh release create "$TAG" "$APK" "$V8" "$EXE" \
               --title "PS5 Pro Search Agent – Hilfe $VERSION" \
               --notes-file "$RUNNER_TEMP/notes.md" \
               --latest=false

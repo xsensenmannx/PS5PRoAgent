@@ -55,7 +55,7 @@ fi
     fi
     echo "## Installation"
     echo
-    echo "- Android 8.0 oder neuer, **arm64-v8a**"
+    echo "- Android 7.0 oder neuer, **arm64-v8a** und **armeabi-v7a**"
     echo "- Release-APK, **$SIZE_MB MB** (\`$NAME\`)"
     echo "- Unbekannte Quellen für Browser bzw. Dateimanager erlauben"
     echo "- Updates installieren sich über die bestehende Version"
