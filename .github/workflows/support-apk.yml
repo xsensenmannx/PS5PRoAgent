@@ -419,7 +419,10 @@ jobs:
 
           - Android 7.0 oder neuer
           - Release-signiert mit eigenem Key; Installation aus „Unbekannte Quellen“
-          - Offline nutzbar; optionale KI mit eigenem Freebuff-Key
+          - Offline nutzbar; optionale KI mit eigenem Key bei Freebuff,
+            OpenRouter, Groq, Google AI Studio oder Mistral
+          - OpenRouter, Groq, Google AI Studio und Mistral haben kostenlose
+            Kontingente; Freebuff rechnet über dein Guthaben ab
           - Keine Telemetrie, kein eingebauter Key
           - Parallel zur Radar-App installierbar
           - \`$APK_NAME\` ($APK_SIZE Bytes) — arm64-v8a und armeabi-v7a
