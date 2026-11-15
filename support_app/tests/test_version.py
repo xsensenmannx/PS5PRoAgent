@@ -62,6 +62,20 @@ class LinksTest(unittest.TestCase):
         self.assertFalse(links.oeffne(""))
         self.assertFalse(links.oeffne(None))
 
+    def test_mailto_wird_nur_als_mailto_geoeffnet(self):
+        self.assertFalse(links.oeffne_mailto("https://example.org"))
+        self.assertFalse(links.oeffne_mailto("mailto:ohne-adresse"))
+        echt = links.webbrowser.open
+        geoeffnet = []
+        links.webbrowser.open = lambda uri: geoeffnet.append(uri) or True
+        try:
+            self.assertTrue(links.oeffne_mailto(
+                "mailto:test%40example.org?subject=Hallo"))
+        finally:
+            links.webbrowser.open = echt
+        self.assertEqual(geoeffnet,
+                         ["mailto:test%40example.org?subject=Hallo"])
+
     def test_kein_netzwerk_modul(self):
         quelle = open(links.__file__, encoding="utf-8").read()
         for verboten in ("urllib", "requests", "socket"):

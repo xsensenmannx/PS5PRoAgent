@@ -14,6 +14,7 @@ Die Datenschutzerklärung ist als Teil des öffentlichen Repositorys abrufbar.
 | `assets/phone/01-fragen.png` … `05-ki.png` | Screenshots | 1620×2880, 9:16, 24-bit RGB, 2–8 Stück |
 | `PRIVACY.md` | Datenschutzerklärung inkl. optionaler KI | öffentliche URL, siehe Checkliste |
 | `DATA_SAFETY.md` | Antworten für „Data safety" | konservativ, mit KI-Variante |
+| `MODERATION.md` | Meldeweg, Triage, Fristen und Moderationsprotokoll | KI-Antworten |
 | `PLAY_INTERNAL_TEST.md` | Checkliste, Konsolenfelder und Datenschutz-URL für den internen Test | kein Upload enthalten |
 
 Screenshots und Grafiken werden erzeugt, nicht von Hand bearbeitet:
@@ -40,13 +41,13 @@ python tools/hilfe_store_assets.py    # Icon 512 + Feature-Grafik
 ## Noch offen vor dem ersten Upload
 
 - **Store-Audit:** Vier harte Blocker sind in `STORE_AUDIT.md` dokumentiert:
-  fehlende KI-In-App-Meldung, Markenname sowie die fehlende finale
-  Content-Rating-/Zielgruppenentscheidung. Die PNG-Formate, der
-  Ollama-Screenshot, die Freebuff-Kosten und die Data-Safety-/Privacy-Angaben
-  sind behoben.
-- **AAB:** Signiertes AAB ist gebaut (Support-AAB-Lauf #4) und als Artefakt
-  verfügbar. Der Upload in die Play Console und die Zuordnung des Upload-Keys
-  stehen noch aus; die Checkliste steht in `PLAY_INTERNAL_TEST.md`.
+  der noch nicht vollständig policy-konforme KI-Meldeweg, der Markenname sowie
+  die fehlende finale Content-Rating-/Zielgruppenentscheidung. Die PNG-Formate,
+  der Ollama-Screenshot, die Freebuff-Kosten und die Data-Safety-/Privacy-Angaben
+  sind behoben; die In-App-Meldefunktion und `MODERATION.md` sind ergänzt.
+- **AAB:** Signiertes AAB ist aus Support-AAB-Lauf #4 verfügbar, wurde aber vor
+  der Meldefunktion gebaut. Vor dem Upload neu bauen und den Review-Key unter
+  App access hinterlegen; die Checkliste steht in `PLAY_INTERNAL_TEST.md`.
 - **Öffentliche Datenschutz-URL:** Die GitHub-URL der `PRIVACY.md` ist aktiv und
   ohne Login erreichbar. Eine eigene Pages-Seite ist bewusst nicht aktiviert.
 - **Datenschutz-Link in der App:** In 1.2.0 nicht vorhanden; vor der Produktion

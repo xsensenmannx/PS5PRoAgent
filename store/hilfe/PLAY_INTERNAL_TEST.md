@@ -9,27 +9,30 @@ Teil dieses Schritts.
 
 | Baustein | Status | Nachweis |
 |---|---|---|
-| AAB gebaut und signiert | **fertig** | Support-AAB-Lauf [#4](https://github.com/xsensenmannx/PS5PRoAgent/actions/runs/43723024167), `completed/success` |
+| AAB gebaut und signiert | **neu bauen** | Lauf [#4](https://github.com/xsensenmannx/PS5PRoAgent/actions/runs/43723024167) ist signiert, enthält aber noch nicht die Meldefunktion |
 | Paket / Version | **fertig** | `de.konsolenradar.support`, `versionName 1.2.0`, `versionCode 10200` |
 | Signatur | **fertig** | Upload-Key, Zertifikat `f99782703ce8a45e55ebf6174611024e42128e169831fd57bc34614563f7042e` |
 | Store-Texte und Grafiken | **teilweise** | Formate ok; Marken-/Listingblocker siehe `STORE_AUDIT.md` |
 | Öffentliche Datenschutz-URL | **fertig** | GitHub-Link, siehe Abschnitt 2, HTTP 200 ohne Login |
 | Play-Console-App | **offen** | muss einmalig angelegt werden |
 | App-Inhalte / Data Safety | **vorbereitet, korrigiert** | Antworten in `DATA_SAFETY.md`; Formular noch nicht ausgefüllt |
-| KI-Policy / In-App-Meldung | **offen** | keine Melde-/Flag-Funktion für KI-Inhalte; Play-Policy siehe `STORE_AUDIT.md` |
+| KI-Policy / In-App-Meldung | **teilweise** | Meldedialog mit Kategorien, lokaler ID und E-Mail/Kopieren vorhanden; direkte Zustellung und Review-Key offen, siehe `MODERATION.md` |
 | Content Rating / Zielgruppe | **vorbereitet** | 18+ vorgesehen; finale IARC-Bewertung und Konsolenfelder fehlen |
 | Datenschutz-Link in der App | **offen** | in 1.2.0 nicht vorhanden; vor Produktion ergänzen |
 | Interner Test / Upload | **nicht ausgeführt** | bewusst zurückgestellt |
 
 ### AAB-Artefakt
 
-- Lauf: `43723024167` (Support AAB #4)
+- Lauf: `43723024167` (Support AAB #4, **Stand vor der Meldefunktion**)
 - Artefakt: `ps5pro-search-agent-hilfe-aab`, 119.602.444 Bytes
 - Enthält: `support-1.2.0-arm64-v8a_armeabi-v7a-release.aab` (39.747.908 Bytes),
   Universal-APK, `.apks`, `AAB-SHA256SUMS`, `buildozer.log`
 - SHA-256 AAB: `c9bcf0154fbf9e2421fbc5970b2fcd28b2fe6843d0214f7d3d904184eefef645`
 - Ablauf: Das Artefakt wird 14 Tage aufbewahrt. Ist es abgelaufen, den Lauf über
   **Actions → Support AAB → Run workflow** neu starten.
+
+> **Wichtig:** Das AAB aus Lauf #4 wurde vor der In-App-Meldefunktion gebaut.
+> Vor einem Upload neu bauen; das alte Artefakt enthält den Meldedialog nicht.
 
 Download für den Upload:
 
@@ -101,7 +104,7 @@ werden; die Datenschutz-URL bleibt unabhängig davon ein Pflichtfeld.
 | Datenschutzerklärung | URL aus Abschnitt 2 eintragen |
 | Werbung | **Nein** |
 | In-App-Käufe | **Nein** |
-| App-Zugriff | **Alle Funktionen ohne Anmeldung**; die KI ist optional und braucht einen eigenen Anbieter-Key |
+| App-Zugriff | **Alle Funktionen ohne Anmeldung**; die KI ist optional und braucht einen eigenen Anbieter-Key. Für den Review ist ein temporärer Test-Key in Play Console nötig (O2) |
 | Zielgruppe | **18+**, keine Ausrichtung auf Kinder/Families; Play-Formular noch nicht ausgefüllt |
 | Content Rating | IARC-Fragebogen: keine Gewalt, keine sexualisierten Inhalte, keine Sprache, keine Drogen, kein Glücksspiel, keine Nutzer-zu-Nutzer-Interaktion, keine Standortfreigabe, keine Käufe, keine Werbung. KI-Inhalte ergänzen; Erwartung „ohne Altersbeschränkung“ ist nicht final. Endgültig entscheidet IARC. |
 | News-App | **Nein** |
@@ -124,6 +127,18 @@ Data-Safety-Kurzfassung:
   nur die aktuelle Frage, Kontextkarten und den Modellnamen.
 - Keine Konten beim Entwickler; Löschung lokal über Key entfernen oder
   Deinstallation. Beim gewählten KI-Anbieter gelten dessen Fristen.
+- Meldungen werden lokal gespeichert; die App sendet sie nicht automatisch.
+  Erst **E-MAIL** öffnet einen vorbereiteten Bericht im Mailprogramm, den der
+  Nutzer selbst absendet; **KOPIEREN** legt ihn in die Zwischenablage.
+
+### Review-Zugang
+
+Die Offline-Funktionen sind ohne Anmeldung testbar. Die KI verlangt einen
+eigenen Anbieter-Key; ohne temporären Review-Key kann Google weder eine echte
+KI-Antwort noch den Meldedialog testen. Vor dem Upload muss ein separater,
+limitierter Test-Key in Play Console unter **App access** hinterlegt werden,
+mit einer englischen Schritt-für-Schritt-Anleitung (KI → KEY → Modell → Frage →
+MELDEN). Der Key gehört nicht ins Repository. Dieser Punkt bleibt offen (O2).
 
 ### Interner Test
 
@@ -136,20 +151,24 @@ Data-Safety-Kurzfassung:
 | Tester | eigene E-Mail-Liste oder Google Group, max. 100 |
 | Länder | Deutschland, Österreich, Schweiz (deutschsprachig) |
 | Feedback | `smiley.medical@gmail.com` und GitHub-Issues |
-| Release-Notes | „Erster interner Test: Offline-Hilfe, Suchplan, Diagnose und optionale KI mit eigenem Anbieter-Key.“ |
+| Release-Notes | „Erster interner Test: Offline-Hilfe, Suchplan, Diagnose, optionale KI mit eigenem Anbieter-Key und Meldefunktion.“ |
 
 ## 4. Checkliste
 
 ### Technisch vorbereitet
 
-- [x] Signiertes AAB aus der Pipeline, Paket und Version geprüft
+- [x] Signiertes AAB aus Lauf #4, Paket und Version geprüft (Stand vor der Meldefunktion)
 - [x] Upload-Zertifikat bekannt und dokumentiert
 - [x] Store-Texte, Icon, Feature-Grafik und fünf Screenshots vorhanden
 - [x] Öffentliche Datenschutz-URL erreichbar
 - [x] Data-Safety- und Content-Rating-Antworten vorbereitet
 - [x] Icon als 32-bit PNG mit Alpha, Screenshots als 24-bit RGB ohne Alpha
 - [x] Screenshot 05 mit Android-UI-Pfad erzeugt (kein Ollama im Android-Listing)
-- [ ] KI-Melde-/Flag-Funktion und Moderation ergänzen
+- [x] In-App-Meldefunktion mit Kategorien, ID und E-Mail/Kopieren ergänzen
+- [x] Moderationsablauf in `MODERATION.md` dokumentiert
+- [ ] Direkte In-App-Zustellung der Meldung oder E-Mail-Weg im Review bestätigen
+- [ ] Temporären Review-Key in Play Console hinterlegen (O2)
+- [ ] AAB nach der Meldefunktion neu bauen und signieren
 - [x] Listing-Freebuff-Kosten korrigiert
 - [x] Data-Safety auf Collected + Shared und Ephemeral = Nein korrigiert
 - [x] Gesprächsverlauf aus Privacy und Data Safety entfernt
@@ -165,6 +184,7 @@ Data-Safety-Kurzfassung:
 - [ ] Store-Eintrag aus `listing.de.md` und den Assets befüllt
 - [ ] Datenschutz-URL eingetragen
 - [ ] App-Zugriff, Werbung, Zielgruppe und Content Rating beantwortet
+- [ ] Temporären Review-Key und englische KI-Anleitung unter App access hinterlegt
 - [ ] Data-Safety-Formular ausgefüllt
 - [ ] Internen Testtrack angelegt und Tester eingetragen
 - [ ] AAB hochgeladen, Release geprüft und Rollout gestartet

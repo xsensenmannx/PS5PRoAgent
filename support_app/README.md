@@ -24,7 +24,7 @@ spricht die App mit dem Netz, und der Key bleibt im privaten App-Speicher.
 | Suche | Wunsch wie „unter 700, nur Amazon, nur neu“ wird zu Einstellungen, Schritten und Hinweisen — mit den echten Schlüsseln des Radars |
 | Diagnose | Füge den Diagnose-Text aus dem Radar ein: Shops, letzter Scan, Treffer, Konfidenz, Webhook-Fehler, 403/429 |
 | Themen | Alle Karten als Liste, ein Tipp öffnet die Antwort im Chat; unten Version und Release-Link (öffnet nur auf Klick) |
-| KI | Optional: Freitext an ein Modell des gewählten Anbieters, mit eigenem Key; passende Karten gehen als Beleg mit, Antworten sind kurz |
+| KI | Optional: Freitext an ein Modell des gewählten Anbieters, mit eigenem Key; passende Karten gehen als Beleg mit, Antworten sind kurz. Die letzte Antwort lässt sich mit Kategorie und optionaler Notiz melden |
 
 ## Was sie nicht kann
 
@@ -65,6 +65,12 @@ ein Fehler wird angezeigt, nicht verschluckt. Freebuff rechnet über das Guthabe
 deines Accounts ab; OpenRouter (Free-Router), Groq, Google AI Studio und Mistral
 haben kostenlose Kontingente, Ollama kostet nichts.
 
+Nach einer Antwort öffnet **MELDEN** einen Meldedialog mit sechs Kategorien und
+einer optionalen Notiz. Die App speichert die Meldung lokal mit einer ID und
+bietet **E-MAIL** (vorbereiteter Bericht im Mailprogramm) und **KOPIEREN** an.
+Sie sendet nichts automatisch und speichert keinen API-Key in der Meldung. Der
+Ablauf steht in `store/hilfe/MODERATION.md`.
+
 ## Suchassistent
 
 Der Reiter „Suche“ übersetzt einen Wunsch in einen prüfbaren Plan:
@@ -86,7 +92,8 @@ steht als Hinweis im Plan, nicht als erfundener Schalter.
 support_app/
 ├── main.py                    Kivy-Oberfläche (fünf Reiter)
 ├── version.py                 Version und Release-Adresse
-├── links.py                   Systembrowser nur auf Klick
+├── links.py                   Browser und Mail nur auf Klick
+├── meldungen.py               lokaler Meldespeicher und E-Mail-Bericht (ohne Kivy)
 ├── support_core.py            Fragen, Berichtsparser, Diagnose (ohne Kivy)
 ├── search_assistant.py        Suchwunsch → Einstellungen (ohne Kivy)
 ├── ai_client.py               KI-Aufruf und Key-Speicher (ohne Kivy)
@@ -98,7 +105,7 @@ support_app/
 ├── icon.png                   512er Icon (Store/Launcher)
 ├── icon_fg.png / icon_bg.png  adaptives Icon (432er Ebenen)
 ├── icon.ico                   Windows-Icon
-└── tests/                     102 Tests ohne Kivy (Kern, Suche, KI-Client, Release)
+└── tests/                     114 Tests ohne Kivy (Kern, Suche, KI-Client, Meldungen, Release)
 ```
 
 ## Tests
@@ -107,7 +114,7 @@ support_app/
 python -m unittest discover -s support_app/tests -v
 ```
 
-Die 102 Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
+Die 114 Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
 
 ## Signierung (Release-APK)
 

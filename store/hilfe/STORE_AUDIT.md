@@ -8,10 +8,11 @@ und der tatsächliche KI-Code. **Kein Upload, kein Rollout, kein Play-Upload.**
 Die formalen Textgrenzen und die Pflicht-Assets sind vorhanden; Titel, Kurz-
 und Vollbeschreibung passen. **Store-reif ist das Paket noch nicht.** Es gibt
 noch vier harte Blocker und mehrere operative Punkte. Die wichtigsten sind
-die fehlende In-App-Meldung für KI-Inhalte, der Markenname im Play-Titel und
-die finale Content-Rating-/Zielgruppenentscheidung. Die PNG-Formate, der
-Ollama-Hinweis in Screenshot 05 sowie die Freebuff-, Data-Safety- und
-Privacy-Widersprüche wurden am 15.11.2026 behoben.
+der noch nicht vollständig policy-konforme KI-Meldeweg, der Markenname im
+Play-Titel und die finale Content-Rating-/Zielgruppenentscheidung. Die
+PNG-Formate, der Ollama-Hinweis in Screenshot 05 sowie die Freebuff-,
+Data-Safety- und Privacy-Widersprüche wurden am 15.11.2026 behoben. Die
+In-App-Meldefunktion und der Moderationsablauf sind am 15.11.2026 ergänzt.
 
 Die Data-Safety-Angaben sind für einen reinen **internen** Testtrack laut Play
 nicht verpflichtend; für geschlossenen Test und Produktion müssen sie korrekt
@@ -95,6 +96,13 @@ Zusätzlich: Der KI-Request enthält nach aktuellem Code Frage, zwei bis drei
 Hilfe-Karten, Modellname und den API-Key im `Authorization`-Header. Es gibt
 **keine** Geräte-ID, keinen Standort, keine Kontakte und keine Analyse-SDKs.
 
+In-App-Meldungen werden lokal mit ID, Kategorie, Notiz, Frage, Antwort,
+Anbieter, Modell und Version gespeichert; der API-Key gehört nicht dazu. Die
+App sendet sie nicht automatisch. E-Mail und Kopieren sind ausdrückliche
+Nutzeraktionen; der Entwickler erhält die Angaben erst mit dem Versand der
+E-Mail. Das ist kein zusätzlicher automatischer Datenfluss, aber im Review und
+in der Datenschutzerklärung erklärt.
+
 ## 4. Content Rating und Zielgruppe
 
 - **Zielgruppe:** In `PLAY_INTERNAL_TEST.md` ist **18+** hinterlegt, keine
@@ -110,16 +118,28 @@ Hilfe-Karten, Modellname und den API-Key im `Authorization`-Header. Es gibt
   Nutzer untereinander richtig, deckt aber die generative KI nicht ab. Die
   KI kann beliebige Antworten des externen Modells anzeigen; eine
   KI-spezifische Bewertung/Finalisierung fehlt.
-- **AI-Generated-Content-Policy:** Apps, die Inhalte mit KI erzeugen, müssen
-  eine **In-App-Möglichkeit zum Melden/Flaggen anstößiger Inhalte** bieten,
-  ohne die App zu verlassen. Die App hat keine solche Funktion; GitHub-Issues
-  oder E-Mail liegen außerhalb der App und erfüllen das nicht. Zusätzlich
-  fehlt eine eigene Output-Moderation jenseits des System-Prompts. Das ist
-  **Blocker B1** und gilt spätestens vor geschlossenem Test/Produktion.
-- **Review-Zugang:** Für KI-Features verlangt Play im Review regelmäßig
-  Zugang zu den Funktionen. Die App verlangt einen eigenen Anbieter-Key; ein
-  Test-Key oder Demo-Modus ist nicht dokumentiert. Das ist ein Review-Risiko,
-  kein automatischer formaler Blocker.
+- **AI-Generated-Content-Policy:** Die Policy gilt auch für die optionale
+  Text-zu-Text-KI. Apps müssen eine **In-App-Möglichkeit zum Melden oder
+  Flaggen anstößiger Inhalte** bieten, die Meldungen an den Entwickler
+  bringt, ohne die App zu verlassen; die Reports müssen in Filterung und
+  Moderation einfließen (siehe Quellen).
+  - Der KI-Reiter hat jetzt **MELDEN**: Kategorie, optionale Notiz, lokale
+    Meldungs-ID und die Aktionen **E-MAIL** und **KOPIEREN**.
+  - Die Meldung wird lokal gespeichert. **E-MAIL** öffnet einen vorbereiteten
+    Bericht im Mailprogramm; der Nutzer sendet ihn selbst. Eine direkte
+    Zustellung an einen eigenen Meldeserver fehlt, daher ist der von Play
+    geforderte Weg "ohne Verlassen der App" noch nicht vollständig belegt.
+  - Eine eigene Output-Moderation jenseits von System-Prompt und
+    Anbieterfiltern gibt es weiterhin nicht; die Reports fließen in den in
+    `MODERATION.md` beschriebenen manuellen Ablauf ein.
+  - Das bleibt **Blocker B1** bis der Zustellweg geklärt ist.
+- **Review-Zugang:** Play verlangt, dass Reviewer alle App-Funktionen erreichen
+  und testen können. Die Offline-Funktionen sind ohne Anmeldung zugänglich;
+  die KI verlangt aber einen eigenen Anbieter-Key. Ein Review-Key oder
+  Demo-Modus ist nicht hinterlegt. Damit können Reviewer weder eine echte
+  KI-Antwort noch den Meldedialog testen. Das bleibt **O2**; vor dem Upload
+  muss ein separater, limitierter Test-Key in Play Console unter App access
+  hinterlegt werden, mit englischer Anleitung. Der Key gehört nicht ins Repo.
 
 ## 5. Markenrechtlicher Play-Titel
 
@@ -144,7 +164,7 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 
 | ID | Blocker | Ort | Nötige Aktion |
 |---|---|---|---|
-| B1 | Keine In-App-Meldung/Flag für anstößige KI-Inhalte; keine eigene Output-Moderation | KI-Reiter | Melde-/Flag-Funktion in der App ergänzen, Reports auswerten, Moderation dokumentieren |
+| B1 | KI-Meldeweg noch nicht vollständig policy-konform: lokale Meldung + E-Mail, keine direkte Zustellung, keine eigene Output-Moderation | KI-Reiter, `MODERATION.md` | Zustellweg klären, Reports auswerten, Review-Key und Moderation nachweisen |
 | B2 | Markenname im Play-Titel und in App-Label/Feature/Screenshot | Listing, `buildozer*.spec`, Assets | Titel neutralisieren oder Markenrechte klären; AAB und Assets neu bauen |
 | B9 | Keine finale IARC-Bewertung; KI-Inhalte im Fragebogen nicht abgedeckt | Play Console | Content-Rating-Fragebogen inkl. KI ausfüllen und Ergebnis übernehmen |
 | B10 | Zielgruppe 18+ nur im internen Dokument; Play-Formular und Abstimmung mit Rating fehlen | Play Console | Zielgruppe setzen, 18+ begründen und mit Content Rating abgleichen |
@@ -170,7 +190,7 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 | ID | Blocker | Nötige Aktion |
 |---|---|---|
 | O1 | Datenschutz-Link in der App fehlt (1.2.0) | Link in der App ergänzen; neue Version bauen |
-| O2 | Kein Test-Key/Demo für den KI-Review | Review-Zugang ohne echten Nutzer-Key ermöglichen |
+| O2 | Kein Test-Key/Demo für den KI-Review | Temporären, limitierten Review-Key in Play Console hinterlegen; Anleitung in `MODERATION.md` |
 | O3 | Screenshots vom Desktop, kein echter Android-Gerätetest | Auf Android prüfen und Shots neu erzeugen |
 | O4 | Play-Console-App, Entwicklerkonto, Upload-Key-Zuordnung und Testerliste fehlen | Beim Entwickler; kein Upload in diesem Schritt |
 | O5 | AAB-Artefakt aus Lauf #4 läuft nach 14 Tagen ab | Vor Upload neu bauen oder gültiges Artefakt verwenden |
@@ -185,16 +205,21 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 - 16 Themenkarten im Listing entsprechen `knowledge.ENTRIES`.
 - Paket `de.konsolenradar.support`, Version 1.2.0, versionCode 10200,
   minSdk 24, targetSdk 36 und nur `INTERNET` sind konsistent.
-- Signiertes AAB und Upload-Zertifikat sind dokumentiert; kein Play-Upload.
+- Signiertes AAB aus Lauf #4 und Upload-Zertifikat sind dokumentiert; das AAB
+  ist vor der Meldefunktion gebaut und muss vor einem Upload neu erzeugt werden.
 - Datenschutz-URL ist öffentlich erreichbar; keine Telemetrie, keine Werbung,
   keine Analyse-SDKs, Key liegt nur im privaten App-Speicher.
 - Data-Safety-Basics (kein Verkauf, TLS, keine Konten beim Entwickler) sind
   konsistent mit dem Code, soweit sie reichen.
+- In-App-Meldungen haben eine ID, sechs Kategorien, eine optionale Notiz und
+  werden lokal gespeichert; E-Mail und Kopieren sind nutzerinitiiert. Der
+  Moderationsablauf ist in `MODERATION.md` dokumentiert.
 
 ## 8. Empfohlene Reihenfolge
 
-1. **KI-Policy:** In-App-Melde-/Flag-Funktion und Moderation ergänzen;
-   Review-Zugang klären (B1, O2).
+1. **KI-Policy:** Meldeweg und Moderationsprotokoll sind vorhanden. Jetzt den
+   direkten Zustellweg oder die E-Mail-Akzeptanz klären und einen temporären
+   Review-Key hinterlegen (B1, O2).
 2. **Marke:** neutralen Titel entscheiden oder Rechte klären; danach App-Label,
    AAB, Feature und Screenshots neu bauen (B2, O3).
 3. **Assets:** Die PNG-Formate sind umgesetzt; bei einem Rebranding müssen
@@ -213,8 +238,17 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
   <https://support.google.com/googleplay/android-developer/answer/10787469>
 - Google Play AI-Generated Content:
   <https://support.google.com/googleplay/android-developer/answer/13985936>
+- Google Play: Understanding the AI-Generated Content policy:
+  <https://support.google.com/googleplay/android-developer/answer/14094294>
+- Google Play: Best Practices to Safeguard AI-Generated Content:
+  <https://support.google.com/googleplay/android-developer/answer/16353813>
+- Google Play: Requirements for providing sign in details for review:
+  <https://support.google.com/googleplay/android-developer/answer/15748846>
+- Google Play Console Requirements (review access, App access):
+  <https://support.google.com/googleplay/android-developer/answer/10788890>
 - Google Play Icon-Spezifikation:
   <https://developer.android.com/distribute/google-play/resources/icon-design-specifications>
-- App-Code: `support_app/main.py`, `support_app/ai_client.py`
+- App-Code: `support_app/main.py`, `support_app/ai_client.py`,
+  `support_app/meldungen.py`, `support_app/links.py`
 - Store-Dateien: `listing.de.md`, `DATA_SAFETY.md`, `PRIVACY.md`,
-  `PLAY_INTERNAL_TEST.md`, `assets/`
+  `MODERATION.md`, `PLAY_INTERNAL_TEST.md`, `assets/`

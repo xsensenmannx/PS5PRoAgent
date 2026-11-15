@@ -32,12 +32,22 @@ tippt, zwei bis drei passende Hilfe-Karten als Kontext und der Modellname.
 Ein Gesprächsverlauf wird nicht mitgesendet. Empfänger ist der vom Nutzer
 gewählte Anbieter: Freebuff, OpenRouter, Groq, Google AI Studio oder Mistral —
 jeweils mit dem eigenen Key des Nutzers. Wählt der Nutzer Ollama auf seinem PC,
-verlassen die Daten den Rechner nicht. Der Entwickler betreibt keinen Server, protokolliert
-nichts und hat keinen Zugriff auf Fragen oder Antworten.
+verlassen die Daten den Rechner nicht. Der Entwickler betreibt keinen Server und
+hat keinen Zugriff auf normale Fragen oder Antworten.
 
 **Löschung:** Der Key liegt nur im privaten App-Speicher und verschwindet mit
 „Key löschen“ oder der Deinstallation. Beim API-Anbieter gelten dessen
 Löschfristen; der Nutzer kann sie über sein dortiges Konto steuern.
+
+**In-App-Meldungen:** Eine gemeldete KI-Antwort wird zunächst nur lokal in
+`meldungen.json` gespeichert (ID, Zeit, Kategorie, Notiz, Frage, Antwort,
+Anbieter, Modell, App-Version; kein API-Key). Die App überträgt sie **nicht
+automatisch**. Erst der Nutzer öffnet über **E-MAIL** sein Mailprogramm und
+sendet den vorbereiteten Bericht an den Entwickler; alternativ kopiert er ihn.
+Die Data-Safety-Antworten oben betreffen die KI-Anfrage, nicht diesen
+nutzerinitiierten Supportweg. Lokale Meldungen verschwinden mit der
+Deinstallation; per E-Mail eingegangene Meldungen werden nach Abschluss,
+spätestens nach 90 Tagen gelöscht (siehe `MODERATION.md`).
 
 ## Variante ohne KI (falls die KI für die Play-Version entfernt wird)
 

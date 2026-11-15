@@ -2,8 +2,10 @@
 
 Standard ist offline: kein Konto, keine Telemetrie, Antworten aus
 ``knowledge.py``. Wer online fragen will, trägt unter „KI“ seinen eigenen
-API-Key ein; er bleibt lokal. Die Logik steckt in ``support_core.py`` und
-``ai_client.py``, diese Datei ist nur die Oberfläche.
+API-Key ein; er bleibt lokal. Anstößige KI-Antworten lassen sich im Reiter
+„KI“ lokal melden und per E-Mail oder Zwischenablage an den Entwickler geben.
+Die Logik steckt in ``support_core.py``, ``ai_client.py`` und ``meldungen.py``;
+diese Datei ist nur die Oberfläche.
 """
 import os
 import sys
@@ -15,6 +17,7 @@ os.environ.setdefault("KIVY_NO_ARGS", "1")
 
 from kivy.app import App
 from kivy.clock import Clock
+from kivy.core.clipboard import Clipboard
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
@@ -31,6 +34,7 @@ from kivy.uix.textinput import TextInput
 
 import ai_client
 import links
+import meldungen
 import search_assistant
 import support_core
 import version
@@ -331,6 +335,14 @@ class KiScreen(Screen):
             halign="left", valign="middle",
         )
         kopf.add_widget(self.kopf_label)
+        self.melden_knopf = Button(
+            text="MELDEN", size_hint_x=None, width=dp(66), bold=True,
+            font_size=dp(10), background_normal="", background_color=PANEL,
+            color=MUTED, disabled_color=MUTED,
+        )
+        self.melden_knopf.bind(on_release=lambda *_: self.melden())
+        self.melden_knopf.disabled = True
+        kopf.add_widget(self.melden_knopf)
         self.key_knopf = Button(
             text="KEY", size_hint_x=None, width=dp(64), bold=True,
             font_size=dp(11), background_normal="", background_color=PANEL,
@@ -359,6 +371,7 @@ class KiScreen(Screen):
         zeile.add_widget(self.knopf)
         root.add_widget(zeile)
         self.add_widget(root)
+        self._letzte = None
         lokal = ("" if kivy_platform in ("android", "ios")
                  else " oder dein lokales Ollama")
         self.schreibe(
@@ -391,7 +404,7 @@ class KiScreen(Screen):
         text = "KI · %s" % info["name"].upper()
         if modell:
             text += " · " + modell
-        self.kopf_label.text = text[:52]
+        self.kopf_label.text = text[:36]
 
     def _anbieter_namen(self):
         """Ollama nur dort anbieten, wo localhost der eigene Rechner ist."""
@@ -569,6 +582,7 @@ class KiScreen(Screen):
                 + support_core.format_answer(support_core.answer(frage)))
             self.einstellungen()
             return
+        modell = ai_client.modell_fuer(zustand, name)
         blase = self.schreibe("Denkt nach …")
         self.knopf.disabled = True
 
@@ -582,17 +596,167 @@ class KiScreen(Screen):
             except Exception as problem:  # pragma: no cover - Notfall
                 fehler = "Unerwarteter Fehler: %s" % problem
             Clock.schedule_once(
-                lambda *_: self._fertig(blase, frage, text, fehler))
+                lambda *_: self._fertig(blase, frage, text, fehler, name,
+                                        modell))
 
         threading.Thread(target=arbeit, daemon=True).start()
 
-    def _fertig(self, blase, frage, text, fehler):
+    def _fertig(self, blase, frage, text, fehler, anbieter, modell):
         self.knopf.disabled = False
         if text:
             blase.text = text
+            self._letzte = {
+                "frage": frage,
+                "antwort": text,
+                "anbieter": anbieter,
+                "modell": modell,
+            }
+            self.melden_knopf.disabled = False
             return
         blase.text = "Keine KI-Antwort: %s\n\nOffline-Antwort:" % fehler
         self.schreibe(support_core.format_answer(support_core.answer(frage)))
+
+    def _meldungen_pfad(self):
+        return meldungen.pfad(App.get_running_app().user_data_dir)
+
+    def _kopiere(self, text):
+        try:
+            Clipboard.copy(text)
+            return True
+        except Exception:
+            return False
+
+    def melden(self):
+        """Öffnet den Meldedialog für die zuletzt erhaltene KI-Antwort."""
+        if not self._letzte:
+            self.schreibe(
+                "Noch keine KI-Antwort zum Melden. Stelle zuerst eine Frage; "
+                "ohne Key bleibt die Offline-Hilfe sichtbar."
+            )
+            return
+        letzte = dict(self._letzte)
+        inhalt = BoxLayout(orientation="vertical", padding=dp(10),
+                           spacing=dp(6))
+        inhalt.add_widget(Label(
+            text="Antwort melden", size_hint_y=None, height=dp(20),
+            color=TEXT, bold=True, font_size=dp(14),
+        ))
+        inhalt.add_widget(Label(
+            text="Die Meldung wird lokal gespeichert. E-Mail öffnet dein "
+                 "Mailprogramm; gesendet wird sie erst dort.",
+            size_hint_y=None, height=dp(38), color=MUTED, font_size=dp(10),
+        ))
+        inhalt.add_widget(Label(
+            text="Was ist anstößig?", size_hint_y=None, height=dp(18),
+            color=MUTED, font_size=dp(11),
+        ))
+        kategorie = Spinner(
+            text="Bitte wählen",
+            values=[label for _, label in meldungen.KATEGORIEN],
+            size_hint_y=None, height=dp(40), background_normal="",
+            background_color=PANEL, color=TEXT,
+        )
+        inhalt.add_widget(kategorie)
+        inhalt.add_widget(Label(
+            text="Notiz (optional)", size_hint_y=None, height=dp(18),
+            color=MUTED, font_size=dp(11),
+        ))
+        notiz = TextInput(
+            hint_text="Was war problematisch?", multiline=True,
+            size_hint_y=None, height=dp(72),
+            background_color=(0.10, 0.13, 0.20, 1), foreground_color=TEXT,
+            cursor_color=ACCENT, padding=(dp(8), dp(8)),
+        )
+        inhalt.add_widget(notiz)
+        inhalt.add_widget(Label(
+            text="Kontakt: %s" % meldungen.KONTAKT,
+            size_hint_y=None, height=dp(18), color=MUTED, font_size=dp(10),
+        ))
+        hinweis = Label(text="", size_hint_y=None, height=dp(26), color=MUTED,
+                        font_size=dp(10))
+        inhalt.add_widget(hinweis)
+        knoepfe = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        abbrechen = Button(
+            text="ABBRECHEN", size_hint_x=0.30, font_size=dp(10),
+            background_normal="", background_color=PANEL,
+        )
+        kopieren = Button(
+            text="KOPIEREN", size_hint_x=0.33, font_size=dp(10),
+            background_normal="", background_color=PANEL,
+        )
+        email = Button(
+            text="E-MAIL", size_hint_x=0.37, bold=True, font_size=dp(10),
+            background_normal="", background_color=ACCENT,
+        )
+        knoepfe.add_widget(abbrechen)
+        knoepfe.add_widget(kopieren)
+        knoepfe.add_widget(email)
+        inhalt.add_widget(knoepfe)
+        popup = Popup(title="KI-Antwort melden", content=inhalt,
+                      size_hint=(0.94, None), height=dp(500),
+                      separator_color=ACCENT)
+
+        def eintrag_bauen():
+            code = next((code for code, label in meldungen.KATEGORIEN
+                         if label == kategorie.text), "")
+            if not code:
+                hinweis.text = "Bitte eine Kategorie wählen."
+                return None
+            try:
+                eintrag = meldungen.erstelle(
+                    code, notiz=notiz.text, frage=letzte["frage"],
+                    antwort=letzte["antwort"], anbieter=letzte["anbieter"],
+                    modell=letzte["modell"], version=version.VERSION)
+                meldungen.speichern(self._meldungen_pfad(), eintrag)
+            except (OSError, ValueError) as problem:
+                hinweis.text = "Speichern fehlgeschlagen: %s" % problem
+                return None
+            return eintrag
+
+        def kopieren_(*_):
+            eintrag = eintrag_bauen()
+            if not eintrag:
+                return
+            popup.dismiss()
+            if self._kopiere(meldungen.als_text(eintrag)):
+                self.schreibe(
+                    "Meldung %s gespeichert und kopiert. Sende sie an %s."
+                    % (eintrag["id"], meldungen.KONTAKT)
+                )
+            else:
+                self.schreibe(
+                    "Meldung %s lokal gespeichert. Kopieren war nicht "
+                    "möglich; öffne die Meldung erneut und nutze E-MAIL."
+                    % eintrag["id"]
+                )
+
+        def email_(*_):
+            eintrag = eintrag_bauen()
+            if not eintrag:
+                return
+            popup.dismiss()
+            if links.oeffne_mailto(meldungen.mailto_url(eintrag)):
+                self.schreibe(
+                    "Meldung %s lokal gespeichert. Das Mailprogramm wurde "
+                    "geöffnet; sende die Nachricht dort ab." % eintrag["id"]
+                )
+            elif self._kopiere(meldungen.als_text(eintrag)):
+                self.schreibe(
+                    "Meldung %s lokal gespeichert. Kein Mailprogramm "
+                    "gefunden; der Bericht liegt in der Zwischenablage. "
+                    "Sende ihn an %s." % (eintrag["id"], meldungen.KONTAKT)
+                )
+            else:
+                self.schreibe(
+                    "Meldung %s lokal gespeichert, aber weder Mailprogramm "
+                    "noch Zwischenablage verfügbar. Kontakt: %s."
+                    % (eintrag["id"], meldungen.KONTAKT)
+                )
+
+        abbrechen.bind(on_release=lambda *_: popup.dismiss())
+        kopieren.bind(on_release=kopieren_)
+        email.bind(on_release=email_)
+        popup.open()
 
 
 class HilfeApp(App):
