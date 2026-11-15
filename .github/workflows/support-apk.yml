@@ -1,14 +1,15 @@
-# Baut das Debug-APK und die Windows-EXE der Offline-Hilfe (support_app/).
+# Baut Release-APK, Windows-EXE und AAB der Offline-Hilfe (support_app/).
 #
 # Bewusst getrennt von release.yml und play-aab.yml: Die Radar-App und ihre
 # Releases bleiben unberuehrt. Bei einem Tag hilfe-v1.2.3 entsteht ein Release
-# mit APK und EXE an derselben Stelle.
+# mit APK und EXE; das AAB wird im selben Lauf gebaut und bleibt ein Artefakt.
 name: Support APK
 
 on:
   workflow_dispatch:
   push:
-    # Tag-Push hilfe-v1.2.3 baut APK und EXE und legt automatisch ein Release an.
+    # Tag-Push hilfe-v1.2.3 baut APK, EXE und AAB und legt automatisch ein
+    # Release mit APK und EXE an; das AAB bleibt Actions-Artefakt.
     # Bei Tag-Pushes wertet GitHub paths-Filter nicht aus, der Build laeuft also
     # immer; Branch-Pushes bleiben auf support_app/ beschraenkt.
     tags:
@@ -37,14 +38,16 @@ jobs:
       - uses: actions/checkout@v5
 
       # Tag hilfe-v1.2.3 -> version=1.2.3, versionCode=10203. Das Skript ist
-      # dasselbe wie im Radar-Release; nur der Tag-Praefix wird abgeschnitten.
+      # dasselbe wie im Radar-Release; es zieht die Play-Spec und version.py
+      # mit, damit APK, EXE und AAB dieselbe Version tragen.
       - name: Version aus Tag
         if: startsWith(github.ref, 'refs/tags/hilfe-v')
         run: |
           set -euo pipefail
           bash tools/set_version_from_tag.sh "v${GITHUB_REF_NAME#hilfe-v}" \
             support_app/buildozer.spec
-          grep -E '^(version|android\.numeric_version)' support_app/buildozer.spec
+          grep -E '^(version|android\.numeric_version)' \
+            support_app/buildozer.spec support_app/buildozer.play.spec
 
       - name: Java 17
         uses: actions/setup-java@v6
@@ -257,6 +260,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Auch die EXE zeigt version.py an; beim Tag-Build muss sie dieselbe
+      # Version wie APK und AAB tragen.
+      - name: Version aus Tag
+        if: startsWith(github.ref, 'refs/tags/hilfe-v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/set_version_from_tag.sh "v${GITHUB_REF_NAME#hilfe-v}" \
+            support_app/buildozer.spec
+          grep -E '^(version|android\.numeric_version)' \
+            support_app/buildozer.spec support_app/buildozer.play.spec
+
       - name: Python 3.12
         uses: actions/setup-python@v6
         with:
@@ -315,25 +330,43 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  aab:
+    name: Android-AAB
+    # Beim Tag-Release laeuft der AAB-Build als dritter Build mit. Ein
+    # manueller Start von Support APK baut ihn ebenfalls, legt aber kein
+    # Release an. Bei Branch-Pushes bleibt er aus (dafuer gibt es Support AAB).
+    if: startsWith(github.ref, 'refs/tags/hilfe-v') || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/support-aab.yml
+    secrets: inherit
+
   release:
     name: Release
-    # Nur bei Tag-Pushes, und erst wenn beide Builds durch sind.
+    # Nur bei Tag-Pushes, und erst wenn APK, EXE und AAB durch sind.
     if: startsWith(github.ref, 'refs/tags/hilfe-v')
-    needs: [apk, windows]
+    needs: [apk, windows, aab]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
-      # Legt je Artefakt einen Unterordner an:
-      #   dist/ps5pro-search-agent-hilfe-apk/bin/*.apk
-      #   dist/ps5pro-search-agent-hilfe-win/PS5ProSearchAgent-Hilfe.exe
-      - name: Artefakte holen
+      # Nur die Release-Assets holen; das AAB wird bewusst nicht heruntergeladen
+      # und damit auch nicht ans GitHub-Release angehaengt.
+      #   dist/apk/bin/*.apk
+      #   dist/win/PS5ProSearchAgent-Hilfe.exe
+      - name: APK-Artefakt holen
         uses: actions/download-artifact@v8
-        # Fehlt jedes Artefakt, soll die Pruefung darunter die Ursache nennen
+        # Fehlt das Artefakt, soll die Pruefung darunter die Ursache nennen
         # statt dieser Schritt mit "Unable to find any artifacts".
         continue-on-error: true
         with:
-          path: dist
+          name: ps5pro-search-agent-hilfe-apk
+          path: dist/apk
+
+      - name: EXE-Artefakt holen
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: ps5pro-search-agent-hilfe-win
+          path: dist/win
 
       # Ohne Keystore baut der APK-Job bewusst kein APK. Dann soll der
       # Release-Job das klar benennen, statt an einem "ls: cannot access"

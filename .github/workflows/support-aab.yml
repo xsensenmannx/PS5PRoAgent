@@ -1,12 +1,13 @@
-# Baut auf Knopfdruck ein signiertes Android App Bundle (AAB) der Hilfe-App.
+# Baut ein signiertes Android App Bundle (AAB) der Hilfe-App.
 #
-# Bewusst getrennt von support-apk.yml: Die GitHub-APK und ihre Releases
-# bleiben unveraendert. Das AAB ist ein reines Artefakt; dieser Workflow laedt
-# nichts in die Play Console hoch und legt kein Release an.
+# Der Workflow laeuft auf Knopfdruck und wird ausserdem vom Tag-Release
+# (support-apk.yml, Tag hilfe-v*) als eigener Job aufgerufen. Das AAB bleibt
+# ein reines Artefakt: kein Play-Upload und kein Release-Asset.
 name: Support AAB
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -19,6 +20,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Beim Tag-Release werden APK- und Play-Spec gemeinsam auf die
+      # Tag-Version gesetzt. Der Preflight prueft danach beide Dateien;
+      # beim manuellen Lauf bleiben die Versionen aus dem Repo stehen.
+      - name: Version aus Tag
+        if: startsWith(github.ref, 'refs/tags/hilfe-v')
+        run: |
+          set -euo pipefail
+          bash tools/set_version_from_tag.sh "v${GITHUB_REF_NAME#hilfe-v}" \
+            support_app/buildozer.spec
+          grep -E '^(version|android\.numeric_version)' \
+            support_app/buildozer.spec support_app/buildozer.play.spec
+
       - name: Java 17
         uses: actions/setup-java@v6
         with:
@@ -30,8 +43,18 @@ jobs:
         with:
           python-version: "3.11.9"
 
-      # Die Tests laufen noch gegen die APK-Spec; erst danach wird die
-      # Play-Spec aktiviert, damit der Drift-Test apk vs. aab pruefen kann.
+      # Vor dem teuren Build: Specs, Version und Play-Artefakt pruefen. Danach
+      # laufen die Kerntests noch gegen die APK-Spec; erst anschliessend wird
+      # die Play-Spec aktiviert, damit der Drift-Test apk vs. aab pruefen kann.
+      - name: AAB-Preflight
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            python tools/check_hilfe_specs.py --tag "${GITHUB_REF_NAME#hilfe-v}"
+          else
+            python tools/check_hilfe_specs.py
+          fi
+
       - name: Kerntests
         run: python -m unittest discover -s support_app/tests -v
 

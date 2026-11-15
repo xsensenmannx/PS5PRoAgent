@@ -54,6 +54,23 @@ jobs:
             exit 1
           fi
 
+      # Der Tag-Build haelt APK- und Play-Spec synchron. Der Preflight und ein
+      # Temp-Test stellen sicher, dass das Skript auch die AAB-Spec mitzieht.
+      - name: Hilfe-Specs und AAB-Preflight pruefen
+        run: |
+          set -euo pipefail
+          python tools/check_hilfe_specs.py
+          TMP=$(mktemp -d)
+          cp support_app/buildozer.spec support_app/buildozer.play.spec \
+            support_app/version.py "$TMP/"
+          bash tools/set_version_from_tag.sh v9.8.7 "$TMP/buildozer.spec"
+          for datei in buildozer.spec buildozer.play.spec; do
+            grep -qx 'version = 9.8.7' "$TMP/$datei"
+            grep -qx 'android.numeric_version = 90807' "$TMP/$datei"
+          done
+          grep -qx 'VERSION = "9.8.7"' "$TMP/version.py"
+          rm -rf "$TMP"
+
   layout:
     name: Kivy-Smoke ${{ matrix.name }}
     runs-on: ubuntu-24.04

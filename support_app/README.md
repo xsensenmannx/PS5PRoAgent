@@ -186,19 +186,29 @@ Universal-APK bleibt für alte 32-Bit-Geräte im Release.
 
 Auf diesem Windows-Rechner ist kein Buildozer/Java/SDK installiert. Gebaut wird
 über `.github/workflows/support-apk.yml`: Bei einem Push entsteht ein
-release-signiertes APK als Artefakt, bei einem Tag `hilfe-v*` zusätzlich das
-GitHub-Release mit APK und EXE. Ohne Keystore baut der Job bewusst kein APK.
+release-signiertes APK als Artefakt. Ein Tag `hilfe-v*` baut APK, EXE und AAB
+aus demselben Commit und legt das GitHub-Release mit APK und EXE an; das AAB
+bleibt ein Artefakt und wird nicht ans Release angehängt. Ohne Keystore baut
+der Job bewusst kein APK.
 
 ### Android-AAB für Google Play
 
-`.github/workflows/support-aab.yml` baut auf Knopfdruck ein signiertes Android
-App Bundle. Der Lauf lädt **nichts** in die Play Console hoch und legt kein
-GitHub-Release an; das AAB bleibt ein Artefakt im Actions-Lauf.
+`.github/workflows/support-aab.yml` baut ein signiertes Android App Bundle –
+auf Knopfdruck oder als AAB-Job des Tag-Release. Der AAB-Job lädt **nichts**
+in die Play Console hoch und hängt das AAB nicht ans GitHub-Release; beim Tag
+legt der übergeordnete Release-Job nur APK und EXE an. Das AAB bleibt ein
+Artefakt im Actions-Lauf.
 
-1. Actions → **Support AAB** → **Run workflow** (Branch `main`).
+1. Actions → **Support AAB** → **Run workflow** (Branch `main`) für einen
+   reinen AAB-Build; beim Tag `hilfe-v*` startet der Job automatisch mit.
 2. Nach dem Lauf das Artefakt `ps5pro-search-agent-hilfe-aab` herunterladen.
 3. Enthalten sind `*.aab`, `*.apks`, `hilfe-universal.apk`, Prüfsummen und
    `buildozer.log`.
+
+Vor dem Build prüft `tools/check_hilfe_specs.py`, dass APK- und Play-Spec
+dieselbe Version, denselben versionCode und dasselbe Paket tragen und dass die
+Play-Spec tatsächlich ein AAB erzeugt. Beim Tag-Build setzt
+`tools/set_version_from_tag.sh` beide Specs und `version.py` auf die Tag-Version.
 
 Der Workflow nutzt denselben Hilfe-Keystore wie die APK
 (`HILFE_KEYSTORE_BASE64`, `HILFE_KEYSTORE_PASSWORD`, `HILFE_KEY_ALIAS`,
