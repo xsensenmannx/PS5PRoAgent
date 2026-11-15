@@ -29,6 +29,14 @@ jobs:
     name: Android-APK
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    # Signierung: eigener Release-Key, nie im Repo. Fehlen die Secrets, wird
+    # bewusst kein APK gebaut (kein Debug-APK als Download).
+    env:
+      HILFE_KEYSTORE_B64: ${{ secrets.HILFE_KEYSTORE_BASE64 }}
+      HILFE_KEYSTORE_PASSWORD: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
+      HILFE_KEY_ALIAS: ${{ secrets.HILFE_KEY_ALIAS }}
+      HILFE_KEY_PASSWORD: ${{ secrets.HILFE_KEY_PASSWORD }}
+      HILFE_CERT_SHA256: ${{ secrets.HILFE_CERT_SHA256 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -83,28 +91,84 @@ jobs:
           key: support-buildozer-v2-${{ hashFiles('support_app/buildozer.spec') }}
           restore-keys: support-buildozer-v2-
 
-      - name: APK bauen
+      # Der Keystore kommt base64-kodiert aus den Secrets und liegt nur im
+      # Temp-Ordner des Runners. Fehlt er, bricht nichts ab: der Job bleibt
+      # gruen und weist per Notice darauf hin.
+      - name: Keystore bereitstellen
+        if: env.HILFE_KEYSTORE_B64 != ''
+        env:
+          KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_PASS:-}" ]; then
+            echo "::error::HILFE_KEYSTORE_PASSWORD fehlt"; exit 1
+          fi
+          KS="$RUNNER_TEMP/hilfe-release.p12"
+          printf '%s' "$HILFE_KEYSTORE_B64" | base64 -d > "$KS"
+          chmod 600 "$KS"
+          keytool -list -keystore "$KS" -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASS > /dev/null
+          echo "Keystore in Ordnung ($(wc -c < "$KS") Bytes)"
+
+      # Signiert wird von p4a, sobald alle vier P4A_RELEASE_*-Variablen gesetzt
+      # sind; buildozer haengt dann --sign an. android.release_artifact = apk
+      # sorgt fuer eine APK statt eines AAB.
+      - name: APK bauen (release, signiert)
+        if: env.HILFE_KEYSTORE_B64 != ''
         working-directory: support_app
         env:
+          KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
           PYTHONUTF8: "1"
           # Neutralisiert p4as "pip install -U pip" im Build-venv (p4a #3339).
           PIP_CONSTRAINT: ${{ github.workspace }}/support_app/pip-constraints.txt
-        run: buildozer -v android debug
+        run: |
+          set -euo pipefail
+          ALIAS="${HILFE_KEY_ALIAS:-hilfe}"
+          KEYPASS="${HILFE_KEY_PASSWORD:-$KEYSTORE_PASS}"
+          export P4A_RELEASE_KEYSTORE="$RUNNER_TEMP/hilfe-release.p12"
+          export P4A_RELEASE_KEYSTORE_PASSWD="$KEYSTORE_PASS"
+          export P4A_RELEASE_KEYALIAS="$ALIAS"
+          export P4A_RELEASE_KEYALIAS_PASSWD="$KEYPASS"
+          rm -f bin/*.apk
+          buildozer -v android release
+          ls -l bin/*.apk
 
-      - name: Manifest pruefen
+      - name: Hinweis ohne Keystore
+        if: env.HILFE_KEYSTORE_B64 == ''
+        run: |
+          echo "::notice::Kein APK gebaut: Secret HILFE_KEYSTORE_BASE64 fehlt. Anleitung in support_app/README.md, Abschnitt Signierung."
+
+      - name: Manifest und Signatur pruefen
+        if: env.HILFE_KEYSTORE_B64 != ''
         run: |
           set -euo pipefail
           APK=$(ls -1 support_app/bin/*.apk | head -n 1)
           AAPT2=$(ls -1 "$HOME"/.buildozer/android/platform/android-sdk/build-tools/*/aapt2 | tail -n 1)
+          APKSIGNER=$(ls -1 "$HOME"/.buildozer/android/platform/android-sdk/build-tools/*/apksigner | tail -n 1)
           "$AAPT2" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission)" || true
           "$AAPT2" dump badging "$APK" | grep -q "package: name='de.konsolenradar.support'" \
             || { echo "::error::Falsches Paket im APK"; exit 1; }
+          "$AAPT2" dump badging "$APK" | grep -q "android.permission.INTERNET" \
+            || { echo "::error::INTERNET-Berechtigung fehlt"; exit 1; }
+          "$APKSIGNER" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
+          if grep -qi "Android Debug" "$RUNNER_TEMP/certs.txt"; then
+            echo "::error::APK ist noch mit dem Debug-Zertifikat signiert"; exit 1
+          fi
+          CERT=$(grep -i "SHA-256 digest" "$RUNNER_TEMP/certs.txt" | head -n 1 | sed 's/.*: //')
+          echo "Zertifikat SHA-256: $CERT"
+          if [ -n "${HILFE_CERT_SHA256:-}" ]; then
+            ERWARTET=$(printf '%s' "$HILFE_CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
+            IST=$(printf '%s' "$CERT" | tr -d ':\r ' | tr 'A-F' 'a-f')
+            [ "$IST" = "$ERWARTET" ] \
+              || { echo "::error::Signatur passt nicht zu HILFE_CERT_SHA256"; exit 1; }
+          fi
+          printf '%s\n' "$CERT" > support_app/bin/CERT-SHA256.txt
           sha256sum "$APK" | tee support_app/bin/SHA256SUMS
 
       - name: APK sichern
-        if: always()
+        if: env.HILFE_KEYSTORE_B64 != ''
         # v7 laeuft auf Node 24; v4 wird von GitHub als veraltet gemeldet.
         uses: actions/upload-artifact@v7
         with:
@@ -112,10 +176,11 @@ jobs:
           path: |
             support_app/bin/*.apk
             support_app/bin/SHA256SUMS
+            support_app/bin/CERT-SHA256.txt
             support_app/buildozer.log
-          # Bei einem Fehlschlag existiert oft keine APK. Der Job ist dann
-          # bereits rot; eine zweite Warnung ueber fehlende Dateien hilft nie.
-          if-no-files-found: ignore
+          # Ohne Keystore wird dieser Schritt uebersprungen; mit Keystore muss
+          # die APK existieren, sonst ist der Job ohnehin rot.
+          if-no-files-found: error
           retention-days: 14
 
   windows:
@@ -220,18 +285,19 @@ jobs:
           cat > "$RUNNER_TEMP/notes.md" <<EOF
           ## PS5 Pro Search Agent – Hilfe $VERSION
 
-          Eigenständige Offline-Hilfe für den PS5 Pro Search Agent.
-          Eigenes Paket (de.konsolenradar.support), unabhängig von der Radar-App
-          und deren Releases.
+          Hilfe-App zum PS5 Pro Search Agent: offline nutzbar, optional mit
+          eigener KI-Anbindung. Eigenes Paket (de.konsolenradar.support),
+          unabhängig von der Radar-App und deren Releases.
 
           ### Android
 
           - Android 7.0 oder neuer, arm64-v8a und armeabi-v7a
-          - Debug-signiert: „Unbekannte Quellen“ erlauben; nicht für Google Play
+          - Release-signiert mit eigenem Key; Installation aus „Unbekannte Quellen“
           - Offline nutzbar; optionale KI mit eigenem Freebuff-Key
           - Keine Telemetrie, kein eingebauter Key
           - Parallel zur Radar-App installierbar
           - \`$APK_NAME\` ($APK_SIZE Bytes)
+          - Signatur-Zertifikat SHA-256: \`$(cat dist/*/bin/CERT-SHA256.txt 2>/dev/null | head -n 1 || echo unbekannt)\`
 
           ### Windows
 

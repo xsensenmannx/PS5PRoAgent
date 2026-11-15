@@ -44,6 +44,10 @@ android.accept_sdk_license = True
 
 # 64- und 32-Bit: deckt aktuelle Geraete und aeltere ARM-Geraete ab (Android 7+).
 # x86_64 (Emulator/Chromebooks) laesst sich bei Bedarf ergaenzen.
+# Signiert wird ueber die Umgebung (p4a): P4A_RELEASE_KEYSTORE,
+# P4A_RELEASE_KEYSTORE_PASSWD, P4A_RELEASE_KEYALIAS und
+# P4A_RELEASE_KEYALIAS_PASSWD. Der Workflow setzt sie aus den Secrets und baut
+# ausschliesslich `android release`; ohne Keystore entsteht kein APK.
 android.archs = arm64-v8a, armeabi-v7a
 android.release_artifact = apk
 

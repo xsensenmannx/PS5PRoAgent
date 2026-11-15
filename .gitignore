@@ -22,6 +22,11 @@ support_app/.venv-win/
 support_app/build/
 support_app/dist/
 support_app/PS5ProSearchAgent-Hilfe.spec
+# Signierschluessel gehoeren nie ins Repo.
+*.p12
+*.jks
+*.keystore
+*.b64
 
 # Betriebssystem-Kram
 .DS_Store

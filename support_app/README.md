@@ -88,14 +88,70 @@ python -m unittest discover -s support_app/tests -v
 
 Die Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
 
+## Signierung (Release-APK)
+
+Die App wird **nur noch als signiertes Release-APK** gebaut. Ein Debug-APK
+gibt es nicht mehr als Download: es lässt sich nicht aktualisieren und wirkt
+beim Sideload wie eine Bastelversion.
+
+Der Workflow erwartet diese Repository-Secrets:
+
+| Secret | Pflicht | Inhalt |
+|---|---|---|
+| `HILFE_KEYSTORE_BASE64` | ja | die `.p12`-Datei, base64-kodiert (eine Zeile) |
+| `HILFE_KEYSTORE_PASSWORD` | ja | Passwort des Keystores |
+| `HILFE_KEY_ALIAS` | nein | Key-Alias, Standard `hilfe` |
+| `HILFE_KEY_PASSWORD` | nein | Key-Passwort, Standard = Keystore-Passwort |
+| `HILFE_CERT_SHA256` | nein | erwarteter Zertifikats-Fingerabdruck; der Build bricht ab, wenn ein anderer Key signiert |
+
+Fehlt `HILFE_KEYSTORE_BASE64`, baut der Workflow **kein** APK (der Job bleibt
+grün und weist per Notice darauf hin). Die Windows-EXE ist davon unberührt.
+
+### Keystore einmalig erzeugen
+
+Auf einem Rechner mit JDK 17 (Windows: Git Bash oder PowerShell):
+
+```bash
+keytool -genkeypair -v -keystore hilfe-release.p12 -storetype PKCS12 \
+  -alias hilfe -keyalg RSA -keysize 4096 -validity 10000 \
+  -dname "CN=PS5 Pro Hilfe, O=Konsolenradar, C=DE"
+# Passwort zweimal eingeben; danach die Datei sicher aufbewahren.
+```
+
+Base64 für das Secret (PowerShell):
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("hilfe-release.p12")) |
+  Set-Content -NoNewline hilfe-release.b64
+gh secret set HILFE_KEYSTORE_BASE64 < hilfe-release.b64
+gh secret set HILFE_KEYSTORE_PASSWORD
+gh secret set HILFE_KEY_ALIAS --body hilfe
+```
+
+`hilfe-release.p12` und `hilfe-release.b64` **niemals committen** (stehen in
+`.gitignore`). Ohne diesen Schlüssel sind spätere Updates nicht mehr möglich —
+Backup anlegen.
+
+Der Fingerabdruck steht nach dem ersten Lauf in `bin/CERT-SHA256.txt` und in
+den Release-Notes; als `HILFE_CERT_SHA256` hinterlegen, damit ein falscher Key
+auffällt.
+
+**Wichtig:** Das bisherige Debug-APK ist mit einem anderen Zertifikat
+signiert. Android lässt es sich nicht durch das Release-APK überschreiben —
+alte Version vorher deinstallieren.
+
 ## Android-APK bauen
 
 Lokal braucht es Linux (oder WSL) mit Java 17, Android-SDK/NDK und Buildozer:
 
 ```bash
 cd support_app
-buildozer -v android debug
-# Ergebnis: bin/*.apk
+export P4A_RELEASE_KEYSTORE=~/keystores/hilfe-release.p12
+export P4A_RELEASE_KEYSTORE_PASSWD='…'
+export P4A_RELEASE_KEYALIAS=hilfe
+export P4A_RELEASE_KEYALIAS_PASSWD='…'
+buildozer -v android release
+# Ergebnis: bin/*-release.apk
 ```
 
 Gebaut wird für `arm64-v8a` und `armeabi-v7a`, also 64- und 32-Bit-ARM ab
