@@ -172,9 +172,6 @@ jobs:
 
           # Die Universal-APK von bundletool enthaelt keine sdkVersion-Zeile im
           # Badging; minSdk wird deshalb direkt am AAB-Manifest geprueft.
-          USES_SDK=$(java -jar "$BT" dump manifest --bundle="$AAB" \
-            --xpath="/manifest/uses-sdk")
-          echo "AAB uses-sdk: $USES_SDK"
           AAB_MIN_SDK=$(java -jar "$BT" dump manifest --bundle="$AAB" \
             --xpath="/manifest/uses-sdk/@android:minSdkVersion")
           echo "AAB minSdkVersion: $AAB_MIN_SDK"
