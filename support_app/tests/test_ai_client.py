@@ -13,27 +13,68 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import ai_client  # noqa: E402
 
 
+def _zustand(key="k", modell="m", anbieter="freebuff"):
+    zustand = ai_client.default_state()
+    zustand["anbieter"] = anbieter
+    zustand["keys"][anbieter] = key
+    zustand["modelle"][anbieter] = modell
+    return zustand
+
+
 class EinstellungenTest(unittest.TestCase):
     def test_speichern_und_lesen(self):
         with tempfile.TemporaryDirectory() as ordner:
             pfad = ai_client.settings_pfad(ordner)
-            ai_client.save_settings(pfad, "  sk-test-123456789  ", "modell-a")
-            daten = ai_client.load_settings(pfad)
-            self.assertEqual(daten, {"key": "sk-test-123456789",
-                                     "model": "modell-a"})
+            zustand = _zustand("  sk-test-123456789  ", "modell-a", "groq")
+            zustand["keys"]["openrouter"] = "or-key"
+            ai_client.save_state(pfad, zustand)
+            daten = ai_client.load_state(pfad)
+            self.assertEqual(daten["anbieter"], "groq")
+            self.assertEqual(daten["keys"]["groq"], "sk-test-123456789")
+            self.assertEqual(daten["keys"]["openrouter"], "or-key")
+            self.assertEqual(daten["modelle"]["groq"], "modell-a")
 
-    def test_kaputte_datei_ergibt_leere_einstellungen(self):
+    def test_alte_datei_wird_freebuff(self):
+        with tempfile.TemporaryDirectory() as ordner:
+            pfad = ai_client.settings_pfad(ordner)
+            with open(pfad, "w", encoding="utf-8") as datei:
+                json.dump({"key": "alt", "model": "alt-modell"}, datei)
+            daten = ai_client.load_state(pfad)
+            self.assertEqual(daten["anbieter"], "freebuff")
+            self.assertEqual(daten["keys"]["freebuff"], "alt")
+            self.assertEqual(daten["modelle"]["freebuff"], "alt-modell")
+
+    def test_kaputte_datei_ergibt_leeren_zustand(self):
         with tempfile.TemporaryDirectory() as ordner:
             pfad = ai_client.settings_pfad(ordner)
             with open(pfad, "w", encoding="utf-8") as datei:
                 datei.write("{kein json")
-            self.assertEqual(ai_client.load_settings(pfad),
-                             {"key": "", "model": ai_client.DEFAULT_MODEL})
+            self.assertEqual(ai_client.load_state(pfad),
+                             ai_client.default_state())
 
     def test_mask_verraet_nichts(self):
         self.assertEqual(ai_client.mask(""), "")
         self.assertEqual(ai_client.mask("kurz"), "…")
         self.assertEqual(ai_client.mask("sk-1234567890abcdef"), "sk-1…cdef")
+
+
+class AnbieterTest(unittest.TestCase):
+    def test_bekannte_anbieter(self):
+        for name in ("freebuff", "openrouter", "groq", "google", "mistral",
+                     "ollama"):
+            self.assertIn(name, ai_client.ANBIETER)
+            self.assertTrue(ai_client.ANBIETER[name]["base"].startswith("http"))
+
+    def test_unbekannter_anbieter_faellt_zurueck(self):
+        self.assertEqual(ai_client.anbieter_info("gibt-es-nicht")["name"],
+                         ai_client.ANBIETER["freebuff"]["name"])
+
+    def test_ollama_braucht_keinen_key(self):
+        self.assertFalse(ai_client.ANBIETER["ollama"]["key_pflicht"])
+
+    def test_key_seiten_sind_https(self):
+        for name, info in ai_client.ANBIETER.items():
+            self.assertTrue(info["key_url"].startswith("https://"), name)
 
 
 class PayloadTest(unittest.TestCase):
@@ -98,6 +139,9 @@ class FehlertextTest(unittest.TestCase):
         self.assertIn("nicht erreichbar", ai_client.fehlertext(503))
         self.assertIn("HTTP 418", ai_client.fehlertext(418))
 
+    def test_404_nennt_modellwahl(self):
+        self.assertIn("MODELL", ai_client.fehlertext(404))
+
 
 def _antwort(daten):
     """Fake für urlopen: liefert JSON als BytesIO."""
@@ -112,7 +156,7 @@ def _antwort(daten):
 class ChatTest(unittest.TestCase):
     def test_antwort_wird_gelesen(self):
         opener = _antwort({"choices": [{"message": {"content": "Hallo"}}]})
-        text = ai_client.chat({"key": "k", "model": "m"}, "Frage", opener=opener)
+        text = ai_client.chat(_zustand(), "Frage", opener=opener)
         self.assertEqual(text, "Hallo")
 
     def test_key_abgelehnt(self):
@@ -120,20 +164,63 @@ class ChatTest(unittest.TestCase):
             raise urllib.error.HTTPError(anfrage.full_url, 401, "Nein", {}, None)
 
         with self.assertRaises(ai_client.KiFehler) as Kontext:
-            ai_client.chat({"key": "k", "model": "m"}, "Frage", opener=oeffnen)
+            ai_client.chat(_zustand(), "Frage", opener=oeffnen)
         self.assertIn("Key abgelehnt", str(Kontext.exception))
 
     def test_ohne_key(self):
         with self.assertRaises(ai_client.KeinKey):
-            ai_client.chat({"key": "", "model": "m"}, "Frage")
+            ai_client.chat(_zustand(key=""), "Frage")
+
+    def test_ohne_key_nennt_anbieter(self):
+        with self.assertRaises(ai_client.KeinKey) as Kontext:
+            ai_client.chat(_zustand(key="", anbieter="groq"), "Frage")
+        self.assertIn("Groq", str(Kontext.exception))
 
     def test_keine_verbindung(self):
         def oeffnen(anfrage, timeout=None, context=None):
             raise urllib.error.URLError("offline")
 
         with self.assertRaises(ai_client.KiFehler) as Kontext:
-            ai_client.chat({"key": "k", "model": "m"}, "Frage", opener=oeffnen)
+            ai_client.chat(_zustand(), "Frage", opener=oeffnen)
         self.assertIn("Keine Verbindung", str(Kontext.exception))
+
+    def test_openrouter_nutzt_eigene_adresse(self):
+        gesehen = {}
+
+        def oeffnen(anfrage, timeout=None, context=None):
+            gesehen["url"] = anfrage.full_url
+            gesehen["auth"] = anfrage.get_header("Authorization")
+            return io.BytesIO(
+                b'{"choices": [{"message": {"content": "ok"}}]}')
+
+        ai_client.chat(_zustand(anbieter="openrouter"), "Frage",
+                       opener=oeffnen)
+        self.assertEqual(gesehen["url"],
+                         "https://openrouter.ai/api/v1/chat/completions")
+        self.assertEqual(gesehen["auth"], "Bearer k")
+
+    def test_ollama_laeuft_ohne_key_und_ohne_tls(self):
+        gesehen = {}
+
+        def oeffnen(anfrage, timeout=None, context=None):
+            gesehen["url"] = anfrage.full_url
+            gesehen["auth"] = anfrage.get_header("Authorization")
+            gesehen["context"] = context
+            return io.BytesIO(
+                b'{"choices": [{"message": {"content": "lokal"}}]}')
+
+        text = ai_client.chat(
+            _zustand(key="", modell="llama3.2", anbieter="ollama"),
+            "Frage", opener=oeffnen)
+        self.assertEqual(text, "lokal")
+        self.assertEqual(gesehen["url"],
+                         "http://localhost:11434/v1/chat/completions")
+        self.assertIsNone(gesehen["auth"])
+        self.assertIsNone(gesehen["context"])
+
+    def test_ohne_modell(self):
+        with self.assertRaises(ai_client.KiFehler):
+            ai_client.chat(_zustand(anbieter="ollama", modell=""), "Frage")
 
 
 class SSLTest(unittest.TestCase):
@@ -145,13 +232,11 @@ class SSLTest(unittest.TestCase):
 
         def oeffnen(anfrage, timeout=None, context=None):
             gesehen["context"] = context
-            return io.BytesIO(b'{"choices": [{"message": {"content": "ok"}}]}')
+            return io.BytesIO(
+                b'{"choices": [{"message": {"content": "ok"}}]}')
 
-        ai_client.chat({"key": "k", "model": "m"}, "Frage", opener=oeffnen)
+        ai_client.chat(_zustand(), "Frage", opener=oeffnen)
         self.assertIs(gesehen["context"], ai_client.SSL_CONTEXT)
-
-    def test_404_nennt_modellwahl(self):
-        self.assertIn("MODELL", ai_client.fehlertext(404))
 
 
 class KontextTestChat(unittest.TestCase):
@@ -163,41 +248,80 @@ class KontextTestChat(unittest.TestCase):
             return io.BytesIO(
                 b'{"choices": [{"message": {"content": "ok"}}]}')
 
-        ai_client.chat({"key": "k", "model": "m"}, "Frage",
-                       kontext="KARTE A", opener=oeffnen)
+        ai_client.chat(_zustand(), "Frage", kontext="KARTE A", opener=oeffnen)
         self.assertIn("KARTE A", json.dumps(gesehen["body"]))
 
 
 class EmpfehlungTest(unittest.TestCase):
-    def test_bevorzugt_in_reihenfolge(self):
+    def test_freebuff_bevorzugt_in_reihenfolge(self):
         alle = ["z", "gpt-5-mini", "deepseek-v4-flash", "a"]
         self.assertEqual(
-            ai_client.empfohlene_modelle(alle),
+            ai_client.empfohlene_modelle(alle, "freebuff"),
             ["deepseek-v4-flash", "gpt-5-mini"])
+
+    def test_openrouter_nur_free_modelle(self):
+        alle = ["openai/gpt-4o", "meta/llama:free", "z-ai/glm:free"]
+        self.assertEqual(
+            ai_client.empfohlene_modelle(alle, "openrouter"),
+            ["meta/llama:free", "z-ai/glm:free"])
+
+    def test_openrouter_free_router_bleibt_in_auswahl(self):
+        alle = ["openrouter/free", "openai/gpt-4o", "z-ai/glm:free"]
+        self.assertEqual(
+            ai_client.empfohlene_modelle(alle, "openrouter"),
+            ["openrouter/free", "z-ai/glm:free"])
+
+    def test_openrouter_ohne_free_faellt_zurueck(self):
+        alle = ["m%d" % i for i in range(25)]
+        self.assertEqual(ai_client.empfohlene_modelle(alle, "openrouter"),
+                         alle[:20])
 
     def test_sonst_die_ersten_20(self):
         alle = ["m%d" % i for i in range(30)]
-        self.assertEqual(ai_client.empfohlene_modelle(alle), alle[:20])
+        self.assertEqual(ai_client.empfohlene_modelle(alle, "groq"), alle[:20])
 
     def test_leer(self):
-        self.assertEqual(ai_client.empfohlene_modelle([]), [])
+        self.assertEqual(ai_client.empfohlene_modelle([], "freebuff"), [])
 
 
 class ModelleTest(unittest.TestCase):
     def test_liste(self):
         opener = _antwort({"data": [{"id": "b"}, {"id": "a"}, {"id": ""}]})
-        modelle = ai_client.liste_modelle({"key": "k"}, opener=opener)
+        modelle = ai_client.liste_modelle(_zustand(), opener=opener)
         self.assertEqual(modelle, ["a", "b"])
 
-    def test_ohne_key(self):
+    def test_ohne_key_abrufbar(self):
         opener = _antwort({"data": [{"id": "a"}]})
-        self.assertEqual(ai_client.liste_modelle({"key": ""}, opener=opener),
+        self.assertEqual(ai_client.liste_modelle(_zustand(key=""), opener=opener),
                          ["a"])
+
+    def test_openrouter_liste_ohne_key(self):
+        opener = _antwort({"data": [{"id": "openrouter/free"}]})
+        modelle = ai_client.liste_modelle(
+            _zustand(key="", anbieter="openrouter"), opener=opener)
+        self.assertEqual(modelle, ["openrouter/free"])
+
+    def test_key_pflicht_ohne_key(self):
+        with self.assertRaises(ai_client.KeinKey):
+            ai_client.liste_modelle(_zustand(key="", anbieter="groq"))
 
     def test_leere_liste(self):
         opener = _antwort({"data": []})
         with self.assertRaises(ai_client.KiFehler):
-            ai_client.liste_modelle({"key": "k"}, opener=opener)
+            ai_client.liste_modelle(_zustand(), opener=opener)
+
+    def test_ollama_modelle_lokal(self):
+        gesehen = {}
+
+        def oeffnen(anfrage, timeout=None, context=None):
+            gesehen["url"] = anfrage.full_url
+            return io.BytesIO(b'{"data": [{"id": "llama3.2"}]}')
+
+        modelle = ai_client.liste_modelle(
+            _zustand(key="", anbieter="ollama"), opener=oeffnen)
+        self.assertEqual(modelle, ["llama3.2"])
+        self.assertEqual(gesehen["url"],
+                         "http://localhost:11434/v1/models")
 
 
 if __name__ == "__main__":

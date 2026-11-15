@@ -6,7 +6,7 @@ Stand: November 2026. **Nichts davon ist veröffentlicht.**
 
 | Datei | Zweck | Vorgabe |
 |---|---|---|
-| `listing.de.md` | Kurz- (74 Zeichen) und Vollbeschreibung (2.448 Zeichen) | 80 / 4.000 |
+| `listing.de.md` | Kurz- (74 Zeichen) und Vollbeschreibung (2.689 Zeichen) | 80 / 4.000 |
 | `assets/icon-512.png` | App-Icon im Store | 512×512, 32-bit PNG |
 | `assets/feature-1024x500.png` | Feature-Grafik | 1024×500, PNG/JPEG |
 | `assets/phone/01-fragen.png` … `05-ki.png` | Screenshots | 1620×2880, 9:16, 2–8 Stück |

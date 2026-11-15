@@ -25,6 +25,7 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.uix.scrollview import ScrollView
+from kivy.utils import platform as kivy_platform
 from kivy.uix.spinner import Spinner
 from kivy.uix.textinput import TextInput
 
@@ -325,10 +326,11 @@ class KiScreen(Screen):
         super().__init__(**kwargs)
         root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
         kopf = BoxLayout(size_hint_y=None, height=dp(26), spacing=dp(6))
-        kopf.add_widget(Label(
-            text="KI · ONLINE", color=MUTED, font_size=dp(12), bold=True,
+        self.kopf_label = Label(
+            text="KI · OFFLINE", color=MUTED, font_size=dp(11), bold=True,
             halign="left", valign="middle",
-        ))
+        )
+        kopf.add_widget(self.kopf_label)
         self.key_knopf = Button(
             text="KEY", size_hint_x=None, width=dp(64), bold=True,
             font_size=dp(11), background_normal="", background_color=PANEL,
@@ -357,12 +359,16 @@ class KiScreen(Screen):
         zeile.add_widget(self.knopf)
         root.add_widget(zeile)
         self.add_widget(root)
+        lokal = ("" if kivy_platform in ("android", "ios")
+                 else " oder dein lokales Ollama")
         self.schreibe(
-            "Die KI antwortet live über die Freebuff-API – mit deinem eigenen "
-            "Key, der nur auf diesem Gerät liegt. Frag frei, wenn die 16 "
-            "Karten nicht reichen. Ohne Key bleibt alles offline; jede "
-            "KI-Frage kostet Guthaben deines Accounts."
+            "Die KI antwortet über den Anbieter, den du unter „KEY“ wählst: "
+            "Freebuff, OpenRouter, Groq, Google AI Studio, Mistral%s. Jeder "
+            "Key bleibt auf diesem Gerät; OpenRouter hat einen kostenlosen "
+            "Free-Router. "
+            "Ohne Key bleibt alles offline." % lokal
         )
+        Clock.schedule_once(lambda *_: self._aktualisiere_kopf(), 0)
 
     def schreibe(self, text, mine=False, bg=None):
         blase = Bubble(text=text, mine=mine, bg=bg)
@@ -375,58 +381,120 @@ class KiScreen(Screen):
         os.makedirs(ordner, exist_ok=True)
         return ai_client.settings_pfad(ordner)
 
-    def _einstellungen(self):
-        return ai_client.load_settings(self._pfad())
+    def _zustand(self):
+        return ai_client.load_state(self._pfad())
+
+    def _aktualisiere_kopf(self):
+        zustand = self._zustand()
+        info = ai_client.anbieter_info(zustand["anbieter"])
+        modell = ai_client.modell_fuer(zustand, zustand["anbieter"])
+        text = "KI · %s" % info["name"].upper()
+        if modell:
+            text += " · " + modell
+        self.kopf_label.text = text[:52]
+
+    def _anbieter_namen(self):
+        """Ollama nur dort anbieten, wo localhost der eigene Rechner ist."""
+        namen = list(ai_client.ANBIETER)
+        if kivy_platform in ("android", "ios"):
+            namen = [name for name in namen if name != "ollama"]
+        return namen
 
     def einstellungen(self):
-        daten = self._einstellungen()
-        inhalt = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+        zustand = self._zustand()
+        namen = self._anbieter_namen()
+        if zustand["anbieter"] not in namen:
+            zustand["anbieter"] = ai_client.STANDARD_ANBIETER
+        anzeige = {ai_client.ANBIETER[name]["name"]: name for name in namen}
+        gewaehlt = {"name": zustand["anbieter"]}
+
+        inhalt = BoxLayout(orientation="vertical", padding=dp(10),
+                           spacing=dp(6))
         inhalt.add_widget(Label(
-            text="Freebuff-API-Key (nur lokal gespeichert)",
-            size_hint_y=None, height=dp(20), color=MUTED, font_size=dp(12),
+            text="Anbieter (OpenAI-kompatibel)", size_hint_y=None,
+            height=dp(20), color=MUTED, font_size=dp(12),
         ))
+        anbieter = Spinner(
+            text=ai_client.anbieter_info(zustand["anbieter"])["name"],
+            values=[ai_client.ANBIETER[name]["name"] for name in namen],
+            size_hint_y=None, height=dp(42), background_normal="",
+            background_color=PANEL, color=TEXT,
+        )
+        inhalt.add_widget(anbieter)
+
+        key_label = Label(text="API-Key (nur lokal)", size_hint_y=None,
+                          height=dp(20), color=MUTED, font_size=dp(12))
+        inhalt.add_widget(key_label)
         key_feld = TextInput(
-            text=daten["key"], password=True, multiline=False,
+            text=ai_client.key_fuer(zustand), password=True, multiline=False,
             size_hint_y=None, height=dp(42),
             background_color=(0.10, 0.13, 0.20, 1), foreground_color=TEXT,
             cursor_color=ACCENT, padding=(dp(10), dp(10)),
         )
         inhalt.add_widget(key_feld)
+
+        kosten = Label(
+            text=ai_client.anbieter_info(zustand["anbieter"])["kosten"],
+            size_hint_y=None, height=dp(20), color=MUTED, font_size=dp(11),
+        )
+        inhalt.add_widget(kosten)
+
         inhalt.add_widget(Label(
             text="Modell", size_hint_y=None, height=dp(20), color=MUTED,
             font_size=dp(12),
         ))
         modell = Spinner(
-            text=daten["model"] or ai_client.DEFAULT_MODEL,
-            values=([daten["model"]] if daten["model"] else []),
-            size_hint_y=None, height=dp(42), background_normal="",
+            text=ai_client.modell_fuer(zustand, zustand["anbieter"]),
+            values=[], size_hint_y=None, height=dp(42), background_normal="",
             background_color=PANEL, color=TEXT,
         )
         inhalt.add_widget(modell)
+
         hinweis = Label(text="", size_hint_y=None, height=dp(18), color=MUTED,
                         font_size=dp(11))
         inhalt.add_widget(hinweis)
 
         knoepfe = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        laden = Button(text="MODELLE", background_normal="",
+        holen = Button(text="KEY HOLEN", size_hint_x=0.9, font_size=dp(11),
+                       background_normal="", background_color=PANEL)
+        laden = Button(text="MODELLE", font_size=dp(11), background_normal="",
                        background_color=PANEL)
-        speichern = Button(text="SPEICHERN", bold=True, background_normal="",
-                           background_color=ACCENT)
+        speichern = Button(text="SPEICHERN", bold=True, font_size=dp(11),
+                           background_normal="", background_color=ACCENT)
+        knoepfe.add_widget(holen)
         knoepfe.add_widget(laden)
         knoepfe.add_widget(speichern)
         inhalt.add_widget(knoepfe)
 
-        popup = Popup(title="KI-Zugang", content=inhalt, size_hint=(0.92, None),
-                      height=dp(330), separator_color=ACCENT)
+        popup = Popup(title="KI-Zugang", content=inhalt,
+                      size_hint=(0.94, None), height=dp(470),
+                      separator_color=ACCENT)
+
+        def felder_fuellen(*_):
+            name = anzeige.get(anbieter.text, ai_client.STANDARD_ANBIETER)
+            gewaehlt["name"] = name
+            info = ai_client.anbieter_info(name)
+            key_feld.text = zustand["keys"].get(name, "")
+            key_feld.disabled = not info["key_pflicht"]
+            key_label.text = ("API-Key (nur lokal)" if info["key_pflicht"]
+                              else "Kein Key nötig (lokal)")
+            kosten.text = info["kosten"]
+            vorhanden = ai_client.modell_fuer(zustand, name)
+            modell.values = [vorhanden] if vorhanden else []
+            modell.text = vorhanden
+            hinweis.text = ""
 
         def modelle_laden(*_):
-            key = key_feld.text.strip()
+            name = gewaehlt["name"]
+            probe = dict(zustand)
+            probe["keys"] = dict(zustand["keys"])
+            probe["keys"][name] = key_feld.text.strip()
             hinweis.text = "Lade Modelle …"
             laden.disabled = True
 
             def arbeit():
                 try:
-                    modelle = ai_client.liste_modelle({"key": key})
+                    modelle = ai_client.liste_modelle(probe, anbieter=name)
                     fehler = ""
                 except ai_client.KiFehler as problem:
                     modelle, fehler = [], str(problem)
@@ -434,7 +502,7 @@ class KiScreen(Screen):
                 def fertig(*_args):
                     laden.disabled = False
                     if modelle:
-                        auswahl = ai_client.empfohlene_modelle(modelle)
+                        auswahl = ai_client.empfohlene_modelle(modelle, name)
                         modell.values = auswahl
                         if modell.text not in auswahl:
                             modell.text = auswahl[0]
@@ -447,36 +515,57 @@ class KiScreen(Screen):
             threading.Thread(target=arbeit, daemon=True).start()
 
         def speichern_(*_):
+            name = gewaehlt["name"]
+            info = ai_client.anbieter_info(name)
             key = key_feld.text.strip()
             wahl = modell.text.strip()
-            if not key:
+            if info["key_pflicht"] and not key:
                 hinweis.text = "Key fehlt."
                 return
-            if not wahl or wahl == "MODELLE LADEN":
+            if not wahl:
                 hinweis.text = "Erst „MODELLE“ laden und eins wählen."
                 return
-            ai_client.save_settings(self._pfad(), key, wahl)
+            zustand["anbieter"] = name
+            zustand["keys"][name] = key
+            zustand["modelle"][name] = wahl
+            ai_client.save_state(self._pfad(), zustand)
             popup.dismiss()
-            self.schreibe("Gespeichert: %s · Modell %s"
-                          % (ai_client.mask(key), wahl))
+            self._aktualisiere_kopf()
+            self.schreibe("Gespeichert: %s · %s · %s"
+                          % (info["name"], ai_client.mask(key) or "ohne Key",
+                             wahl))
 
+        def key_holen(*_):
+            """Oeffnet die Key-Seite des Anbieters; ohne Klick passiert nichts."""
+            links.oeffne(ai_client.anbieter_info(gewaehlt["name"])["key_url"])
+
+        anbieter.bind(text=lambda *_: felder_fuellen())
+        holen.bind(on_release=key_holen)
         laden.bind(on_release=modelle_laden)
         speichern.bind(on_release=speichern_)
         popup.open()
-        # Die Modellliste ist oeffentlich; laden, bevor ein Key da ist.
-        Clock.schedule_once(lambda *_: modelle_laden(), 0.2)
+        felder_fuellen()
 
     def senden(self, *_):
         frage = self.eingabe.text.strip()
         if not frage:
             return
-        daten = self._einstellungen()
+        zustand = self._zustand()
+        name = zustand["anbieter"]
+        info = ai_client.anbieter_info(name)
         self.eingabe.text = ""
         self.schreibe(frage, mine=True)
-        if not daten["key"]:
+        if info["key_pflicht"] and not ai_client.key_fuer(zustand, name):
             self.schreibe(
-                "Dafür fehlt der Key. Tippe oben auf „KEY“ und trage deinen "
-                "Freebuff-API-Key ein.\n\n"
+                "Dafür fehlt der Key für %s. Tippe oben auf „KEY“ und trage "
+                "deinen eigenen API-Key ein.\n\n" % info["name"]
+                + support_core.format_answer(support_core.answer(frage)))
+            self.einstellungen()
+            return
+        if not ai_client.modell_fuer(zustand, name):
+            self.schreibe(
+                "Für %s ist noch kein Modell gewählt. Öffne „KEY“, lade die "
+                "Modelle und speichere.\n\n" % info["name"]
                 + support_core.format_answer(support_core.answer(frage)))
             self.einstellungen()
             return
@@ -487,7 +576,7 @@ class KiScreen(Screen):
             text, fehler = "", ""
             try:
                 text = ai_client.chat(
-                    daten, frage, kontext=support_core.kontext_text(frage))
+                    zustand, frage, kontext=support_core.kontext_text(frage))
             except ai_client.KiFehler as problem:
                 fehler = str(problem)
             except Exception as problem:  # pragma: no cover - Notfall

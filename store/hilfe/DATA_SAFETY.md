@@ -14,7 +14,7 @@ weiteste: die optionale KI. Wer sie nicht nutzt, erzeugt keinen Netzwerkverkehr.
 | Data type 2 | **Messages → Other in-app messages** |
 | Collected or shared? | **Shared** |
 | Purpose | **App functionality** |
-| Optional? | **Ja** — nur wenn der Nutzer einen eigenen Key einträgt und sendet |
+| Optional? | **Ja** — nur wenn der Nutzer einen Anbieter wählt, einen eigenen Key einträgt und sendet |
 | Ephemeral? | **Ja** — der Entwickler speichert nichts |
 | Linked to the user's identity? | **Nein** (der Key ist ein Zugangstoken, kein Konto bei uns) |
 | Encrypted in transit? | **Ja** (HTTPS/TLS) |
@@ -23,10 +23,12 @@ weiteste: die optionale KI. Wer sie nicht nutzt, erzeugt keinen Netzwerkverkehr.
 | Account deletion? | **Entfällt** — keine Konten beim Entwickler |
 
 **Was übertragen wird:** ausschließlich der Text, den der Nutzer in die KI-Zeile
-tippt, der bisherige Gesprächsverlauf dieses Reiters und der Modellname. Empfänger
-ist die Freebuff-API (`freebuff.com`), die der Nutzer mit seinem eigenen Key
-ansteuert. Der Entwickler betreibt keinen Server, protokolliert nichts und hat
-keinen Zugriff auf Fragen oder Antworten.
+tippt, der bisherige Gesprächsverlauf dieses Reiters, zwei bis drei passende
+Hilfe-Karten als Kontext und der Modellname. Empfänger ist der vom Nutzer
+gewählte Anbieter: Freebuff, OpenRouter, Groq, Google AI Studio oder Mistral —
+jeweils mit dem eigenen Key des Nutzers. Wählt der Nutzer Ollama auf seinem PC,
+verlassen die Daten den Rechner nicht. Der Entwickler betreibt keinen Server, protokolliert
+nichts und hat keinen Zugriff auf Fragen oder Antworten.
 
 **Löschung:** Der Key liegt nur im privaten App-Speicher und verschwindet mit
 „Key löschen“ oder der Deinstallation. Beim API-Anbieter gelten dessen
@@ -52,7 +54,9 @@ Crash-Logs an Dritte, Werbe-ID: **nein**.
 
 ## Entscheidungshinweis
 
-Play bewertet auch optionale Funktionen. Weil der Endpunkt fest in der App steht
-und nicht vom Nutzer gewählt wird, ist „Shared“ die sichere Angabe — dieselbe
-Logik wie beim Webhook der Radar-App. Die Angabe kostet im Listing nichts und
-verhindert eine Ablehnung wegen unvollständiger Deklaration.
+Play bewertet auch optionale Funktionen. Die App bringt eine feste Liste
+OpenAI-kompatibler Anbieter mit, zwischen denen der Nutzer wählt; ein eigener
+Server des Entwicklers ist nicht beteiligt. Weil Nutzerdaten dabei an einen
+Dritten gehen können, ist „Shared“ die sichere Angabe — dieselbe Logik wie beim
+Webhook der Radar-App. Die Angabe kostet im Listing nichts und verhindert eine
+Ablehnung wegen unvollständiger Deklaration.

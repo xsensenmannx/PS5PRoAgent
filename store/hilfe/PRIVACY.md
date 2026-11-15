@@ -7,8 +7,9 @@ Stand: 15. November 2026. Gilt für die Android-App
 
 Die Hilfe-App arbeitet ohne Konto, ohne Werbung, ohne Analyse und ohne
 Telemetrie. Solange du die optionale KI nicht nutzt, verlässt keine Anfrage dein
-Gerät. Für die KI brauchst du deinen eigenen API-Key; gesendet wird nur deine
-Frage an die Freebuff-API. Der Entwickler erhält davon nichts.
+Gerät. Für die KI brauchst du deinen eigenen API-Key bei einem Anbieter deiner
+Wahl; gesendet wird nur deine Frage an genau diesen Anbieter. Der Entwickler
+betreibt keinen Server und erhält davon nichts.
 
 ## Verantwortlich
 
@@ -17,10 +18,11 @@ Entwickler der App ist xsensenmannx. Kontakt für Datenschutzfragen:
 
 ## Welche Daten auf dem Gerät bleiben
 
-- **KI-Zugang:** API-Key und gewähltes Modell in `ki.json` im privaten
-  App-Speicher (Android: App-Datenverzeichnis, Windows: `%APPDATA%`). Die Datei
-  ist für andere Apps nicht lesbar; unter Android ist die Cloud-Sicherung
-  deaktiviert.
+- **KI-Zugang:** je Anbieter ein eigener API-Key und das gewählte Modell in
+  `ki.json` im privaten App-Speicher (Android: App-Datenverzeichnis, Windows:
+  `%APPDATA%`). Die Datei ist für andere Apps nicht lesbar; unter Android ist
+  die Cloud-Sicherung deaktiviert. Alte Keys aus früheren Versionen werden
+  übernommen.
 - **Kein Verlauf:** Fragen und Antworten werden nicht gespeichert. Sie stehen nur
   im Arbeitsspeicher, solange der Reiter geöffnet ist.
 - **Keine Kennungen:** Die App liest keine Geräte-ID, keinen Standort, keine
@@ -36,19 +38,38 @@ optionale KI gebraucht. Ohne Key baut die App keine Verbindung auf.
 
 ## Optionale KI (nur mit eigenem Key)
 
-Wenn du im Reiter „KI“ einen Key einträgst und eine Frage sendest, überträgt die
-App über HTTPS an die Freebuff-API (`https://freebuff.com/api/v1/paid`):
+Im Reiter „KI“ wählst du den Anbieter und trägst dort deinen eigenen Key ein.
+Erst wenn du eine Frage sendest, überträgt die App an **genau diesen Anbieter**:
 
 - den Text deiner Frage,
 - den bisherigen Gesprächsverlauf dieses Reiters (nur zur Laufzeit),
+- zwei bis drei passende Hilfe-Karten als Kontext,
 - den Namen des gewählten Modells,
 - deinen API-Key als `Authorization: Bearer …`.
 
-Zweck ist ausschließlich die Erzeugung der Antwort. Empfänger ist der
-API-Betreiber Freebuff; es gelten dessen Datenschutzhinweise und die Bedingungen
-deines dortigen Accounts. Die Nutzung ist freiwillig und kostenpflichtig
-(Guthaben deines Accounts). Ohne Key oder ohne Internet bleibt die App offline
-und antwortet aus den mitgelieferten Themenkarten.
+Empfänger ist der von dir gewählte Betreiber:
+
+| Anbieter | Adresse |
+|---|---|
+| Freebuff (Standard) | `https://freebuff.com/api/v1/paid` |
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| Groq | `https://api.groq.com/openai/v1` |
+| Google AI Studio | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| Mistral | `https://api.mistral.ai/v1` |
+| Ollama (lokal, nur Windows) | `http://localhost:11434/v1` |
+
+Bei Ollama bleibt alles auf deinem Rechner; die App spricht nur mit dem lokal
+installierten Modell. Auf Android wird Ollama nicht angeboten, weil `localhost`
+dort das Telefon selbst wäre.
+
+Freebuff rechnet über das Guthaben deines Accounts ab. OpenRouter, Groq, Google
+AI Studio und Mistral haben kostenlose Kontingente mit Tages- oder Monatslimit;
+Einzelheiten stehen bei deinem Anbieter. Ollama kostet nichts. Bei den anderen Anbietern gelten deren Datenschutzhinweise
+und die Bedingungen deines dortigen Accounts. OpenRouter kennzeichnet kostenlose
+Modelle mit `:free`; Kosten und Limits richten sich nach deinem Account.
+Zweck ist ausschließlich die Erzeugung der Antwort. Die Nutzung ist freiwillig.
+Ohne Key oder ohne Internet bleibt die App offline und antwortet aus den
+mitgelieferten Themenkarten.
 
 Der Entwickler:
 
@@ -65,14 +86,15 @@ automatischen Fehlerberichte an Dritte. Abstürze bleiben auf dem Gerät.
 ## Kinder
 
 Die App richtet sich nicht an Kinder und erhebt wissentlich keine Daten von
-Kindern. Die KI-Funktion setzt einen eigenen Account bei einem API-Anbieter
-voraus.
+Kindern. Die KI-Funktion setzt einen eigenen Zugang bei einem API-Anbieter
+voraus (oder ein lokal betriebenes Ollama).
 
 ## Deine Rechte
 
 Da beim Entwickler keine personenbezogenen Daten gespeichert werden, gibt es
 dort nichts, worüber Auskunft erteilt werden könnte. Für Daten, die du selbst an
-die Freebuff-API sendest, wende dich an den dortigen Anbieter. Lokale Daten
+den von dir gewählten KI-Anbieter sendest, wende dich an diesen Betreiber.
+Lokale Daten
 entfernst du durch Löschen des Keys oder Deinstallation der App.
 
 ## Änderungen

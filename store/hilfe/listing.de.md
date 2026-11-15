@@ -22,10 +22,12 @@ ohne Telemetrie.
   nur der Radar.
 • Diagnose: Diagnose-Block aus dem Radar einfügen, die App findet 403/429,
   Webhook-Fehler, auffällige Konfidenz und fehlende Treffer.
-• Optional KI: mit deinem eigenen Freebuff-API-Key für freie Fragen. Die KI
-  bekommt die passenden Hilfe-Karten als Beleg mitgeschickt und antwortet kurz,
-  damit sie keine Einstellungen erfindet. Ohne Key bleibt alles offline; jede
-  KI-Frage kostet Guthaben deines Accounts.
+• Optional KI: mit deinem eigenen Key bei Freebuff, OpenRouter, Groq, Google
+  AI Studio oder Mistral. OpenRouter hat einen kostenlosen Free-Router, die
+  anderen Anbieter kostenlose Kontingente. Die KI bekommt zwei bis drei
+  passende Hilfe-Karten als Beleg mitgeschickt und antwortet kurz, damit sie
+  keine Einstellungen erfindet. Anbieter und Modell wählst du selbst; jeder Key
+  bleibt auf dem Gerät. Ohne Key bleibt alles offline.
 
 **Was die App nicht macht**
 
@@ -36,16 +38,18 @@ ohne Telemetrie.
 
 **Datenschutz**
 
-Ohne KI-Key verlässt keine Anfrage das Gerät. Einstellungen und der Key liegen im
-privaten App-Speicher. Nur wenn du die optionale KI nutzt, geht deine Frage über
-HTTPS an die Freebuff-API; der Entwickler erhält davon nichts und speichert
-nichts. Keine Analyse-SDKs, keine Werbe-ID, kein Tracking.
+Ohne KI-Key verlässt keine Anfrage das Gerät. Keys und Modelle liegen im privaten
+App-Speicher. Nur wenn du die optionale KI nutzt, geht deine Frage über HTTPS an
+den von dir gewählten Anbieter. Der Entwickler betreibt keinen Server, erhält
+davon nichts und speichert nichts. Keine Analyse-SDKs, keine Werbe-ID, kein
+Tracking.
 
 **Voraussetzungen**
 
 • Android 7.0 oder neuer, arm64-v8a oder armeabi-v7a
 • Der PS5 Pro Search Agent (Konsolen-Radar) für Suche und Alarme
-• Optional: eigener Freebuff-API-Key für die KI
+• Optional: eigener API-Key (Freebuff, OpenRouter, Groq, Google AI Studio oder
+  Mistral) für die KI
 
 **Hinweis zu Marken**
 

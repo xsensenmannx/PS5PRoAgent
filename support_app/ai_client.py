@@ -1,8 +1,13 @@
-"""Online-KI für die Hilfe-App: eigener Key, direkter Aufruf der Freebuff-API.
+"""Online-KI für die Hilfe-App: mehrere Anbieter, jeweils eigener Key.
 
 Die App bleibt ohne Key vollständig offline. Wer online fragen will, trägt
 seinen eigenen API-Key ein; er liegt nur im privaten App-Speicher und wird
-nirgends protokolliert. Es gibt keinen eingebauten Key und keine Telemetrie.
+nirgends protokolliert. Es gibt keinen eingebauten Key, kein Teilen fremder
+Kontingente und keine Telemetrie.
+
+Unterstützt werden OpenAI-kompatible Endpunkte: Freebuff, OpenRouter (dort
+ausdrücklich die kostenlosen ``:free``-Modelle), Groq, Google AI Studio und
+ein lokal laufendes Ollama ohne Key.
 """
 import json
 import os
@@ -15,17 +20,86 @@ try:
 except ImportError:  # Desktop-Python hat meist eigene CAs; Android nicht.
     certifi = None
 
-BASE_URL = "https://freebuff.com/api/v1/paid"
-CHAT_URL = BASE_URL + "/chat/completions"
-MODELLE_URL = BASE_URL + "/models"
+ANBIETER = {
+    "freebuff": {
+        "name": "Freebuff",
+        "base": "https://freebuff.com/api/v1/paid",
+        "key_url": "https://freebuff.com/account/api",
+        "key_pflicht": True,
+        "liste_ohne_key": True,
+        "kosten": "Guthaben deines Freebuff-Accounts",
+        "modelle": ("deepseek-v4-flash", "deepseek-v4.1-flash",
+                    "gpt-5-mini", "gpt-4o-mini", "claude-haiku-4-5",
+                    "gemini-2.5-flash"),
+        "standard": "deepseek-v4-flash",
+        "nur_free": False,
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "base": "https://openrouter.ai/api/v1",
+        "key_url": "https://openrouter.ai/keys",
+        "key_pflicht": True,
+        "liste_ohne_key": True,
+        "kosten": "kostenloser Free-Router, 50 Anfragen/Tag",
+        "modelle": ("openrouter/free",),
+        "standard": "openrouter/free",
+        "nur_free": True,
+    },
+    "groq": {
+        "name": "Groq",
+        "base": "https://api.groq.com/openai/v1",
+        "key_url": "https://console.groq.com/keys",
+        "key_pflicht": True,
+        "liste_ohne_key": False,
+        "kosten": "kostenloses Kontingent",
+        "modelle": ("openai/gpt-oss-120b", "openai/gpt-oss-20b",
+                    "qwen/qwen3.8-27b"),
+        "standard": "openai/gpt-oss-120b",
+        "nur_free": False,
+    },
+    "google": {
+        "name": "Google AI Studio",
+        "base": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "key_url": "https://aistudio.google.com/apikey",
+        "key_pflicht": True,
+        "liste_ohne_key": False,
+        "kosten": "kostenloses Kontingent",
+        "modelle": ("gemini-3.8-flash", "gemini-3.6-flash",
+                    "gemini-2.5-flash"),
+        "standard": "gemini-3.8-flash",
+        "nur_free": False,
+    },
+    "mistral": {
+        "name": "Mistral",
+        "base": "https://api.mistral.ai/v1",
+        "key_url": "https://console.mistral.ai/api-keys",
+        "key_pflicht": True,
+        "liste_ohne_key": False,
+        "kosten": "Free-Mode mit Monatslimit",
+        "modelle": ("mistral-small-latest",),
+        "standard": "mistral-small-latest",
+        "nur_free": False,
+    },
+    "ollama": {
+        "name": "Ollama (lokal)",
+        "base": "http://localhost:11434/v1",
+        "key_url": "https://ollama.com/download",
+        "key_pflicht": False,
+        "liste_ohne_key": True,
+        "kosten": "lokal auf deinem PC, kostenlos",
+        "modelle": (),
+        "standard": "",
+        "nur_free": False,
+    },
+}
+STANDARD_ANBIETER = "freebuff"
 DATEI = "ki.json"
-DEFAULT_MODEL = "deepseek-v4-flash"
+DEFAULT_MODEL = ANBIETER[STANDARD_ANBIETER]["standard"]
 # Kleine, guenstige Chat-Modelle zuerst; die volle Liste hat ~280 Eintraege
 # und ist als Auswahlliste auf dem Telefon unbrauchbar.
-BEVORZUGT = ("deepseek-v4-flash", "deepseek-v4.1-flash", "gpt-5-mini",
-             "gpt-4o-mini", "claude-haiku-4-5", "gemini-2.5-flash")
-# Die Modellliste der API ist gross (hunderte Eintraege, ~60 kB).
-MAX_ANTWORT = 262144
+BEVORZUGT = ANBIETER[STANDARD_ANBIETER]["modelle"]
+# Die Modellliste ist gross: OpenRouter liefert ~850 kB, Tendenz steigend.
+MAX_ANTWORT = 4_000_000
 MAX_FRAGE = 4000
 # Kurze Antworten: weniger Gelegenheit, Einstellungen zu erfinden.
 MAX_TOKENS = 450
@@ -75,34 +149,85 @@ def settings_pfad(ordner):
     return os.path.join(ordner, DATEI)
 
 
-def load_settings(pfad):
-    """Liest Key und Modell; kaputte Dateien ergeben leere Einstellungen."""
+def default_state():
+    """Leerer Zustand mit allen Anbietern; Modell faellt auf den Standard."""
+    return {
+        "anbieter": STANDARD_ANBIETER,
+        "keys": {name: "" for name in ANBIETER},
+        "modelle": {name: "" for name in ANBIETER},
+    }
+
+
+def _bereinige(text):
+    return str(text or "").strip()
+
+
+def load_state(pfad):
+    """Liest Anbieter, Keys und Modelle; kaputte Dateien ergeben leeren Zustand.
+
+    Das alte Format ``{"key": ..., "model": ...}`` wird als Freebuff gelesen,
+    damit ein Update niemanden aussperrt.
+    """
+    zustand = default_state()
     try:
         with open(pfad, "r", encoding="utf-8") as datei:
             daten = json.load(datei)
     except (OSError, ValueError):
-        return {"key": "", "model": DEFAULT_MODEL}
+        return zustand
     if not isinstance(daten, dict):
-        return {"key": "", "model": DEFAULT_MODEL}
-    return {
-        "key": str(daten.get("key") or "").strip(),
-        "model": str(daten.get("model") or DEFAULT_MODEL).strip(),
-    }
+        return zustand
+    if "keys" in daten or "modelle" in daten:
+        gewaehlt = _bereinige(daten.get("anbieter"))
+        zustand["anbieter"] = (gewaehlt if gewaehlt in ANBIETER
+                               else STANDARD_ANBIETER)
+        keys = daten.get("keys") if isinstance(daten.get("keys"), dict) else {}
+        modelle = daten.get("modelle") if isinstance(
+            daten.get("modelle"), dict) else {}
+        for name in ANBIETER:
+            zustand["keys"][name] = _bereinige(keys.get(name))
+            zustand["modelle"][name] = _bereinige(modelle.get(name))
+        return zustand
+    zustand["keys"][STANDARD_ANBIETER] = _bereinige(daten.get("key"))
+    zustand["modelle"][STANDARD_ANBIETER] = _bereinige(daten.get("model"))
+    return zustand
 
 
-def save_settings(pfad, key, model):
-    """Schreibt die Einstellungen atomar und nur für den Nutzer lesbar."""
+def save_state(pfad, zustand):
+    """Schreibt den Zustand atomar und nur für den Nutzer lesbar."""
     ordner = os.path.dirname(pfad) or "."
     os.makedirs(ordner, exist_ok=True)
+    daten = {
+        "anbieter": (zustand.get("anbieter") or STANDARD_ANBIETER),
+        "keys": {name: _bereinige((zustand.get("keys") or {}).get(name))
+                 for name in ANBIETER},
+        "modelle": {name: _bereinige((zustand.get("modelle") or {}).get(name))
+                    for name in ANBIETER},
+    }
     zwischen = pfad + ".tmp"
     with open(zwischen, "w", encoding="utf-8") as datei:
-        json.dump({"key": key.strip(), "model": model.strip()}, datei)
+        json.dump(daten, datei, ensure_ascii=False, indent=2)
     try:
         os.chmod(zwischen, 0o600)
     except OSError:
         # Windows kennt keine POSIX-Rechte; der App-Ordner ist ohnehin privat.
         pass
     os.replace(zwischen, pfad)
+
+
+def anbieter_info(name):
+    """Konfiguration eines Anbieters; unbekannte Namen fallen auf Standard."""
+    return ANBIETER.get(name) or ANBIETER[STANDARD_ANBIETER]
+
+
+def key_fuer(zustand, name=None):
+    name = name or (zustand.get("anbieter") or STANDARD_ANBIETER)
+    return _bereinige((zustand.get("keys") or {}).get(name))
+
+
+def modell_fuer(zustand, name=None):
+    name = name or (zustand.get("anbieter") or STANDARD_ANBIETER)
+    gewaehlt = _bereinige((zustand.get("modelle") or {}).get(name))
+    return gewaehlt or anbieter_info(name)["standard"]
 
 
 def mask(key):
@@ -169,7 +294,7 @@ def _request(url, key, payload=None, timeout=45, opener=None, key_pflicht=True):
     daten = None
     kopf = {
         "Accept": "application/json",
-        "User-Agent": "PS5ProHilfe/1.1.4",
+        "User-Agent": "PS5ProHilfe/1.2.0",
     }
     if key:
         kopf["Authorization"] = "Bearer " + key
@@ -200,23 +325,33 @@ def _request(url, key, payload=None, timeout=45, opener=None, key_pflicht=True):
         raise KiFehler("Die Antwort war kein gültiges JSON.") from None
 
 
-def chat(settings, frage, verlauf=None, kontext="", opener=None, timeout=45):
-    """Eine Frage an die KI; gibt den Antworttext zurück oder wirft KiFehler."""
-    key = (settings or {}).get("key") or ""
-    model = (settings or {}).get("model") or ""
-    if not key:
-        raise KeinKey("Kein Key gespeichert.")
-    daten = _request(CHAT_URL, key,
+def chat(zustand, frage, verlauf=None, kontext="", opener=None, timeout=45,
+         anbieter=None):
+    """Eine Frage an den gewählten Anbieter; gibt den Antworttext zurück."""
+    name = anbieter or (zustand or {}).get("anbieter") or STANDARD_ANBIETER
+    info = anbieter_info(name)
+    key = key_fuer(zustand, name)
+    model = modell_fuer(zustand, name)
+    if info["key_pflicht"] and not key:
+        raise KeinKey("%s braucht einen eigenen Key." % info["name"])
+    if not model:
+        raise KiFehler("Kein Modell gewählt. Lade unter „KEY“ die Modelle.")
+    daten = _request(info["base"] + "/chat/completions", key,
                      build_payload(model, frage, verlauf, kontext),
-                     timeout=timeout, opener=opener)
+                     timeout=timeout, opener=opener,
+                     key_pflicht=info["key_pflicht"])
     return parse_antwort(daten)
 
 
-def liste_modelle(settings, opener=None, timeout=20):
-    """Verfügbare Modelle, alphabetisch sortiert (auch ohne Key abrufbar)."""
-    key = (settings or {}).get("key") or ""
-    daten = _request(MODELLE_URL, key, timeout=timeout, opener=opener,
-                     key_pflicht=False)
+def liste_modelle(zustand, anbieter=None, opener=None, timeout=20):
+    """Verfügbare Modelle des Anbieters, alphabetisch sortiert."""
+    name = anbieter or (zustand or {}).get("anbieter") or STANDARD_ANBIETER
+    info = anbieter_info(name)
+    key = key_fuer(zustand, name)
+    if not info.get("liste_ohne_key") and not key:
+        raise KeinKey("%s braucht zuerst einen Key." % info["name"])
+    daten = _request(info["base"] + "/models", key,
+                     timeout=timeout, opener=opener, key_pflicht=False)
     eintraege = daten.get("data") if isinstance(daten, dict) else None
     modelle = []
     for eintrag in eintraege or []:
@@ -224,12 +359,18 @@ def liste_modelle(settings, opener=None, timeout=20):
         if kennung:
             modelle.append(kennung)
     if not modelle:
-        raise KiFehler("Der Account meldet keine Modelle.")
+        raise KiFehler("Der Anbieter meldet keine Modelle.")
     return sorted(set(modelle))
 
 
-def empfohlene_modelle(alle):
-    """Kurze Auswahlliste: bevorzugte Modelle, sonst die ersten 20."""
+def empfohlene_modelle(alle, anbieter=STANDARD_ANBIETER):
+    """Kurze Auswahlliste passend zum Anbieter."""
     vorrat = list(alle or [])
-    vorhanden = [name for name in BEVORZUGT if name in vorrat]
+    info = anbieter_info(anbieter)
+    if info.get("nur_free"):
+        frei = [name for name in vorrat
+                if name.endswith(":free") or name == "openrouter/free"]
+        if frei:
+            return frei[:20]
+    vorhanden = [name for name in info["modelle"] if name in vorrat]
     return vorhanden or vorrat[:20]

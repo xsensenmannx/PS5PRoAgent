@@ -5,5 +5,5 @@ Tag gesetzt (derselbe Lauf schreibt ``buildozer.spec``). Ein Test haelt beide
 Werte zusammen, damit die Anzeige nicht auseinanderlaeuft.
 """
 
-VERSION = "1.1.7"
+VERSION = "1.2.0"
 RELEASES = "https://github.com/xsensenmannx/PS5PRoAgent/releases"

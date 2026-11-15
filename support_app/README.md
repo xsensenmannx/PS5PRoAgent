@@ -6,8 +6,9 @@ und prüft einen eingefügten Diagnosebericht.
 
 **Standard ist offline: kein Konto, keine Telemetrie, kein eingebauter Key.**
 Alle Antworten stammen aus `knowledge.py`. Optional lässt sich unter „KI“ ein
-eigener Freebuff-API-Key eintragen; nur dann spricht die App mit dem Netz,
-und der Key bleibt im privaten App-Speicher.
+eigener API-Key bei einem von mehreren Anbietern eintragen (Freebuff,
+OpenRouter, Groq, Google AI Studio, Mistral oder ein lokales Ollama); nur dann
+spricht die App mit dem Netz, und der Key bleibt im privaten App-Speicher.
 
 ## Warum eigenes Projekt?
 
@@ -23,7 +24,7 @@ und der Key bleibt im privaten App-Speicher.
 | Suche | Wunsch wie „unter 700, nur Amazon, nur neu“ wird zu Einstellungen, Schritten und Hinweisen — mit den echten Schlüsseln des Radars |
 | Diagnose | Füge den Diagnose-Text aus dem Radar ein: Shops, letzter Scan, Treffer, Konfidenz, Webhook-Fehler, 403/429 |
 | Themen | Alle Karten als Liste, ein Tipp öffnet die Antwort im Chat; unten Version und Release-Link (öffnet nur auf Klick) |
-| KI | Optional: Freitext an ein Modell der Freebuff-API, mit eigenem Key; passende Karten gehen als Beleg mit, Antworten sind kurz |
+| KI | Optional: Freitext an ein Modell des gewählten Anbieters, mit eigenem Key; passende Karten gehen als Beleg mit, Antworten sind kurz |
 
 ## Was sie nicht kann
 
@@ -39,9 +40,20 @@ und der Key bleibt im privaten App-Speicher.
 
 Reiter „KI“, oben rechts „KEY“:
 
-1. Freebuff-API-Key eintragen (bleibt lokal, wird nur maskiert angezeigt).
-2. „MODELLE“ lädt die verfügbaren Modelle des Accounts, eines auswählen.
-3. Speichern. Fragen gehen direkt an `https://freebuff.com/api/v1/paid`.
+1. Anbieter wählen: Freebuff (Standard), OpenRouter, Groq, Google AI Studio,
+   Mistral oder Ollama (nur Windows). Jeder Anbieter hat seinen eigenen
+   Key-Speicher.
+2. Eigenen API-Key eintragen (bleibt lokal, wird nur maskiert angezeigt);
+   Ollama auf dem eigenen PC braucht keinen Key.
+3. „MODELLE“ lädt die Liste des Anbieters, eines auswählen, speichern.
+
+OpenRouter startet mit `openrouter/free` (wählt automatisch ein kostenloses
+Modell); die Modellliste ist auf `:free`-Einträge gefiltert.
+Ollama läuft unter `http://localhost:11434/v1` und verlässt den Rechner nicht;
+angeboten wird es nur in der Windows-Version, weil `localhost` auf dem Telefon
+das Telefon selbst wäre.
+Ein altes `ki.json` im Format `{"key", "model"}` wird beim Start als
+Freebuff gelesen, niemand verliert seinen Key.
 
 Zu jeder Frage schickt die App zwei bis drei passende Karten aus
 `knowledge.py` als Kontext mit (`support_core.kontext_text`), damit das Modell
@@ -49,8 +61,9 @@ keine Einstellungen erfindet. Die Antwort ist auf `max_tokens = 450` begrenzt
 und wird zur Sicherheit bei 1.400 Zeichen gekürzt.
 
 Ohne Key oder ohne Verbindung fällt die App auf die Offline-Karten zurück;
-ein Fehler wird angezeigt, nicht verschluckt. Jede Anfrage kostet Guthaben
-des Accounts, in dem der Key angelegt wurde.
+ein Fehler wird angezeigt, nicht verschluckt. Freebuff rechnet über das Guthaben
+deines Accounts ab; OpenRouter (Free-Router), Groq, Google AI Studio und Mistral
+haben kostenlose Kontingente, Ollama kostet nichts.
 
 ## Suchassistent
 
@@ -72,6 +85,8 @@ steht als Hinweis im Plan, nicht als erfundener Schalter.
 ```
 support_app/
 ├── main.py                    Kivy-Oberfläche (fünf Reiter)
+├── version.py                 Version und Release-Adresse
+├── links.py                   Systembrowser nur auf Klick
 ├── support_core.py            Fragen, Berichtsparser, Diagnose (ohne Kivy)
 ├── search_assistant.py        Suchwunsch → Einstellungen (ohne Kivy)
 ├── ai_client.py               KI-Aufruf und Key-Speicher (ohne Kivy)
@@ -82,7 +97,7 @@ support_app/
 ├── icon.png                   512er Icon (Store/Launcher)
 ├── icon_fg.png / icon_bg.png  adaptives Icon (432er Ebenen)
 ├── icon.ico                   Windows-Icon
-└── tests/                     79 Tests ohne Kivy (Kern, Suche, KI-Client)
+└── tests/                     99 Tests ohne Kivy (Kern, Suche, KI-Client)
 ```
 
 ## Tests
@@ -91,7 +106,7 @@ support_app/
 python -m unittest discover -s support_app/tests -v
 ```
 
-Die 79 Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
+Die 99 Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
 
 ## Signierung (Release-APK)
 
