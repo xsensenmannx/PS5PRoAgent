@@ -198,8 +198,9 @@ jobs:
           rm -rf "$ARBEIT/app/lib/armeabi-v7a"
           rm -f "$ARBEIT/app"/META-INF/*.SF "$ARBEIT/app"/META-INF/*.RSA \
                 "$ARBEIT/app"/META-INF/*.DSA
-          # .so unkomprimiert lassen, wie im p4a-Original; zipalign richtet sie aus.
-          (cd "$ARBEIT/app" && zip -qr "$ARBEIT/v8-unsigned.apk" . -n .so)
+          # Wie im p4a-Original komprimieren (extractNativeLibs ist dort nicht
+          # abgeschaltet); unkomprimiert waere die Datei groesser als noetig.
+          (cd "$ARBEIT/app" && zip -qr "$ARBEIT/v8-unsigned.apk" .)
           "$TOOLS/zipalign" -f 4 "$ARBEIT/v8-unsigned.apk" "$ARBEIT/v8-aligned.apk"
 
           ALIAS="${KEY_ALIAS:-hilfe}"

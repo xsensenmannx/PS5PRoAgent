@@ -165,7 +165,7 @@ Android 7 (API 24). Emulator/Chromebooks (x86_64) lassen sich in
 
 Der Workflow leitet aus der Universal-APK zusätzlich eine reine
 `arm64-v8a`-Fassung ab (32-Bit-Bibliotheken entfernt, neu signiert). Sie ist
-rund ein Drittel kleiner und reicht für alle Geräte der letzten Jahre; die
+deutlich kleiner und reicht für alle Geräte der letzten Jahre; die
 Universal-APK bleibt für alte 32-Bit-Geräte im Release.
 
 Auf diesem Windows-Rechner ist kein Buildozer/Java/SDK installiert. Gebaut wird
