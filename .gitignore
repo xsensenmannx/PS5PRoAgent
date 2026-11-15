@@ -21,6 +21,7 @@ buildozer.log
 support_app/.venv-win/
 support_app/build/
 support_app/dist/
+support_app/PS5ProSearchAgent-Hilfe.spec
 
 # Betriebssystem-Kram
 .DS_Store
