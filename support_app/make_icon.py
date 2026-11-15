@@ -176,6 +176,15 @@ def main():
               sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
                      (64, 64), (128, 128), (256, 256)])
 
+    # p4a legt nur res/mipmap/icon.png ab; die Dichte-Varianten kaemen sonst
+    # vom Bootstrap (SDL-Logo). Diese Dateien gehen als add_resources mit.
+    for dichte, kante in (("mdpi", 48), ("hdpi", 72), ("xhdpi", 96),
+                         ("xxhdpi", 144), ("xxxhdpi", 192)):
+        ordner = os.path.join(HIER, "android_res", "mipmap-" + dichte)
+        os.makedirs(ordner, exist_ok=True)
+        icon.resize((kante, kante), Image.LANCZOS).save(
+            os.path.join(ordner, "icon.png"))
+
     # Vorschau in echten Groessen
     vorschau = Image.new("RGBA", (512 + 3 * 136, 160), (18, 24, 36, 255))
     vorschau.alpha_composite(icon.resize((128, 128), Image.LANCZOS), (16, 16))

@@ -11,9 +11,9 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json,ttf
 source.exclude_dirs = bin, .buildozer, __pycache__, tests
 
-version = 1.1.1
+version = 1.1.2
 # versionCode; tools/set_version_from_tag.sh leitet ihn bei Tag-Builds neu ab.
-android.numeric_version = 10101
+android.numeric_version = 10102
 
 # Gleiche Pins wie die Radar-App: p4a master baut sonst CPython 3.14, das mit
 # Kivy 2.3 und dem festen Cython 0.29 im Recipe nicht kompiliert. python3 und
@@ -25,6 +25,10 @@ requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.1
 icon.filename = %(source.dir)s/icon.png
 icon.adaptive_foreground.filename = %(source.dir)s/icon_fg.png
 icon.adaptive_background.filename = %(source.dir)s/icon_bg.png
+# p4a kopiert nur res/mipmap/icon.png; die Dichte-Varianten (mipmap-*dpi)
+# bleiben sonst beim Bootstrap-Icon (SDL-Logo). Darum die 48-192-px-Fassungen
+# selbst als Ressourcen mitgeben - sie ueberschreiben die Defaults.
+android.add_resources = android_res/mipmap-mdpi/icon.png:mipmap-mdpi/icon.png, android_res/mipmap-hdpi/icon.png:mipmap-hdpi/icon.png, android_res/mipmap-xhdpi/icon.png:mipmap-xhdpi/icon.png, android_res/mipmap-xxhdpi/icon.png:mipmap-xxhdpi/icon.png, android_res/mipmap-xxxhdpi/icon.png:mipmap-xxxhdpi/icon.png
 
 orientation = portrait
 fullscreen = 0
