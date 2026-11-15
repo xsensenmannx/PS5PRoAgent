@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import ssl
 import sys
 import tempfile
 import unittest
@@ -80,7 +81,7 @@ def _antwort(daten):
     """Fake für urlopen: liefert JSON als BytesIO."""
     roh = json.dumps(daten).encode("utf-8")
 
-    def oeffnen(_anfrage, timeout=None):
+    def oeffnen(_anfrage, timeout=None, context=None):
         return io.BytesIO(roh)
 
     return oeffnen
@@ -93,7 +94,7 @@ class ChatTest(unittest.TestCase):
         self.assertEqual(text, "Hallo")
 
     def test_key_abgelehnt(self):
-        def oeffnen(anfrage, timeout=None):
+        def oeffnen(anfrage, timeout=None, context=None):
             raise urllib.error.HTTPError(anfrage.full_url, 401, "Nein", {}, None)
 
         with self.assertRaises(ai_client.KiFehler) as Kontext:
@@ -105,12 +106,30 @@ class ChatTest(unittest.TestCase):
             ai_client.chat({"key": "", "model": "m"}, "Frage")
 
     def test_keine_verbindung(self):
-        def oeffnen(anfrage, timeout=None):
+        def oeffnen(anfrage, timeout=None, context=None):
             raise urllib.error.URLError("offline")
 
         with self.assertRaises(ai_client.KiFehler) as Kontext:
             ai_client.chat({"key": "k", "model": "m"}, "Frage", opener=oeffnen)
         self.assertIn("Keine Verbindung", str(Kontext.exception))
+
+
+class SSLTest(unittest.TestCase):
+    def test_kontext_verlangt_zertifikate(self):
+        self.assertEqual(ai_client.SSL_CONTEXT.verify_mode, ssl.CERT_REQUIRED)
+
+    def test_https_bekommt_kontext(self):
+        gesehen = {}
+
+        def oeffnen(anfrage, timeout=None, context=None):
+            gesehen["context"] = context
+            return io.BytesIO(b'{"choices": [{"message": {"content": "ok"}}]}')
+
+        ai_client.chat({"key": "k", "model": "m"}, "Frage", opener=oeffnen)
+        self.assertIs(gesehen["context"], ai_client.SSL_CONTEXT)
+
+    def test_404_nennt_modellwahl(self):
+        self.assertIn("MODELL", ai_client.fehlertext(404))
 
 
 class EmpfehlungTest(unittest.TestCase):

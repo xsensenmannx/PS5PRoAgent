@@ -6,8 +6,14 @@ nirgends protokolliert. Es gibt keinen eingebauten Key und keine Telemetrie.
 """
 import json
 import os
+import ssl
 import urllib.error
 import urllib.request
+
+try:
+    import certifi
+except ImportError:  # Desktop-Python hat meist eigene CAs; Android nicht.
+    certifi = None
 
 BASE_URL = "https://freebuff.com/api/v1/paid"
 CHAT_URL = BASE_URL + "/chat/completions"
@@ -31,6 +37,24 @@ SYSTEM = (
     "Schalter; wenn du etwas nicht sicher weißt, sag es und verweise auf den "
     "Diagnose-Reiter. Keine Links, keine Kaufberatung."
 )
+
+
+def _ssl_kontext():
+    """Kontext mit mitgelieferten CA-Zertifikaten.
+
+    Android hat keinen CA-Store fuer Pythons OpenSSL; ohne eigenes Bundle
+    scheitert HTTPS dort mit CERTIFICATE_VERIFY_FAILED. certifi liegt dem
+    Build bei (buildozer.spec).
+    """
+    try:
+        if certifi is not None:
+            return ssl.create_default_context(cafile=certifi.where())
+    except (OSError, ssl.SSLError):
+        pass
+    return ssl.create_default_context()
+
+
+SSL_CONTEXT = _ssl_kontext()
 
 
 class KiFehler(Exception):
@@ -103,7 +127,8 @@ def fehlertext(status):
     if status in (401, 403):
         return ("Key abgelehnt (HTTP %d). Prüfe den Key unter „KEY“." % status)
     if status == 404:
-        return "Adresse nicht gefunden (HTTP 404). Prüfe die API-Adresse."
+        return ("Modell oder Adresse nicht gefunden (HTTP 404). Prüfe die "
+                "Modellwahl unter „MODELL“.")
     if status == 429:
         return ("Limit erreicht (HTTP 429). Warte kurz oder prüfe dein "
                 "Guthaben.")
@@ -129,7 +154,7 @@ def _request(url, key, payload=None, timeout=45, opener=None, key_pflicht=True):
     daten = None
     kopf = {
         "Accept": "application/json",
-        "User-Agent": "PS5ProHilfe/1.1",
+        "User-Agent": "PS5ProHilfe/1.1.3",
     }
     if key:
         kopf["Authorization"] = "Bearer " + key
@@ -139,8 +164,11 @@ def _request(url, key, payload=None, timeout=45, opener=None, key_pflicht=True):
     anfrage = urllib.request.Request(
         url, data=daten, headers=kopf, method="POST" if daten else "GET")
     oeffnen = opener or urllib.request.urlopen
+    optionen = {"timeout": timeout}
+    if url.startswith("https://"):
+        optionen["context"] = SSL_CONTEXT
     try:
-        with oeffnen(anfrage, timeout=timeout) as antwort:
+        with oeffnen(anfrage, **optionen) as antwort:
             roh = antwort.read(MAX_ANTWORT + 1)
     except urllib.error.HTTPError as fehler:
         raise KiFehler(fehlertext(fehler.code)) from None

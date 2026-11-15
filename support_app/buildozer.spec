@@ -11,14 +11,16 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json,ttf
 source.exclude_dirs = bin, .buildozer, __pycache__, tests
 
-version = 1.1.2
+version = 1.1.3
 # versionCode; tools/set_version_from_tag.sh leitet ihn bei Tag-Builds neu ab.
-android.numeric_version = 10102
+android.numeric_version = 10103
 
 # Gleiche Pins wie die Radar-App: p4a master baut sonst CPython 3.14, das mit
 # Kivy 2.3 und dem festen Cython 0.29 im Recipe nicht kompiliert. python3 und
 # hostpython3 muessen identisch sein, sonst bricht p4a den Build ab.
-requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.1
+# certifi bringt die CA-Zertifikate mit: Android hat keinen CA-Store fuer
+# Pythons OpenSSL, ohne Bundle scheitert die optionale Online-KI an HTTPS.
+requirements = python3==3.11.9, hostpython3==3.11.9, kivy==2.3.1, certifi
 
 # Legacy-Icon 512 plus adaptives Icon (432er Ebenen, vom Launcher maskiert).
 # Beide Ebenen sind Pflicht, sobald eine gesetzt ist.
