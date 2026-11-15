@@ -1,11 +1,13 @@
-"""PS5 Pro Search Agent – Hilfe: Offline-Support als eigenständige App.
+"""PS5 Pro Search Agent – Hilfe: Support-App mit optionaler Online-KI.
 
-Kein Netzwerk, kein Konto, keine Telemetrie. Die Inhalte stecken in
-``knowledge.py``, die Logik in ``support_core.py``; diese Datei ist nur die
-Oberfläche.
+Standard ist offline: kein Konto, keine Telemetrie, Antworten aus
+``knowledge.py``. Wer online fragen will, trägt unter „KI“ seinen eigenen
+API-Key ein; er bleibt lokal. Die Logik steckt in ``support_core.py`` und
+``ai_client.py``, diese Datei ist nur die Oberfläche.
 """
 import os
 import sys
+import threading
 
 # Kivy parst sonst die Kommandozeile, bevor unser Code sie sieht, und beendet
 # sich bei --selftest/--smoke mit einer Usage-Meldung (Exitcode 2).
@@ -20,10 +22,13 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.spinner import Spinner
 from kivy.uix.textinput import TextInput
 
+import ai_client
 import search_assistant
 import support_core
 from knowledge import ENTRIES
@@ -287,6 +292,193 @@ class ThemenScreen(Screen):
         self.add_widget(root)
 
 
+class KiScreen(Screen):
+    """Online-KI mit eigenem Key. Ohne Key bleibt die App offline."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
+        kopf = BoxLayout(size_hint_y=None, height=dp(26), spacing=dp(6))
+        kopf.add_widget(Label(
+            text="KI · ONLINE", color=MUTED, font_size=dp(12), bold=True,
+            halign="left", valign="middle",
+        ))
+        self.key_knopf = Button(
+            text="KEY", size_hint_x=None, width=dp(64), bold=True,
+            font_size=dp(11), background_normal="", background_color=PANEL,
+            color=TEXT,
+        )
+        self.key_knopf.bind(on_release=lambda *_: self.einstellungen())
+        kopf.add_widget(self.key_knopf)
+        root.add_widget(kopf)
+
+        self.liste = BlasenListe()
+        self.sv = _scrollbereich(self.liste)
+        root.add_widget(self.sv)
+
+        zeile = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        self.eingabe = TextInput(
+            hint_text="z. B. Warum findet der Scan bei MediaMarkt nichts?",
+            multiline=False, size_hint_x=0.72,
+            background_color=(0.10, 0.13, 0.20, 1), foreground_color=TEXT,
+            cursor_color=ACCENT, padding=(dp(10), dp(12)),
+        )
+        self.eingabe.bind(on_text_validate=self.senden)
+        self.knopf = Button(text="SENDEN", size_hint_x=0.28, bold=True,
+                            background_normal="", background_color=ACCENT)
+        self.knopf.bind(on_release=self.senden)
+        zeile.add_widget(self.eingabe)
+        zeile.add_widget(self.knopf)
+        root.add_widget(zeile)
+        self.add_widget(root)
+        self.schreibe(
+            "Die KI antwortet live über die Freebuff-API – mit deinem eigenen "
+            "Key, der nur auf diesem Gerät liegt. Frag frei, wenn die 16 "
+            "Karten nicht reichen. Ohne Key bleibt alles offline; jede "
+            "KI-Frage kostet Guthaben deines Accounts."
+        )
+
+    def schreibe(self, text, mine=False, bg=None):
+        blase = Bubble(text=text, mine=mine, bg=bg)
+        self.liste.add_widget(blase)
+        Clock.schedule_once(lambda *_: setattr(self.sv, "scroll_y", 0), 0.05)
+        return blase
+
+    def _pfad(self):
+        ordner = App.get_running_app().user_data_dir
+        os.makedirs(ordner, exist_ok=True)
+        return ai_client.settings_pfad(ordner)
+
+    def _einstellungen(self):
+        return ai_client.load_settings(self._pfad())
+
+    def einstellungen(self):
+        daten = self._einstellungen()
+        inhalt = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+        inhalt.add_widget(Label(
+            text="Freebuff-API-Key (nur lokal gespeichert)",
+            size_hint_y=None, height=dp(20), color=MUTED, font_size=dp(12),
+        ))
+        key_feld = TextInput(
+            text=daten["key"], password=True, multiline=False,
+            size_hint_y=None, height=dp(42),
+            background_color=(0.10, 0.13, 0.20, 1), foreground_color=TEXT,
+            cursor_color=ACCENT, padding=(dp(10), dp(10)),
+        )
+        inhalt.add_widget(key_feld)
+        inhalt.add_widget(Label(
+            text="Modell", size_hint_y=None, height=dp(20), color=MUTED,
+            font_size=dp(12),
+        ))
+        modell = Spinner(
+            text=daten["model"] or ai_client.DEFAULT_MODEL,
+            values=([daten["model"]] if daten["model"] else []),
+            size_hint_y=None, height=dp(42), background_normal="",
+            background_color=PANEL, color=TEXT,
+        )
+        inhalt.add_widget(modell)
+        hinweis = Label(text="", size_hint_y=None, height=dp(18), color=MUTED,
+                        font_size=dp(11))
+        inhalt.add_widget(hinweis)
+
+        knoepfe = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        laden = Button(text="MODELLE", background_normal="",
+                       background_color=PANEL)
+        speichern = Button(text="SPEICHERN", bold=True, background_normal="",
+                           background_color=ACCENT)
+        knoepfe.add_widget(laden)
+        knoepfe.add_widget(speichern)
+        inhalt.add_widget(knoepfe)
+
+        popup = Popup(title="KI-Zugang", content=inhalt, size_hint=(0.92, None),
+                      height=dp(330), separator_color=ACCENT)
+
+        def modelle_laden(*_):
+            key = key_feld.text.strip()
+            hinweis.text = "Lade Modelle …"
+            laden.disabled = True
+
+            def arbeit():
+                try:
+                    modelle = ai_client.liste_modelle({"key": key})
+                    fehler = ""
+                except ai_client.KiFehler as problem:
+                    modelle, fehler = [], str(problem)
+
+                def fertig(*_args):
+                    laden.disabled = False
+                    if modelle:
+                        auswahl = ai_client.empfohlene_modelle(modelle)
+                        modell.values = auswahl
+                        if modell.text not in auswahl:
+                            modell.text = auswahl[0]
+                        hinweis.text = "%d Modelle verfügbar." % len(modelle)
+                    else:
+                        hinweis.text = fehler or "Keine Modelle gemeldet."
+
+                Clock.schedule_once(fertig)
+
+            threading.Thread(target=arbeit, daemon=True).start()
+
+        def speichern_(*_):
+            key = key_feld.text.strip()
+            wahl = modell.text.strip()
+            if not key:
+                hinweis.text = "Key fehlt."
+                return
+            if not wahl or wahl == "MODELLE LADEN":
+                hinweis.text = "Erst „MODELLE“ laden und eins wählen."
+                return
+            ai_client.save_settings(self._pfad(), key, wahl)
+            popup.dismiss()
+            self.schreibe("Gespeichert: %s · Modell %s"
+                          % (ai_client.mask(key), wahl))
+
+        laden.bind(on_release=modelle_laden)
+        speichern.bind(on_release=speichern_)
+        popup.open()
+        # Die Modellliste ist oeffentlich; laden, bevor ein Key da ist.
+        Clock.schedule_once(lambda *_: modelle_laden(), 0.2)
+
+    def senden(self, *_):
+        frage = self.eingabe.text.strip()
+        if not frage:
+            return
+        daten = self._einstellungen()
+        self.eingabe.text = ""
+        self.schreibe(frage, mine=True)
+        if not daten["key"]:
+            self.schreibe(
+                "Dafür fehlt der Key. Tippe oben auf „KEY“ und trage deinen "
+                "Freebuff-API-Key ein.\n\n"
+                + support_core.format_answer(support_core.answer(frage)))
+            self.einstellungen()
+            return
+        blase = self.schreibe("Denkt nach …")
+        self.knopf.disabled = True
+
+        def arbeit():
+            text, fehler = "", ""
+            try:
+                text = ai_client.chat(daten, frage)
+            except ai_client.KiFehler as problem:
+                fehler = str(problem)
+            except Exception as problem:  # pragma: no cover - Notfall
+                fehler = "Unerwarteter Fehler: %s" % problem
+            Clock.schedule_once(
+                lambda *_: self._fertig(blase, frage, text, fehler))
+
+        threading.Thread(target=arbeit, daemon=True).start()
+
+    def _fertig(self, blase, frage, text, fehler):
+        self.knopf.disabled = False
+        if text:
+            blase.text = text
+            return
+        blase.text = "Keine KI-Antwort: %s\n\nOffline-Antwort:" % fehler
+        self.schreibe(support_core.format_answer(support_core.answer(frage)))
+
+
 class HilfeApp(App):
     title = "PS5 Pro Search Agent - Hilfe"
 
@@ -302,8 +494,9 @@ class HilfeApp(App):
         leiste = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(4),
                            padding=(dp(6), dp(6)))
         for beschriftung, name in (("FRAGEN", "chat"), ("SUCHE", "suche"),
-                                   ("DIAGNOSE", "diag"), ("THEMEN", "themen")):
-            knopf = Button(text=beschriftung, bold=True, font_size=dp(11.5),
+                                   ("DIAGNOSE", "diag"), ("KI", "ki"),
+                                   ("THEMEN", "themen")):
+            knopf = Button(text=beschriftung, bold=True, font_size=dp(10.5),
                            background_normal="", background_color=PANEL,
                            color=MUTED)
             knopf.bind(on_release=lambda inst, n=name: self.gehe(n))
@@ -316,7 +509,8 @@ class HilfeApp(App):
         self.suche = SuchScreen(name="suche")
         self.diag = DiagnoseScreen(name="diag")
         self.themen = ThemenScreen(name="themen")
-        for screen in (self.chat, self.suche, self.diag, self.themen):
+        self.ki = KiScreen(name="ki")
+        for screen in (self.chat, self.suche, self.diag, self.ki, self.themen):
             self.sm.add_widget(screen)
         root.add_widget(self.sm)
         self.gehe("chat")
@@ -348,10 +542,13 @@ if __name__ == "__main__":
     # Beide beenden sich sofort; Exitcode 0 = ok.
     if "--selftest" in sys.argv:
         ergebnis = support_core.answer("webhook fehler 401")
-        raise SystemExit(0 if ergebnis.get("kind") == "antwort" else 1)
+        ki_ok = ai_client.build_payload("m", "test")["messages"][-1][
+            "content"] == "test"
+        raise SystemExit(
+            0 if ergebnis.get("kind") == "antwort" and ki_ok else 1)
     if "--smoke" in sys.argv:
         app = HilfeApp()
         root = app.build()
-        okay = root is not None and len(app.sm.screen_names) == 4
+        okay = root is not None and len(app.sm.screen_names) == 5
         raise SystemExit(0 if okay else 1)
     HilfeApp().run()

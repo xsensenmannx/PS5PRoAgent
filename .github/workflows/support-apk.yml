@@ -228,7 +228,8 @@ jobs:
 
           - Android 7.0 oder neuer, arm64-v8a und armeabi-v7a
           - Debug-signiert: „Unbekannte Quellen“ erlauben; nicht für Google Play
-          - Keine Internet-Berechtigung, keine Telemetrie
+          - Offline nutzbar; optionale KI mit eigenem Freebuff-Key
+          - Keine Telemetrie, kein eingebauter Key
           - Parallel zur Radar-App installierbar
           - \`$APK_NAME\` ($APK_SIZE Bytes)
 

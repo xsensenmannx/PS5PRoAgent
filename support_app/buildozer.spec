@@ -29,9 +29,9 @@ icon.adaptive_background.filename = %(source.dir)s/icon_bg.png
 orientation = portrait
 fullscreen = 0
 
-# Bewusst leer: Die Hilfe braucht kein Internet, keine Benachrichtigungen und
-# keinen Hintergrunddienst. Alles steckt in knowledge.py.
-android.permissions =
+# Nur Internet, und nur fuer die optionale Online-KI mit eigenem Key. Ohne Key
+# bleibt die App offline; keine Benachrichtigungen, kein Hintergrunddienst.
+android.permissions = INTERNET
 
 # Keine Cloud-Sicherung der lokalen Hilfe-Daten.
 android.allow_backup = False

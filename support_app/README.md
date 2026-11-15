@@ -4,8 +4,10 @@ Eigenständige Offline-Support-App für den PS5 Pro Search Agent (Konsolen-Radar
 Sie erklärt Einrichtung, Alarme, Webhooks, Konfidenz und Grenzen der Radar-App
 und prüft einen eingefügten Diagnosebericht.
 
-**Kein Netzwerk, kein Konto, keine Telemetrie.** Die App hat keine
-Internet-Berechtigung; alle Antworten stammen aus `knowledge.py`.
+**Standard ist offline: kein Konto, keine Telemetrie, kein eingebauter Key.**
+Alle Antworten stammen aus `knowledge.py`. Optional lässt sich unter „KI“ ein
+eigener Freebuff-API-Key eintragen; nur dann spricht die App mit dem Netz,
+und der Key bleibt im privaten App-Speicher.
 
 ## Warum eigenes Projekt?
 
@@ -21,14 +23,29 @@ Internet-Berechtigung; alle Antworten stammen aus `knowledge.py`.
 | Suche | Wunsch wie „unter 700, nur Amazon, nur neu“ wird zu Einstellungen, Schritten und Hinweisen — mit den echten Schlüsseln des Radars |
 | Diagnose | Füge den Diagnose-Text aus dem Radar ein: Shops, letzter Scan, Treffer, Konfidenz, Webhook-Fehler, 403/429 |
 | Themen | Alle Karten als Liste, ein Tipp öffnet die Antwort im Chat |
+| KI | Optional: Freitext an ein Modell der Freebuff-API, mit eigenem Key |
 
 ## Was sie nicht kann
 
 - **Sie liest keine Daten des Radars.** Android erlaubt keiner App den Zugriff
   auf den privaten Speicher einer anderen. Deshalb der Weg über den
   Diagnose-Text: kopieren, einfügen, prüfen.
-- Keine Modell-Antworten, kein LLM, keine Internetquelle. Jede Antwort ist
-  eine feste, prüfbare Karte.
+- Ohne Key keine Modell-Antworten: Jede Antwort ist dann eine feste,
+  prüfbare Karte.
+- Kein eingebauter Key und keine Telemetrie. Die KI kostet Guthaben des
+  eigenen Accounts; Fragen verlassen dabei das Gerät.
+
+## Online-KI (optional)
+
+Reiter „KI“, oben rechts „KEY“:
+
+1. Freebuff-API-Key eintragen (bleibt lokal, wird nur maskiert angezeigt).
+2. „MODELLE“ lädt die verfügbaren Modelle des Accounts, eines auswählen.
+3. Speichern. Fragen gehen direkt an `https://freebuff.com/api/v1/paid`.
+
+Ohne Key oder ohne Verbindung fällt die App auf die Offline-Karten zurück;
+ein Fehler wird angezeigt, nicht verschluckt. Jede Anfrage kostet Guthaben
+des Accounts, in dem der Key angelegt wurde.
 
 ## Suchassistent
 
@@ -52,6 +69,7 @@ support_app/
 ├── main.py                    Kivy-Oberfläche (vier Reiter)
 ├── support_core.py            Fragen, Berichtsparser, Diagnose (ohne Kivy)
 ├── search_assistant.py        Suchwunsch → Einstellungen (ohne Kivy)
+├── ai_client.py               KI-Aufruf und Key-Speicher (ohne Kivy)
 ├── shops.py                   Die 42 Shops des Radars
 ├── knowledge.py               Wissensbasis
 ├── buildozer.spec             Android-Build, Paket de.konsolenradar.support
