@@ -30,13 +30,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     # Signierung: eigener Release-Key, nie im Repo. Fehlen die Secrets, wird
-    # bewusst kein APK gebaut (kein Debug-APK als Download).
-    env:
-      HILFE_KEYSTORE_B64: ${{ secrets.HILFE_KEYSTORE_BASE64 }}
-      HILFE_KEYSTORE_PASSWORD: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
-      HILFE_KEY_ALIAS: ${{ secrets.HILFE_KEY_ALIAS }}
-      HILFE_KEY_PASSWORD: ${{ secrets.HILFE_KEY_PASSWORD }}
-      HILFE_CERT_SHA256: ${{ secrets.HILFE_CERT_SHA256 }}
+    # bewusst kein APK gebaut (kein Debug-APK als Download). Die Secrets
+    # stehen nur in den Schritten, die sie lesen - nicht im Job-env, damit
+    # Checkout und Cache sie nie sehen.
     steps:
       - uses: actions/checkout@v5
 
@@ -91,12 +87,25 @@ jobs:
           key: support-buildozer-v2-${{ hashFiles('support_app/buildozer.spec') }}
           restore-keys: support-buildozer-v2-
 
-      # Der Keystore kommt base64-kodiert aus den Secrets und liegt nur im
-      # Temp-Ordner des Runners. Fehlt er, bricht nichts ab: der Job bleibt
-      # gruen und weist per Notice darauf hin.
-      - name: Keystore bereitstellen
-        if: env.HILFE_KEYSTORE_B64 != ''
+      # Prueft nur, ob ein Keystore hinterlegt ist; das Secret liegt allein in
+      # diesem Schritt. Fehlt es, bleibt der Job gruen (Notice) und es entsteht
+      # kein APK.
+      - name: Keystore pruefen
+        id: keystore
         env:
+          KEYSTORE_B64: ${{ secrets.HILFE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            echo "vorhanden=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vorhanden=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Kein APK gebaut: Secret HILFE_KEYSTORE_BASE64 fehlt. Anleitung in support_app/README.md, Abschnitt Signierung."
+          fi
+
+      - name: Keystore bereitstellen
+        if: steps.keystore.outputs.vorhanden == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.HILFE_KEYSTORE_BASE64 }}
           KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
@@ -104,7 +113,7 @@ jobs:
             echo "::error::HILFE_KEYSTORE_PASSWORD fehlt"; exit 1
           fi
           KS="$RUNNER_TEMP/hilfe-release.p12"
-          printf '%s' "$HILFE_KEYSTORE_B64" | base64 -d > "$KS"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
           chmod 600 "$KS"
           keytool -list -keystore "$KS" -storetype PKCS12 \
             -storepass:env KEYSTORE_PASS > /dev/null
@@ -114,10 +123,12 @@ jobs:
       # sind; buildozer haengt dann --sign an. android.release_artifact = apk
       # sorgt fuer eine APK statt eines AAB.
       - name: APK bauen (release, signiert)
-        if: env.HILFE_KEYSTORE_B64 != ''
+        if: steps.keystore.outputs.vorhanden == 'true'
         working-directory: support_app
         env:
           KEYSTORE_PASS: ${{ secrets.HILFE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.HILFE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.HILFE_KEY_PASSWORD }}
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
           PYTHONUTF8: "1"
@@ -125,8 +136,8 @@ jobs:
           PIP_CONSTRAINT: ${{ github.workspace }}/support_app/pip-constraints.txt
         run: |
           set -euo pipefail
-          ALIAS="${HILFE_KEY_ALIAS:-hilfe}"
-          KEYPASS="${HILFE_KEY_PASSWORD:-$KEYSTORE_PASS}"
+          ALIAS="${KEY_ALIAS:-hilfe}"
+          KEYPASS="${KEY_PASS:-$KEYSTORE_PASS}"
           export P4A_RELEASE_KEYSTORE="$RUNNER_TEMP/hilfe-release.p12"
           export P4A_RELEASE_KEYSTORE_PASSWD="$KEYSTORE_PASS"
           export P4A_RELEASE_KEYALIAS="$ALIAS"
@@ -135,13 +146,10 @@ jobs:
           buildozer -v android release
           ls -l bin/*.apk
 
-      - name: Hinweis ohne Keystore
-        if: env.HILFE_KEYSTORE_B64 == ''
-        run: |
-          echo "::notice::Kein APK gebaut: Secret HILFE_KEYSTORE_BASE64 fehlt. Anleitung in support_app/README.md, Abschnitt Signierung."
-
       - name: Manifest und Signatur pruefen
-        if: env.HILFE_KEYSTORE_B64 != ''
+        if: steps.keystore.outputs.vorhanden == 'true'
+        env:
+          CERT_SHA256: ${{ secrets.HILFE_CERT_SHA256 }}
         run: |
           set -euo pipefail
           APK=$(ls -1 support_app/bin/*.apk | head -n 1)
@@ -158,8 +166,8 @@ jobs:
           fi
           CERT=$(grep -i "SHA-256 digest" "$RUNNER_TEMP/certs.txt" | head -n 1 | sed 's/.*: //')
           echo "Zertifikat SHA-256: $CERT"
-          if [ -n "${HILFE_CERT_SHA256:-}" ]; then
-            ERWARTET=$(printf '%s' "$HILFE_CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
+          if [ -n "${CERT_SHA256:-}" ]; then
+            ERWARTET=$(printf '%s' "$CERT_SHA256" | tr -d ':\r ' | tr 'A-F' 'a-f')
             IST=$(printf '%s' "$CERT" | tr -d ':\r ' | tr 'A-F' 'a-f')
             [ "$IST" = "$ERWARTET" ] \
               || { echo "::error::Signatur passt nicht zu HILFE_CERT_SHA256"; exit 1; }
@@ -168,7 +176,7 @@ jobs:
           sha256sum "$APK" | tee support_app/bin/SHA256SUMS
 
       - name: APK sichern
-        if: env.HILFE_KEYSTORE_B64 != ''
+        if: steps.keystore.outputs.vorhanden == 'true'
         # v7 laeuft auf Node 24; v4 wird von GitHub als veraltet gemeldet.
         uses: actions/upload-artifact@v7
         with:
