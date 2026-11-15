@@ -141,22 +141,114 @@ in der Datenschutzerklärung erklärt.
   muss ein separater, limitierter Test-Key in Play Console unter App access
   hinterlegt werden, mit englischer Anleitung. Der Key gehört nicht ins Repo.
 
-## 5. Markenrechtlicher Play-Titel
+## 5. Markenrechtlicher Play-Titel und Namensvorprüfung
 
-Der Play-Titel **„PS5 Pro Search Agent – Hilfe“** enthält „PS5“ und „PS5 Pro“,
-Marken von Sony Interactive Entertainment. Das App-Label, die Feature-Grafik
-(„PS5 PRO SEARCH AGENT“) und Screenshot 02 („PS5 Pro 2 TB“) führen die Marke
-ebenfalls. Der Disclaimer in der Vollbeschreibung und in `PRIVACY.md` klärt
-die fehlende Verbindung, ersetzt aber keine Erlaubnis.
+Stand: 15. November 2026. Geprüft wurde der neutrale Name
+**„Konsolen-Radar“** als Ersatz für den bisherigen Titel
+„PS5 Pro Search Agent – Hilfe“. Das ist eine Vorprüfung, keine
+Rechtsberatung und keine Markenfreigabe.
 
-- **Package-Name:** `de.konsolenradar.support` ist neutral; das ist gut.
-- **Produktionsblocker:** Ohne markenrechtliche Klärung oder neutralen Titel
-  ist die Produktionsfreigabe nicht vertretbar. Ein neutraler Name wie
-  „Konsolen-Radar – Hilfe“ müsste App-Label, Listing, Feature-Grafik,
-  Screenshot 02 und das AAB (neue Version) mitziehen.
-- **Interner Test:** Der bestehende Titel kann für einen internen Test
-  weiterverwendet werden, bleibt aber ein Policy-/Markenrisiko. Das ist keine
-  Rechtsberatung.
+### 5.1 Entscheidung
+
+Der Play-Titel wird auf **„Konsolen-Radar – Hilfe“** (22 Zeichen) und das
+Android-Label auf **„Konsolen-Radar - Hilfe“** umgestellt. Der Paketname
+`de.konsolenradar.support` bleibt unverändert. Die Umstellung ist entschieden,
+aber noch nicht umgesetzt; der alte Titel steht weiterhin in den Buildozer-
+Specs, im Listing und in den Assets.
+
+Der bisherige Titel führt „PS5“ und „PS5 Pro“ als prägenden Bestandteil.
+Sony führt „PlayStation“ und „PS5“ als Marken; ein Disclaimer in der
+Beschreibung beseitigt das Titelrisiko nicht. Der neutrale Name folgt der
+bereits verwendeten Radar-Marke und vermeidet die Sony-Marke im App-Namen.
+
+### 5.2 Suchumfang
+
+Geprüft wurden am 15.11.2026:
+
+- **DPMAregister:** nationale Marken, Unionsmarken und internationale Marken
+  mit Schutzwirkung in Deutschland; Suche nach `"Konsolen-Radar"`,
+  `Konsolen Radar`, `Konsolenradar` und der Wildcard `Konsolen?Radar`.
+- **EUIPO/TMview:** Unionsmarken und deutsche Marken im offiziellen
+  EUIPO/TMDN-Datenbestand; dieselben Schreibweisen, jeweils für `EM`, `DE`
+  und `EM+DE`.
+- **Breite Ähnlichkeitskontrolle:** TMview-Suche nach `Konsolen` (EM+DE),
+  anschließend Prüfung aller Treffer auf die Kombination mit `Radar`.
+- **Google Play:** Store-Suche Deutschland, Kategorie Apps, nach
+  `"Konsolen-Radar"`, `"Konsolen Radar"` und `"Konsolenradar"`, zusätzlich
+  die breite Suche `Konsolen-Radar`.
+
+Die App-Klassen 9 (Software) und 42 (Software-Dienstleistungen) sind in den
+Trefferlisten enthalten. Eine gesonderte Klassenbeschränkung war bei den
+exakten Suchbegriffen nicht nötig, weil diese bereits ohne Treffer blieben.
+
+### 5.3 Ergebnisse
+
+| Quelle | Suchlauf | Ergebnis |
+|---|---|---|
+| DPMAregister | `"Konsolen-Radar"` | **0 Treffer** |
+| DPMAregister | `Konsolen Radar` | **0 Treffer** |
+| DPMAregister | `Konsolenradar` | **0 Treffer** |
+| DPMAregister | `Konsolen?Radar` | **0 Treffer** |
+| EUIPO/TMview | `Konsolen-Radar`, EM | **0 Treffer** |
+| EUIPO/TMview | `Konsolen-Radar`, DE | **0 Treffer** |
+| EUIPO/TMview | `Konsolen-Radar`, EM+DE | **0 Treffer** |
+| Google Play DE | `"Konsolen-Radar"` | **keine Ergebnisse** |
+| Google Play DE | `"Konsolen Radar"` | **keine Ergebnisse** |
+| Google Play DE | `"Konsolenradar"` | **keine Ergebnisse** |
+
+Die breite TMview-Suche nach `Konsolen` (EM+DE) lieferte **13 Treffer**.
+**Keiner davon enthält „Radar“.** Die für die App-Klassen 9/42 relevanten
+Treffer sind:
+
+| Marke | Amt | Status | Klassen |
+|---|---|---|---|
+| `KONSOLEN PROFIS` | DE | Expired | 9, 37, 42 |
+| `Konsolenchef` | DE | Expired | 9, 35, 37, 42 |
+| `konsolenreparatur Poschnar` | DE | Registered | 9, 28, 35, 37 |
+| `Konsolentuning` | DE | Expired | 3, 9, 42 |
+| `LS Seitenkonsolen` | EM | Registered | 9, 28 |
+| `TABLELINE KONSOLENSYSTEM` | DE | Expired | 20, 21, 42 |
+| `VERLEIH SHOP.DE DVD · Blue-ray · Konsolenspiele PC-Spiele und PC Software` | DE | Expired | 9, 28, 35, 38, 41 |
+| `Ultimate Konsolen Games` | DE | Ended | 9, 28 |
+| `Konsolenstore` | DE | Expired | 9 |
+
+Die übrigen vier Treffer (`KonsolenFix`, `Konsolen-Tuning.de`,
+`KONSOLENZOCKER`, `KonsolenfreaX`) liegen nicht in Klasse 9 oder 42.
+
+### 5.4 Bewertung
+
+In den geprüften Quellen wurde **kein identischer Treffer und kein Treffer
+mit der Kombination „Konsolen“ + „Radar“** gefunden. Insbesondere gibt es
+keinen Eintrag, der beide Begriffe kombiniert, und keinen öffentlichen
+Play-Store-Eintrag mit diesem Namen. Die breite Play-Suche zeigt nur allgemeine
+Radar-Apps, keine Konsolen- oder Hilfe-App mit demselben Namen.
+
+Damit ergibt die Vorprüfung **keinen harten Namenskonflikt**, aber keine
+Markenfreigabe. Der
+Name ist beschreibend aus „Konsolen“ und „Radar“ zusammengesetzt; das spricht
+für eine schwache Kennzeichnungskraft und senkt das Verletzungsrisiko, macht
+eine spätere Durchsetzung aber auch schwieriger. Die Entscheidung für den
+neutralen Namen bleibt trotzdem richtig, weil sie die ungeklärte Sony-Marke
+aus dem Titel entfernt.
+
+### 5.5 Grenzen
+
+- DPMAregister erlaubt keine vollständige Ähnlichkeits- oder Phonetiksuche.
+  Die exakte und wörtliche Suche ist belastbar, ersetzt aber keine
+  Ähnlichkeitsrecherche durch eine spezialisierte Stelle.
+- TMview ist ein amtlicher EUIPO/TMDN-Aggregator; Registerdaten können einen
+  abweichenden Stand haben. Die eSearch-plus-Oberfläche wurde nicht separat
+  ausgewertet; die EUIPO-Bestände wurden über TMview abgefragt.
+- Die Play-Suche war auf Deutschland, Apps und öffentlich sichtbare Einträge
+  beschränkt. Nicht erfasst sind unveröffentlichte Apps, andere Länder,
+  Webangebote, Domains und Social-Media-Handles.
+- Nicht geprüft wurden Firmenregister, common-law-Rechte und eine förmliche
+  Markenanmeldung. Für eine Produktionsfreigabe bleibt eine juristische
+  Clearance für die Klassen 9/42 empfehlenswert.
+
+Das ist keine Rechtsberatung. **B2 bleibt bis zur tatsächlichen Umstellung ein
+Umsetzungsblocker**, nicht wegen eines gefundenen Namenskonflikts, sondern weil
+Titel, Label, Listing und Assets noch den alten Namen tragen.
 
 ## 6. Restliche Blocker
 
@@ -165,7 +257,7 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 | ID | Blocker | Ort | Nötige Aktion |
 |---|---|---|---|
 | B1 | KI-Meldeweg noch nicht vollständig policy-konform: lokale Meldung + E-Mail, keine direkte Zustellung, keine eigene Output-Moderation | KI-Reiter, `MODERATION.md` | Zustellweg klären, Reports auswerten, Review-Key und Moderation nachweisen |
-| B2 | Markenname im Play-Titel und in App-Label/Feature/Screenshot | Listing, `buildozer*.spec`, Assets | Titel neutralisieren oder Markenrechte klären; AAB und Assets neu bauen |
+| B2 | Markenname im Play-Titel und in App-Label/Feature/Screenshot | Listing, `buildozer*.spec`, Assets | Vorprüfung „Konsolen-Radar“ ohne identischen/nahen Treffer; Umstellung, Assets und AAB noch offen |
 | B9 | Keine finale IARC-Bewertung; KI-Inhalte im Fragebogen nicht abgedeckt | Play Console | Content-Rating-Fragebogen inkl. KI ausfüllen und Ergebnis übernehmen |
 | B10 | Zielgruppe 18+ nur im internen Dokument; Play-Formular und Abstimmung mit Rating fehlen | Play Console | Zielgruppe setzen, 18+ begründen und mit Content Rating abgleichen |
 
