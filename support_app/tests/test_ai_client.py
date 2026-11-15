@@ -53,6 +53,21 @@ class PayloadTest(unittest.TestCase):
         with self.assertRaises(ai_client.KiFehler):
             ai_client.build_payload("", "Hallo")
 
+    def test_kontext_wird_mitgeschickt(self):
+        payload = ai_client.build_payload("m1", "Frage", kontext="KARTE A")
+        self.assertEqual([m["role"] for m in payload["messages"]],
+                         ["system", "system", "user"])
+        self.assertIn("KARTE A", payload["messages"][1]["content"])
+
+    def test_ohne_kontext_nur_zwei_nachrichten(self):
+        payload = ai_client.build_payload("m1", "Frage")
+        self.assertEqual(len(payload["messages"]), 2)
+
+    def test_antwortlaenge_ist_begrenzt(self):
+        payload = ai_client.build_payload("m1", "Frage")
+        self.assertEqual(payload["max_tokens"], ai_client.MAX_TOKENS)
+        self.assertLessEqual(ai_client.MAX_TOKENS, 500)
+
 
 class AntwortTest(unittest.TestCase):
     def test_lesbar(self):
@@ -67,6 +82,13 @@ class AntwortTest(unittest.TestCase):
         daten = {"choices": [{"message": {"content": "   "}}]}
         with self.assertRaises(ai_client.KiFehler):
             ai_client.parse_antwort(daten)
+
+    def test_zu_lange_antwort_wird_gekuerzt(self):
+        daten = {"choices": [{"message": {
+            "content": "x" * (ai_client.MAX_TEXT + 200)}}]}
+        text = ai_client.parse_antwort(daten)
+        self.assertLessEqual(len(text), ai_client.MAX_TEXT + 2)
+        self.assertTrue(text.endswith("…"))
 
 
 class FehlertextTest(unittest.TestCase):
@@ -130,6 +152,20 @@ class SSLTest(unittest.TestCase):
 
     def test_404_nennt_modellwahl(self):
         self.assertIn("MODELL", ai_client.fehlertext(404))
+
+
+class KontextTestChat(unittest.TestCase):
+    def test_chat_schickt_kontext(self):
+        gesehen = {}
+
+        def oeffnen(anfrage, timeout=None, context=None):
+            gesehen["body"] = json.loads(anfrage.data.decode("utf-8"))
+            return io.BytesIO(
+                b'{"choices": [{"message": {"content": "ok"}}]}')
+
+        ai_client.chat({"key": "k", "model": "m"}, "Frage",
+                       kontext="KARTE A", opener=oeffnen)
+        self.assertIn("KARTE A", json.dumps(gesehen["body"]))
 
 
 class EmpfehlungTest(unittest.TestCase):

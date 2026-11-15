@@ -19,6 +19,31 @@ class NormalisierungTest(unittest.TestCase):
                          ["alarm"])
 
 
+class KontextTest(unittest.TestCase):
+    def test_webhook_kommt_als_kontext(self):
+        text = support_core.kontext_text("webhook fehler 401")
+        self.assertIn("WEBHOOK", text)
+        self.assertLessEqual(len(text), support_core.KONTEXT_ZEICHEN)
+
+    def test_zwei_bis_drei_karten(self):
+        karten = support_core.kontext_karten("alarm webhook akku konfidenz")
+        self.assertTrue(2 <= len(karten) <= 3)
+
+    def test_webhook_bekommt_nachbarn(self):
+        titel = [k["title"] for k in support_core.kontext_karten(
+            "webhook fehler 401")]
+        self.assertEqual(len(titel), 3)
+        self.assertIn("Webhook: ntfy, Telegram, Discord", titel)
+        self.assertIn("Guten Fehlerbericht schreiben", titel)
+
+    def test_unpassende_karte_bleibt_draussen(self):
+        text = support_core.kontext_text("webhook fehler 401")
+        self.assertNotIn("LOTTERIE", text)
+
+    def test_ohne_treffer_leerer_kontext(self):
+        self.assertEqual(support_core.kontext_text("xyz qqq"), "")
+
+
 class AntwortTest(unittest.TestCase):
     def test_webhook_frage(self):
         treffer = support_core.search("webhook fehler 401")

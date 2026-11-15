@@ -27,15 +27,21 @@ BEVORZUGT = ("deepseek-v4-flash", "deepseek-v4.1-flash", "gpt-5-mini",
 # Die Modellliste der API ist gross (hunderte Eintraege, ~60 kB).
 MAX_ANTWORT = 262144
 MAX_FRAGE = 4000
+# Kurze Antworten: weniger Gelegenheit, Einstellungen zu erfinden.
+MAX_TOKENS = 450
+MAX_TEXT = 1400
+MAX_KONTEXT = 4000
 
 SYSTEM = (
     "Du bist die Hilfe-App zum 'PS5 Pro Search Agent' (Konsolen-Radar), einer "
     "Android-App, die 42 Shops nach PS5-Pro-Angeboten durchsucht und Alarme "
     "sowie Webhooks verschickt. Antworte auf Deutsch, kurz und in Du-Form. "
     "Themen: Einrichtung, Alarme, Webhooks, Konfidenz, Chance-Zustände, "
-    "Diagnosebericht, 403/429, Akku, Shops. Erfinde keine Einstellungen oder "
-    "Schalter; wenn du etwas nicht sicher weißt, sag es und verweise auf den "
-    "Diagnose-Reiter. Keine Links, keine Kaufberatung."
+    "Diagnosebericht, 403/429, Akku, Shops. Dir werden Auszüge aus den "
+    "Hilfe-Karten mitgeschickt. Nutze nur Einstellungen, Schalter und Zahlen, "
+    "die dort stehen. Steht etwas nicht in den Auszügen, sage das offen und "
+    "verweise auf den Diagnose-Reiter; erfinde nichts. Antworte in höchstens "
+    "fünf Sätzen. Keine Links, keine Kaufberatung."
 )
 
 
@@ -107,20 +113,27 @@ def mask(key):
     return key[:4] + "…" + key[-4:]
 
 
-def build_payload(model, frage, verlauf=None):
+def build_payload(model, frage, verlauf=None, kontext=""):
     if not model:
         raise KiFehler("Kein Modell gewählt.")
     frage = (frage or "").strip()[:MAX_FRAGE]
     if not frage:
         raise KiFehler("Die Frage ist leer.")
     nachrichten = [{"role": "system", "content": SYSTEM}]
+    kontext = (kontext or "").strip()[:MAX_KONTEXT]
+    if kontext:
+        nachrichten.append({
+            "role": "system",
+            "content": "Auszüge aus den Hilfe-Karten:\n\n" + kontext,
+        })
     for eintrag in verlauf or []:
         rolle = eintrag.get("role")
         inhalt = str(eintrag.get("content") or "").strip()[:MAX_FRAGE]
         if rolle in ("user", "assistant") and inhalt:
             nachrichten.append({"role": rolle, "content": inhalt})
     nachrichten.append({"role": "user", "content": frage})
-    return {"model": model, "messages": nachrichten}
+    return {"model": model, "messages": nachrichten,
+            "max_tokens": MAX_TOKENS}
 
 
 def fehlertext(status):
@@ -145,6 +158,8 @@ def parse_antwort(daten):
     text = str(text or "").strip()
     if not text:
         raise KiFehler("Die KI hat nichts geantwortet.")
+    if len(text) > MAX_TEXT:
+        text = text[:MAX_TEXT].rstrip() + " …"
     return text
 
 
@@ -154,7 +169,7 @@ def _request(url, key, payload=None, timeout=45, opener=None, key_pflicht=True):
     daten = None
     kopf = {
         "Accept": "application/json",
-        "User-Agent": "PS5ProHilfe/1.1.3",
+        "User-Agent": "PS5ProHilfe/1.1.4",
     }
     if key:
         kopf["Authorization"] = "Bearer " + key
@@ -185,13 +200,14 @@ def _request(url, key, payload=None, timeout=45, opener=None, key_pflicht=True):
         raise KiFehler("Die Antwort war kein gültiges JSON.") from None
 
 
-def chat(settings, frage, verlauf=None, opener=None, timeout=45):
+def chat(settings, frage, verlauf=None, kontext="", opener=None, timeout=45):
     """Eine Frage an die KI; gibt den Antworttext zurück oder wirft KiFehler."""
     key = (settings or {}).get("key") or ""
     model = (settings or {}).get("model") or ""
     if not key:
         raise KeinKey("Kein Key gespeichert.")
-    daten = _request(CHAT_URL, key, build_payload(model, frage, verlauf),
+    daten = _request(CHAT_URL, key,
+                     build_payload(model, frage, verlauf, kontext),
                      timeout=timeout, opener=opener)
     return parse_antwort(daten)
 

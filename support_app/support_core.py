@@ -105,6 +105,64 @@ def _vorschlaege():
     return [nach_id[i]["title"] for i in _VORSCHLAG_IDS if i in nach_id]
 
 
+KONTEXT_KARTEN = 3
+KONTEXT_ZEICHEN = 2200
+KARTE_ZEICHEN = 800
+
+# Thematische Nachbarn: Die beste Karte allein deckt eine Frage selten ab.
+# Bewusst kuratiert statt per Wortüberlappung, damit keine unpassende Karte
+# mitgeschickt wird, aus der die KI falsche Schalter ableitet.
+VERWANDT = {
+    "erste-schritte": ("alarm-kommt-nicht", "akku-hintergrund"),
+    "alarm-kommt-nicht": ("erste-schritte", "konfidenz", "akku-hintergrund"),
+    "webhook": ("fehlerbericht", "erste-schritte"),
+    "keine-treffer": ("preis-filter", "konfidenz", "bot-schutz"),
+    "bot-schutz": ("keine-treffer", "scan-intervall", "fehlerbericht"),
+    "konfidenz": ("alarm-kommt-nicht", "keine-treffer", "chance"),
+    "chance": ("konfidenz", "keine-treffer"),
+    "akku-hintergrund": ("alarm-kommt-nicht", "scan-intervall"),
+    "play-vs-sideload": ("daten", "erste-schritte"),
+    "daten": ("play-vs-sideload", "was-nicht"),
+    "scan-intervall": ("akku-hintergrund", "bot-schutz"),
+    "preis-filter": ("keine-treffer", "chance"),
+    "ps-direct": ("preis-filter", "chance"),
+    "fehlerbericht": ("webhook", "bot-schutz"),
+    "was-nicht": ("daten", "chance"),
+    "suchassistent": ("preis-filter", "chance"),
+}
+
+
+def kontext_karten(frage, limit=KONTEXT_KARTEN):
+    """Zwei bis drei Karten: bester Treffer plus thematische Nachbarn.
+
+    Ohne Treffer über der Suchschwelle bleibt der Kontext leer: lieber kein
+    Auszug als eine unpassende Karte, aus der die KI Einstellungen ableitet.
+    """
+    treffer = search(frage, limit=1)
+    if not treffer:
+        return []
+    nach_id = {entry["id"]: entry for entry in ENTRIES}
+    karten = [treffer[0]["entry"]]
+    for kennung in VERWANDT.get(karten[0]["id"], ()):
+        if len(karten) >= limit:
+            break
+        nachbar = nach_id.get(kennung)
+        if nachbar is not None and nachbar not in karten:
+            karten.append(nachbar)
+    return karten
+
+
+def kontext_text(frage, limit=KONTEXT_KARTEN, max_zeichen=KONTEXT_ZEICHEN):
+    """Passende Karten als kompakter Text für den KI-Aufruf."""
+    teile = []
+    for entry in kontext_karten(frage, limit):
+        text = format_entry(entry)
+        if len(text) > KARTE_ZEICHEN:
+            text = text[:KARTE_ZEICHEN - 3].rstrip() + "..."
+        teile.append(text)
+    return "\n\n---\n\n".join(teile)[:max_zeichen]
+
+
 def answer(frage):
     """Antwortkarte oder Fallback mit Themenvorschlägen."""
     treffer = search(frage)

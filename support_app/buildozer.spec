@@ -11,9 +11,9 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json,ttf
 source.exclude_dirs = bin, .buildozer, __pycache__, tests
 
-version = 1.1.3
+version = 1.1.4
 # versionCode; tools/set_version_from_tag.sh leitet ihn bei Tag-Builds neu ab.
-android.numeric_version = 10103
+android.numeric_version = 10104
 
 # Gleiche Pins wie die Radar-App: p4a master baut sonst CPython 3.14, das mit
 # Kivy 2.3 und dem festen Cython 0.29 im Recipe nicht kompiliert. python3 und

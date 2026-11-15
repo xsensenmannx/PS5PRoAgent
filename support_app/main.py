@@ -460,7 +460,8 @@ class KiScreen(Screen):
         def arbeit():
             text, fehler = "", ""
             try:
-                text = ai_client.chat(daten, frage)
+                text = ai_client.chat(
+                    daten, frage, kontext=support_core.kontext_text(frage))
             except ai_client.KiFehler as problem:
                 fehler = str(problem)
             except Exception as problem:  # pragma: no cover - Notfall
