@@ -9,9 +9,9 @@ Die Datenschutzerklärung ist als Teil des öffentlichen Repositorys abrufbar.
 |---|---|---|
 | `listing.de.md` | Kurz- (74 Zeichen) und Vollbeschreibung (2.689 Zeichen) | 80 / 4.000 |
 | `STORE_AUDIT.md` | Vollständigkeits- und Widerspruchsprüfung, priorisierte Blocker | Stand 15.11.2026 |
-| `assets/icon-512.png` | App-Icon im Store | 512×512, Soll: 32-bit PNG mit Alpha (aktuell 24-bit RGB, siehe Audit) |
+| `assets/icon-512.png` | App-Icon im Store | 512×512, 32-bit RGBA |
 | `assets/feature-1024x500.png` | Feature-Grafik | 1024×500, PNG/JPEG |
-| `assets/phone/01-fragen.png` … `05-ki.png` | Screenshots | 1620×2880, 9:16, 2–8 Stück |
+| `assets/phone/01-fragen.png` … `05-ki.png` | Screenshots | 1620×2880, 9:16, 24-bit RGB, 2–8 Stück |
 | `PRIVACY.md` | Datenschutzerklärung inkl. optionaler KI | öffentliche URL, siehe Checkliste |
 | `DATA_SAFETY.md` | Antworten für „Data safety" | konservativ, mit KI-Variante |
 | `PLAY_INTERNAL_TEST.md` | Checkliste, Konsolenfelder und Datenschutz-URL für den internen Test | kein Upload enthalten |
@@ -39,10 +39,11 @@ python tools/hilfe_store_assets.py    # Icon 512 + Feature-Grafik
 
 ## Noch offen vor dem ersten Upload
 
-- **Store-Audit:** Zehn harte Blocker sind in `STORE_AUDIT.md` dokumentiert:
-  fehlende KI-In-App-Meldung, Markenname, Icon-/Screenshot-Formate, falscher
-  Ollama-Screenshot, Data-Safety-Korrekturen und die fehlende finale
-  Content-Rating-/Zielgruppenentscheidung.
+- **Store-Audit:** Sieben harte Blocker sind in `STORE_AUDIT.md` dokumentiert:
+  fehlende KI-In-App-Meldung, Markenname, Data-Safety-Korrekturen,
+  Listing-Freebuff-Kosten und die fehlende finale
+  Content-Rating-/Zielgruppenentscheidung. Die PNG-Formate und der
+  Ollama-Screenshot sind behoben.
 - **AAB:** Signiertes AAB ist gebaut (Support-AAB-Lauf #4) und als Artefakt
   verfügbar. Der Upload in die Play Console und die Zuordnung des Upload-Keys
   stehen noch aus; die Checkliste steht in `PLAY_INTERNAL_TEST.md`.

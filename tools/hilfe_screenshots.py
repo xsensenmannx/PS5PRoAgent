@@ -1,14 +1,16 @@
 """Erzeugt die fünf Store-Screenshots der Hilfe-App als echte App-Aufnahmen.
 
 Läuft mit Kivy im Fenster (1080x1920, Dichte 2.25) und speichert pro Reiter
-einen Screenshot unter docs/store/hilfe/screenshots/. Die Inhalte entstehen
-über die normalen UI-Aktionen (senden, planen, prüfen), nicht aus Mockups.
+einen Screenshot unter store/hilfe/assets/phone/. Die Inhalte entstehen über
+die normalen UI-Aktionen (senden, planen, prüfen), nicht aus Mockups.
 
     python tools/hilfe_screenshots.py
 """
 import glob
 import os
 import sys
+
+from PIL import Image
 
 os.environ.setdefault("KIVY_NO_ARGS", "1")
 os.environ.setdefault("KIVY_METRICS_DENSITY", "2.25")
@@ -29,6 +31,11 @@ ZIEL = os.path.join(BASIS, "store", "hilfe", "assets", "phone")
 sys.path.insert(0, APP)
 
 import main  # noqa: E402
+
+# Die Store-Aufnahmen sollen die Android-UI zeigen. Unter Windows würde
+# main.py sonst Ollama anbieten; die Plattform wird für die Aufnahme daher
+# auf Android gesetzt. Die eigentliche Geräteprüfung bleibt separat.
+main.kivy_platform = "android"
 
 # Reihenfolge = Reihenfolge im Store.
 AUFNAHMEN = (
@@ -80,8 +87,14 @@ class Aufnahme(main.HilfeApp):
     def sichern(self, datei, nummer):
         pfad = Window.screenshot(name=os.path.join(ZIEL, datei + ".png"))
         ziel = os.path.join(ZIEL, datei + ".png")
-        os.replace(pfad, ziel)
-        print("gespeichert:", ziel, Window.size)
+        # Play verlangt fuer Screenshots 24-bit RGB ohne Alpha. Die
+        # Kivy-Aufnahme kommt als RGBA; deshalb nach dem Capture flachlegen.
+        with Image.open(pfad) as bild:
+            rgb = bild.convert("RGB")
+        rgb.save(ziel, format="PNG", optimize=True)
+        if os.path.abspath(pfad) != os.path.abspath(ziel):
+            os.remove(pfad)
+        print("gespeichert:", ziel, rgb.size, rgb.mode, Window.size)
         Clock.schedule_once(lambda *_: self.schritt(nummer + 1), 0.3)
 
 

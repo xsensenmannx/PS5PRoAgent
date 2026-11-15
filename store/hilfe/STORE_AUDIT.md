@@ -7,9 +7,10 @@ und der tatsächliche KI-Code. **Kein Upload, kein Rollout, kein Play-Upload.**
 
 Die formalen Textgrenzen und die Pflicht-Assets sind vorhanden; Titel, Kurz-
 und Vollbeschreibung passen. **Store-reif ist das Paket noch nicht.** Es gibt
-zehn harte Blocker und mehrere operative Punkte. Die wichtigsten sind die
-fehlende In-App-Meldung für KI-Inhalte, der Markenname im Play-Titel und in
-den Grafiken sowie falsche PNG-Formate bei Icon und Screenshots.
+noch sieben harte Blocker und mehrere operative Punkte. Die wichtigsten sind
+die fehlende In-App-Meldung für KI-Inhalte und der Markenname im Play-Titel
+und in den Grafiken. Die PNG-Formate von Icon und Screenshots sowie der
+Ollama-Hinweis in Screenshot 05 wurden am 15.11.2026 behoben.
 
 Die Data-Safety-Angaben sind für einen reinen **internen** Testtrack laut Play
 nicht verpflichtend; für geschlossenen Test und Produktion müssen sie korrekt
@@ -23,14 +24,15 @@ sein. Der interne Test ist also kein Freibrief für die übrigen Blocker.
 | App-Label | `PS5 Pro Search Agent - Hilfe`, **28 Zeichen** | – | Länge ok; Bindestrich statt Gedankenstrich |
 | Kurzbeschreibung | **74 Zeichen** | 80 | ok |
 | Vollbeschreibung | **2.689 Zeichen** | 4.000 | ok |
-| Icon | 512×512, 72.713 B, **24-bit RGB (color_type 2)** | 32-bit PNG **mit Alpha**, max. 1.024 KB | **Blocker B3** |
+| Icon | 512×512, **80.695 B, 32-bit RGBA (color_type 6)** | 32-bit PNG **mit Alpha**, max. 1.024 KB | **behoben (B3)** |
 | Feature-Grafik | 1024×500, 24-bit RGB, 88.481 B | JPEG oder 24-bit PNG ohne Alpha | Format ok; Marke in der Grafik |
-| Screenshots | 5× 1620×2880, 9:16, 78–226 KB | 2–8, je Seite 320–3.840 px, max. 8 MB, **24-bit PNG/JPEG ohne Alpha** | **Blocker B4** (RGBA) |
+| Screenshots | 5× 1620×2880, 9:16, **24-bit RGB**, 79–250 KB | 2–8, je Seite 320–3.840 px, max. 8 MB, **24-bit PNG/JPEG ohne Alpha** | **behoben (B4)** |
 | Tablet-/Chromebook-Shots | nicht vorhanden | optional | kein Blocker |
 
 Die Angaben in `README.md` (74 / 2.689 Zeichen, fünf Screenshots) stimmen mit
-den Dateien überein. Die Behauptung „Icon 32-bit“ stimmt **nicht**: Der
-Generator `tools/hilfe_store_assets.py` legt das Icon als RGB an.
+den Dateien überein. Icon und Screenshots wurden am 15.11.2026 auf die
+geforderten Formate umgestellt: `icon-512.png` ist jetzt RGBA, die fünf
+Screenshots sind RGB.
 
 ## 2. Inhaltliche Widersprüche
 
@@ -62,13 +64,14 @@ Datenschutztexte den tatsächlichen Code beschreiben, oder der Verlauf muss
 bewusst implementiert und dann korrekt deklariert werden. Bis dahin ist die
 Angabe ein Widerspruch (Blocker B7).
 
-### 2.3 Ollama im Android-Screenshot
+### 2.3 Ollama im Android-Screenshot (behoben)
 
-`assets/phone/05-ki.png` zeigt den Satz „… oder dein lokales Ollama“. Die
+`assets/phone/05-ki.png` zeigte den Satz „… oder dein lokales Ollama“. Die
 Android-App blendet Ollama jedoch aus, weil `localhost` dort das Telefon wäre
-(`main.py`: `_anbieter_namen` filtert `ollama` auf Android/iOS). Die
-Screenshots wurden laut `README.md` vom Desktop-Build erzeugt. Für ein
-Android-Listing ist das irreführend (Blocker B5).
+(`main.py`: `_anbieter_namen` filtert `ollama` auf Android/iOS). Der
+Screenshot-Generator setzt für die Store-Aufnahmen jetzt
+`main.kivy_platform = "android"`; Screenshot 05 wurde neu erzeugt und enthält
+keinen Ollama-Hinweis mehr. Ein echter Android-Gerätetest bleibt O3.
 
 ### 2.4 Kleinere Konsistenzpunkte
 
@@ -148,14 +151,19 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 |---|---|---|---|
 | B1 | Keine In-App-Meldung/Flag für anstößige KI-Inhalte; keine eigene Output-Moderation | KI-Reiter | Melde-/Flag-Funktion in der App ergänzen, Reports auswerten, Moderation dokumentieren |
 | B2 | Markenname im Play-Titel und in App-Label/Feature/Screenshot | Listing, `buildozer*.spec`, Assets | Titel neutralisieren oder Markenrechte klären; AAB und Assets neu bauen |
-| B3 | Icon ist 24-bit RGB statt 32-bit RGBA | `assets/icon-512.png` | Icon als 32-bit PNG mit Alpha neu erzeugen; Generator korrigieren |
-| B4 | Screenshots sind RGBA statt 24-bit RGB ohne Alpha | `assets/phone/*.png` | Alle fünf Screenshots nach RGB flatten und neu speichern |
-| B5 | Screenshot 05 zeigt Ollama, obwohl Android es ausblendet | `assets/phone/05-ki.png` | Screenshot auf Android erzeugen oder Ollama-Text entfernen |
 | B6 | Data Safety nur „Shared“ statt „Collected + Shared“ | `DATA_SAFETY.md` | Beide Kategorien für die übertragenen Daten angeben |
 | B7 | „Ephemeral: Ja“ und „Gesprächsverlauf“ nicht durch Code/Anbieter gedeckt | `DATA_SAFETY.md`, `PRIVACY.md` | Ephemeral auf Nein korrigieren; Verlauf aus Doku entfernen oder implementieren |
 | B8 | Listing bezeichnet Freebuff indirekt als kostenlos | `listing.de.md` | Freebuff als guthabenpflichtig, übrige Anbieter als kostenlos formulieren |
 | B9 | Keine finale IARC-Bewertung; KI-Inhalte im Fragebogen nicht abgedeckt | Play Console | Content-Rating-Fragebogen inkl. KI ausfüllen und Ergebnis übernehmen |
 | B10 | Zielgruppe 18+ nur im internen Dokument; Play-Formular und Abstimmung mit Rating fehlen | Play Console | Zielgruppe setzen, 18+ begründen und mit Content Rating abgleichen |
+
+### Behobene Asset-Blocker (15.11.2026)
+
+| ID | vorher | jetzt |
+|---|---|---|
+| B3 | Icon 24-bit RGB ohne Alpha | `icon-512.png` als 32-bit RGBA neu erzeugt (80.695 B); Generator liefert RGBA |
+| B4 | Screenshots RGBA mit Alpha | Alle fünf Screenshots als 24-bit RGB neu gespeichert (79–250 KB) |
+| B5 | Screenshot 05 zeigte Ollama auf Android | Screenshot 05 mit Android-UI-Pfad neu erzeugt, ohne Ollama-Hinweis |
 
 ### Operative Blocker
 
@@ -171,6 +179,9 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 
 - Titel, Kurz- und Vollbeschreibung liegen innerhalb der Play-Grenzen.
 - Feature-Grafik 1024×500, fünf Screenshots 1620×2880 (9:16), alle unter 8 MB.
+- Icon 512×512 als 32-bit RGBA; Screenshots als 24-bit RGB ohne Alpha.
+- Screenshot 05 wurde mit Android-UI-Pfad erzeugt und enthält keinen Ollama-Hinweis;
+  der echte Gerätetest bleibt O3.
 - 16 Themenkarten im Listing entsprechen `knowledge.ENTRIES`.
 - Paket `de.konsolenradar.support`, Version 1.2.0, versionCode 10200,
   minSdk 24, targetSdk 36 und nur `INTERNET` sind konsistent.
@@ -185,9 +196,9 @@ die fehlende Verbindung, ersetzt aber keine Erlaubnis.
 1. **KI-Policy:** In-App-Melde-/Flag-Funktion und Moderation ergänzen;
    Review-Zugang klären (B1, O2).
 2. **Marke:** neutralen Titel entscheiden oder Rechte klären; danach App-Label,
-   AAB, Feature und Screenshots neu bauen (B2, B5, O3).
-3. **Assets:** Icon auf 32-bit RGBA, Screenshots auf 24-bit RGB ohne Alpha
-   umstellen; Android-Shots erzeugen (B3, B4).
+   AAB, Feature und Screenshots neu bauen (B2, O3).
+3. **Assets:** Die PNG-Formate sind umgesetzt; bei einem Rebranding müssen
+   Feature, Screenshot 02 und die Android-Aufnahmen erneut erzeugt werden.
 4. **Texte/Data Safety:** Freebuff-Kosten, Verlauf, Collected + Shared und
    Ephemeral korrigieren (B6–B8).
 5. **Konsolenfelder:** Content Rating inkl. KI und Zielgruppe ausfüllen (B9,

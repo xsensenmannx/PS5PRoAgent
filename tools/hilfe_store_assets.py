@@ -1,6 +1,6 @@
 """Erzeugt die beiden Play-Grafiken der Hilfe-App.
 
-    store/hilfe/assets/icon-512.png          512x512, 32-bit
+    store/hilfe/assets/icon-512.png          512x512, 32-bit RGBA
     store/hilfe/assets/feature-1024x500.png  1024x500
 
 Basis ist das Roboter-Icon aus `support_app/icon.png` (dieselbe Quelle wie
@@ -57,8 +57,9 @@ def icon_quelle(size):
 
 def icon_512():
     im = icon_quelle(512)
-    # Play mag keine Transparenz: auf den App-Hintergrund flachlegen.
-    flach = Image.new("RGB", (512, 512), INK)
+    # Play verlangt ein 32-bit PNG mit Alpha. Der Alphakanal bleibt erhalten;
+    # der Hintergrund ist voll deckend, die Ecken maskiert Play selbst.
+    flach = Image.new("RGBA", (512, 512), INK + (255,))
     flach.paste(im, (0, 0), im)
     return flach
 

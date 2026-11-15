@@ -12,7 +12,7 @@ Teil dieses Schritts.
 | AAB gebaut und signiert | **fertig** | Support-AAB-Lauf [#4](https://github.com/xsensenmannx/PS5PRoAgent/actions/runs/43723024167), `completed/success` |
 | Paket / Version | **fertig** | `de.konsolenradar.support`, `versionName 1.2.0`, `versionCode 10200` |
 | Signatur | **fertig** | Upload-Key, Zertifikat `f99782703ce8a45e55ebf6174611024e42128e169831fd57bc34614563f7042e` |
-| Store-Texte und Grafiken | **teilweise** | Längen ok; Icon-/Screenshot-Formate und Markenblocker siehe `STORE_AUDIT.md` |
+| Store-Texte und Grafiken | **teilweise** | Formate ok; Marken-/Listingblocker siehe `STORE_AUDIT.md` |
 | Öffentliche Datenschutz-URL | **fertig** | GitHub-Link, siehe Abschnitt 2, HTTP 200 ohne Login |
 | Play-Console-App | **offen** | muss einmalig angelegt werden |
 | App-Inhalte / Data Safety | **vorbereitet, zu korrigieren** | Antworten in `DATA_SAFETY.md`; Abweichungen und Blocker siehe `STORE_AUDIT.md` |
@@ -145,8 +145,8 @@ Data-Safety-Kurzfassung:
 - [x] Store-Texte, Icon, Feature-Grafik und fünf Screenshots vorhanden
 - [x] Öffentliche Datenschutz-URL erreichbar
 - [x] Data-Safety- und Content-Rating-Antworten vorbereitet
-- [ ] Icon als 32-bit PNG mit Alpha, Screenshots als 24-bit RGB ohne Alpha
-- [ ] Screenshot 05 auf Android erzeugen (kein Ollama im Android-Listing)
+- [x] Icon als 32-bit PNG mit Alpha, Screenshots als 24-bit RGB ohne Alpha
+- [x] Screenshot 05 mit Android-UI-Pfad erzeugt (kein Ollama im Android-Listing)
 - [ ] KI-Melde-/Flag-Funktion und Moderation ergänzen
 - [ ] Listing-Freebuff-Kosten und Data-Safety-/Privacy-Verlauf korrigieren
 - [ ] Finale IARC-Bewertung inkl. KI und Zielgruppe in der Konsole setzen
