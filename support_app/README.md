@@ -98,7 +98,7 @@ support_app/
 ├── icon.png                   512er Icon (Store/Launcher)
 ├── icon_fg.png / icon_bg.png  adaptives Icon (432er Ebenen)
 ├── icon.ico                   Windows-Icon
-└── tests/                     101 Tests ohne Kivy (Kern, Suche, KI-Client)
+└── tests/                     102 Tests ohne Kivy (Kern, Suche, KI-Client, Release)
 ```
 
 ## Tests
@@ -107,7 +107,7 @@ support_app/
 python -m unittest discover -s support_app/tests -v
 ```
 
-Die 101 Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
+Die 102 Tests brauchen weder Kivy noch Android und laufen auch unter Windows.
 
 ## Signierung (Release-APK)
 
