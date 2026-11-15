@@ -12,10 +12,12 @@ Teil dieses Schritts.
 | AAB gebaut und signiert | **fertig** | Support-AAB-Lauf [#4](https://github.com/xsensenmannx/PS5PRoAgent/actions/runs/43723024167), `completed/success` |
 | Paket / Version | **fertig** | `de.konsolenradar.support`, `versionName 1.2.0`, `versionCode 10200` |
 | Signatur | **fertig** | Upload-Key, Zertifikat `f99782703ce8a45e55ebf6174611024e42128e169831fd57bc34614563f7042e` |
-| Store-Texte und Grafiken | **fertig** | `listing.de.md`, Icon 512, Feature 1024×500, fünf Screenshots 1620×2880 |
+| Store-Texte und Grafiken | **teilweise** | Längen ok; Icon-/Screenshot-Formate und Markenblocker siehe `STORE_AUDIT.md` |
 | Öffentliche Datenschutz-URL | **fertig** | GitHub-Link, siehe Abschnitt 2, HTTP 200 ohne Login |
 | Play-Console-App | **offen** | muss einmalig angelegt werden |
-| App-Inhalte / Data Safety | **vorbereitet** | Antworten in `DATA_SAFETY.md`; Formular noch nicht ausgefüllt |
+| App-Inhalte / Data Safety | **vorbereitet, zu korrigieren** | Antworten in `DATA_SAFETY.md`; Abweichungen und Blocker siehe `STORE_AUDIT.md` |
+| KI-Policy / In-App-Meldung | **offen** | keine Melde-/Flag-Funktion für KI-Inhalte; Play-Policy siehe `STORE_AUDIT.md` |
+| Content Rating / Zielgruppe | **vorbereitet** | 18+ vorgesehen; finale IARC-Bewertung und Konsolenfelder fehlen |
 | Datenschutz-Link in der App | **offen** | in 1.2.0 nicht vorhanden; vor Produktion ergänzen |
 | Interner Test / Upload | **nicht ausgeführt** | bewusst zurückgestellt |
 
@@ -100,8 +102,8 @@ werden; die Datenschutz-URL bleibt unabhängig davon ein Pflichtfeld.
 | Werbung | **Nein** |
 | In-App-Käufe | **Nein** |
 | App-Zugriff | **Alle Funktionen ohne Anmeldung**; die KI ist optional und braucht einen eigenen Anbieter-Key |
-| Zielgruppe | **18+**, keine Ausrichtung auf Kinder/Families |
-| Content Rating | IARC-Fragebogen: keine Gewalt, keine sexualisierten Inhalte, keine Sprache, keine Drogen, kein Glücksspiel, keine Nutzer-zu-Nutzer-Interaktion, keine Standortfreigabe, keine Käufe, keine Werbung. Erwartung: ohne Altersbeschränkung; endgültig entscheidet IARC. |
+| Zielgruppe | **18+**, keine Ausrichtung auf Kinder/Families; Play-Formular noch nicht ausgefüllt |
+| Content Rating | IARC-Fragebogen: keine Gewalt, keine sexualisierten Inhalte, keine Sprache, keine Drogen, kein Glücksspiel, keine Nutzer-zu-Nutzer-Interaktion, keine Standortfreigabe, keine Käufe, keine Werbung. KI-Inhalte ergänzen; Erwartung „ohne Altersbeschränkung“ ist nicht final. Endgültig entscheidet IARC. |
 | News-App | **Nein** |
 | COVID-19-Kontaktverfolgung | **Nein** |
 | Regierungs-App | **Nein** |
@@ -115,8 +117,9 @@ Data-Safety-Kurzfassung:
   „Messages → Other in-app messages“.
 - Zweck: **App functionality**; nur optional, wenn der Nutzer einen Anbieter
   wählt, einen eigenen Key einträgt und eine Frage sendet.
-- **Ephemeral**, nicht mit der Identität verknüpft, TLS-verschlüsselt, kein
-  Verkauf, keine Werbe- oder Analyse-SDKs.
+- **Ephemeral** ist derzeit nicht belegbar, solange die Retention der
+  KI-Anbieter nicht geklärt ist; nicht mit der Identität verknüpft (zu prüfen),
+  TLS-verschlüsselt, kein Verkauf, keine Werbe- oder Analyse-SDKs.
 - Keine Konten beim Entwickler; Löschung lokal über Key entfernen oder
   Deinstallation. Beim gewählten KI-Anbieter gelten dessen Fristen.
 
@@ -142,6 +145,11 @@ Data-Safety-Kurzfassung:
 - [x] Store-Texte, Icon, Feature-Grafik und fünf Screenshots vorhanden
 - [x] Öffentliche Datenschutz-URL erreichbar
 - [x] Data-Safety- und Content-Rating-Antworten vorbereitet
+- [ ] Icon als 32-bit PNG mit Alpha, Screenshots als 24-bit RGB ohne Alpha
+- [ ] Screenshot 05 auf Android erzeugen (kein Ollama im Android-Listing)
+- [ ] KI-Melde-/Flag-Funktion und Moderation ergänzen
+- [ ] Listing-Freebuff-Kosten und Data-Safety-/Privacy-Verlauf korrigieren
+- [ ] Finale IARC-Bewertung inkl. KI und Zielgruppe in der Konsole setzen
 - [ ] Datenschutz-Link in der App ergänzen (vor Produktion, nicht Teil von 1.2.0)
 - [ ] Markenrechtlichen Play-Titel prüfen (siehe Hinweis oben)
 - [ ] Gerätetest auf einem echten Android-Gerät

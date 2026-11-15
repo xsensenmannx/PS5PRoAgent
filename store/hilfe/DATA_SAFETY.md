@@ -2,6 +2,12 @@
 
 Stand: November 2026. Grundlage: `store/hilfe/PRIVACY.md`.
 
+> **Audit-Hinweis (15.11.2026):** Diese Tabelle ist noch nicht Play-konform.
+> Siehe `STORE_AUDIT.md`. Insbesondere muss der Datentyp als **Collected +
+> Shared** angegeben werden, „Ephemeral“ ist ohne Retention-Garantie der
+> KI-Anbieter nicht belegbar, und der dokumentierte Gesprächsverlauf wird
+> aktuell nicht mitgesendet.
+
 Die Hilfe-App hat zwei Betriebsarten. Für die Data-Safety-Angaben zählt die
 weiteste: die optionale KI. Wer sie nicht nutzt, erzeugt keinen Netzwerkverkehr.
 
