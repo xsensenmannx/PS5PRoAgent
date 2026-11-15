@@ -22,7 +22,7 @@ und der Key bleibt im privaten App-Speicher.
 | Fragen | Freitextfragen gegen 16 Themenkarten, umlaut- und umgangssprachfest |
 | Suche | Wunsch wie „unter 700, nur Amazon, nur neu“ wird zu Einstellungen, Schritten und Hinweisen — mit den echten Schlüsseln des Radars |
 | Diagnose | Füge den Diagnose-Text aus dem Radar ein: Shops, letzter Scan, Treffer, Konfidenz, Webhook-Fehler, 403/429 |
-| Themen | Alle Karten als Liste, ein Tipp öffnet die Antwort im Chat |
+| Themen | Alle Karten als Liste, ein Tipp öffnet die Antwort im Chat; unten Version und Release-Link (öffnet nur auf Klick) |
 | KI | Optional: Freitext an ein Modell der Freebuff-API, mit eigenem Key; passende Karten gehen als Beleg mit, Antworten sind kurz |
 
 ## Was sie nicht kann

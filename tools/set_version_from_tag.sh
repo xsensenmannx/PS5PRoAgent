@@ -5,6 +5,9 @@
 #   v1.2     -> version = 1.2,   android.numeric_version = 10200
 #   v1.2.3   -> version = 1.2.3, android.numeric_version = 10203
 #
+# Liegt neben der Spec eine version.py, wird deren VERSION mitgeschrieben;
+# die App zeigt sie im Reiter THEMEN an.
+#
 # Der versionCode muss bei jedem Update steigen; aus dem Tag abgeleitet kann er
 # nicht mehr vergessen werden. Minor und Patch muessen unter 100 bleiben,
 # damit die Reihenfolge eindeutig ist.
@@ -58,6 +61,16 @@ fi
 if ! grep -qx "android.numeric_version = ${CODE}" "$SPEC"; then
     echo "::error::android.numeric_version konnte in $SPEC nicht gesetzt werden" >&2
     exit 1
+fi
+
+# Die App zeigt ihre Version aus version.py; beim Tag-Build mitziehen.
+VERSIONSDATEI="$(dirname "$SPEC")/version.py"
+if [ -f "$VERSIONSDATEI" ]; then
+    sed -i -E "s/^VERSION[[:space:]]*=.*/VERSION = \"${VERSION}\"/" "$VERSIONSDATEI"
+    if ! grep -qx "VERSION = \"${VERSION}\"" "$VERSIONSDATEI"; then
+        echo "::error::VERSION konnte in $VERSIONSDATEI nicht gesetzt werden" >&2
+        exit 1
+    fi
 fi
 
 echo "Tag $TAG -> version=$VERSION versionCode=$CODE"

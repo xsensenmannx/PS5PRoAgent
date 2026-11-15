@@ -29,8 +29,10 @@ from kivy.uix.spinner import Spinner
 from kivy.uix.textinput import TextInput
 
 import ai_client
+import links
 import search_assistant
 import support_core
+import version
 from knowledge import ENTRIES
 
 BG = (0.043, 0.071, 0.125, 1)
@@ -289,7 +291,31 @@ class ThemenScreen(Screen):
                        .show_topic(e))
             inhalt.add_widget(knopf)
         root.add_widget(_scrollbereich(inhalt))
+
+        # Versionsanzeige und Update-Weg fuer Sideload-Nutzer. Der Link wird
+        # nur auf Klick geoeffnet; die App selbst fragt nichts ab.
+        fuss = BoxLayout(orientation="vertical", size_hint_y=None,
+                         height=dp(64), spacing=dp(2))
+        self.version_label = Label(
+            text="Version %s" % version.VERSION, size_hint_y=None,
+            height=dp(18), color=MUTED, font_size=dp(11),
+        )
+        releases = Button(
+            text="RELEASES AUF GITHUB", size_hint_y=None, height=dp(40),
+            bold=True, font_size=dp(11), background_normal="",
+            background_color=PANEL, color=TEXT,
+        )
+        releases.bind(on_release=self._releases)
+        fuss.add_widget(self.version_label)
+        fuss.add_widget(releases)
+        root.add_widget(fuss)
         self.add_widget(root)
+
+    def _releases(self, *_):
+        """Oeffnet die Release-Seite im Browser; ohne Klick passiert nichts."""
+        if not links.oeffne(version.RELEASES):
+            self.version_label.text = ("Version %s · Link konnte nicht "
+                                       "geoeffnet werden." % version.VERSION)
 
 
 class KiScreen(Screen):
