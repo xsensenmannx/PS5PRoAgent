@@ -188,7 +188,9 @@ jobs:
         run: |
           set -euo pipefail
           UNIVERSAL=$(ls -1 support_app/bin/*arm64-v8a_armeabi-v7a*.apk | head -n 1)
-          V8=$(printf '%s' "$UNIVERSAL" | sed 's/_arm64-v8a_armeabi-v7a/_arm64-v8a/')
+          V8=$(printf '%s' "$UNIVERSAL" | sed 's/-arm64-v8a_armeabi-v7a-/-arm64-v8a-/')
+          [ "$V8" != "$UNIVERSAL" ] \
+            || { echo "::error::Name der arm64-APK nicht abgeleitet"; exit 1; }
           TOOLS=$(ls -d "$HOME"/.buildozer/android/platform/android-sdk/build-tools/* | tail -n 1)
           ARBEIT=$(mktemp -d)
 
