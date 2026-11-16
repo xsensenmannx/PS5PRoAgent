@@ -70,7 +70,8 @@ Bereits gebaut und getestet:
   mit Boot-Start.
 * **Webhook-Alarme** (ntfy, Telegram, Discord, generisch) mit Maskierung und Dedupe.
 * **Treffer-Verifikation** per zweitem Abruf ohne Cache; Rückstufung bei Ausverkauf.
-* **Schnell-Modus** für sechs heiße Shops im Minutentakt.
+* **Live-Modus (v1.5)** für die fälligen Shops: 30 s heiße, 4 min stille,
+  12 min gestörte, Runde auf 12 Shops gedeckelt; im Hintergrund 15 min.
 * Remote-Konfiguration für URLs und deklarative Parser-Regeln.
 * **v1.4:** Verfügbarkeitszustände (Markt/Lotterie/Einladung/Vorbestellung),
   Konfidenz 0–100, Beleg-Ausschnitt mit Hash, GTIN/EAN, Bundle-Filter,
@@ -142,7 +143,7 @@ dieselbe Logik. Ein Treffer im Hintergrund ist derselbe Treffer wie im Vordergru
 
 ## 6. Roadmap
 
-Drei Releases, jedes mit einem klaren Zweck. Keine Version ohne Abnahmekriterien.
+Vier Releases, jedes mit einem klaren Zweck. Keine Version ohne Abnahmekriterien.
 
 ### v1.4 — „Vertrauen" (Kern umgesetzt)
 
@@ -182,7 +183,34 @@ Kein Laufzeit-LLM, keine automatische Veröffentlichung, keine Nutzerdaten.
 * Ein Lotterie-/Einladungszustand erzeugt CHANCE, nie VERFÜGBAR.
 * 800+ Tests, alle sechs Smoke-Läufe, Release-Gates wie v1.3.
 
-### v1.5 — „Cloud" (2–4 Wochen)
+### v1.5 — „Live" (Händler-Erkennung + Live-Überwachung)
+
+Kurzfassung hier; Etappen, Aufwände und Abnahmekriterien stehen in
+[`RELEASE_1_5.md`](RELEASE_1_5.md).
+
+**Live-Überwachung.** Statt starrer 5–60-Minuten-Runden über alle 42 Shops prüft die
+App nur die fälligen: heiße Shops im Vordergrund alle 20–30 s, gestörte Shops mit
+Circuit Breaker seltener, alles unter einem globalen Request-Budget. Ein Shop ohne
+Feed lässt sich nicht pushen — „live" heißt hier schnelleres, klügeres Polling.
+Der eigentliche Gewinn ist dabei nicht der Takt, sondern der Datenpfad: pro Shop der
+JSON-Endpoint, den die Seite selbst nutzt (wenige KB statt 1–5 MB HTML), mit
+HTML-Fallback. Nicht der Takt entscheidet über Sekunden, sondern diese Abkürzung.
+
+**Händler-Erkennung.** Ein Offline-Werkzeug (`tools/discover_shops.py`) zieht
+Händlerkandidaten aus Preisvergleichs-Händlerlisten und prüft sie deterministisch
+(HTTPS, robots.txt, Produkt und Preis auf der Seite, kein Bot-Schutz). Aufgenommen
+wird ein Kandidat erst mit Fixture und bestandenem Testlauf; der Host-Kreis der
+Remote-Konfiguration bleibt unverändert.
+
+**Abnahme v1.5**
+* Live-Runde im Vordergrund ≤ 30 s für heiße Shops, ohne Anstieg von 403/429; ein
+  Ein-Minuten-Fenster wird damit praktisch immer erkannt. Im Hintergrund bleiben 15 min
+  (rund 7 % eines Minutenfensters) — die Hilfe nennt diese Zahl.
+* Ein Kandidat aus dem Bericht ist mit Liste, Fixture und Test aufgenommen, ohne die
+  Scan-Logik zu ändern.
+* Gates wie v1.4: Konfiguration, Logiktests, alle Smoke-Läufe, Signatur.
+
+### v1.6 — „Cloud" (2–4 Wochen)
 
 **Persönlicher Wächter, ohne Konto in der App.**
 Ein kleines Worker-Deployment (Cron 2–5 min, 6–8 Hot-Shops, ntfy-Push), das der Nutzer
@@ -198,7 +226,7 @@ mit einem Klick in sein eigenes Hosting legt. Kopplung per QR-Code: Die App zeig
 **Sicherheit:** Kein zentraler Server, kein geteiltes Geheimnis, Rate-Limit pro Token,
 Kill-Switch in der App, keine Secrets im Repository.
 
-**Abnahme v1.5**
+**Abnahme v1.6**
 * Zwei Geräte, ein Wächter: Alarm kommt an, wenn die App geschlossen ist.
 * Fremdes Token wird abgelehnt; fehlendes Token ebenfalls.
 * Ausfall des Wächters ist im HUD sichtbar, lokaler Scan läuft weiter.

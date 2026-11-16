@@ -4,7 +4,7 @@ Wird von der App (main.py) und vom Hintergrund-Service (service.py) benutzt.
 Der Service laeuft in einem eigenen Prozess ohne UI - dort darf kein Kivy
 importiert werden, deshalb liegt diese Logik hier getrennt.
 """
-import os, sys, json, re, time, random, threading, traceback, hashlib
+import os, sys, json, re, time, random, threading, traceback, hashlib, zlib
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
@@ -92,6 +92,36 @@ WEBHOOK_PRESETS = ("ntfy","telegram","discord","generisch")
 # in HAENDLER vorkommen; unbekannte werden ignoriert.
 HOT_SHOPS = ["Amazon DE","MediaMarkt DE","Saturn DE","Otto DE",
              "Cyberport DE","Coolblue DE"]
+# ── Live-Taktung ────────────────────────────────────────────────────
+# "Live" heisst hier nicht Push (kein Shop bietet einen Kanal), sondern:
+# faellige Shops in kurzen Runden. Ein Shop, der zuletzt kaufbar war, wird
+# alle 30 s geprueft, ein stiller alle 4 Minuten, ein gestoerter erst nach
+# der Ruhepause. Das Drehbuch steht in docs/RELEASE_1_5.md, Abschnitt 2.
+LIVE_TAKT = 20              # Sekunden zwischen zwei Live-Runden (Vordergrund)
+LIVE_TAKT_MOBIL = 60        # ohne WLAN: seltener, aber nicht aus
+LIVE_HEISS_S = 30           # letzter Zustand kaufbar -> dran bleiben
+LIVE_NORMAL_S = 240         # unauffaellig -> 4 Minuten
+LIVE_GESTOERT_S = 720       # Fehlerserie -> 12 Minuten
+LIVE_RUHE_S = 600           # Circuit Breaker nach Bot-Schutz/Rate-Limit
+LIVE_JITTER = 0.2           # +/- 20 %, damit nicht alle gleichzeitig aufschlagen
+LIVE_BUDGET = 40            # Obergrenze Requests pro Minute im Vordergrund
+# Aus dem Minutenbudget und dem Takt folgt die Rundengroesse (40 / 3 Runden).
+LIVE_RUNDE_MAX = 12
+# ── Drop-Fenster ────────────────────────────────────────────────────
+# Bekannte Auflegezeiten: PS Direct stellt um 10:00 ein, MM/S schalten
+# Kontingente in Schueben frei. In diesen Minuten entscheidet ein 10-s-Takt
+# darueber, ein Ein-Minuten-Fenster ueberhaupt zu sehen; ausserhalb waere er
+# nur Last. Zeiten sind lokale Ortszeit, minutengenau, Ende inklusive.
+LIVE_FENSTER_S = 10         # Takt innerhalb eines Drop-Fensters
+LIVE_TAKT_FENSTER = 10      # Rundentakt, solange ein Fenster offen ist
+DROP_FENSTER = {
+    "PS Direct DE": ((9, 50, 10, 25),),
+    "PS Direct AT": ((9, 50, 10, 25),),
+    "MediaMarkt DE": ((9, 0, 11, 0),),
+    "MediaMarkt AT": ((9, 0, 11, 0),),
+    "Saturn DE": ((9, 0, 11, 0),),
+    "Saturn AT": ((9, 0, 11, 0),),
+}
 BG_STATUS_FILE = "ps5pro_bg.json"
 HEALTH_FILE = "ps5pro_health.json"
 CRASH_FILE = "ps5pro_crash.log"
@@ -1506,6 +1536,153 @@ def bg_intervall(sekunden, minimum=900):
     try: s = int(sekunden)
     except (TypeError, ValueError): s = minimum
     return max(minimum, s)
+
+
+def _als_datetime(jetzt=None):
+    """Akzeptiert datetime, Zeitstempel oder None (dann Ortszeit jetzt)."""
+    if jetzt is None: return datetime.now()
+    if isinstance(jetzt, datetime): return jetzt
+    try: return datetime.fromtimestamp(float(jetzt))
+    except (TypeError, ValueError, OSError, OverflowError): return datetime.now()
+
+
+def im_drop_fenster(name, jetzt=None):
+    """True, wenn dieser Shop gerade in einem bekannten Auflegefenster liegt.
+
+    Nur Shops aus ``DROP_FENSTER`` bekommen den dichteren Takt. Ein Fenster
+    ueber Mitternacht ist erlaubt, wird hier aber nicht gebraucht.
+    """
+    fenster = DROP_FENSTER.get(str(name or ""))
+    if not fenster: return False
+    d = _als_datetime(jetzt)
+    minute = d.hour * 60 + d.minute
+    for sh, sm, eh, em in fenster:
+        von, bis = sh * 60 + sm, eh * 60 + em
+        if (von <= minute <= bis) if von <= bis else (minute >= von or minute <= bis):
+            return True
+    return False
+
+
+def live_takt(haendler, aktiv=None, jetzt=None):
+    """Rundentakt: im Drop-Fenster 10 s, sonst ``LIVE_TAKT``.
+
+    Das Fenster ist eine Information ueber den Shop, keine Regel ueber die
+    Uhr: ohne aktiven Shop in einem Fenster bleibt es beim normalen Takt.
+    """
+    namen = set(aktiv) if aktiv else None
+    for h in haendler or []:
+        name = h.get("name")
+        if not name or (namen is not None and name not in namen): continue
+        if im_drop_fenster(name, jetzt): return LIVE_TAKT_FENSTER
+    return LIVE_TAKT
+
+
+def meldebereit(r):
+    """Treffer mit strukturiertem Beleg darf ohne Warten auf die Verifikation melden.
+
+    Der zweite Abruf bleibt Pflicht und laeuft direkt danach; er kann den
+    Treffer zurueckstufen (``verify == "weg"``). Gemeldet wird vorher nur,
+    was aus JSON-LD oder einer belegten Remote-Regel stammt, ausdruecklich
+    ``in_stock`` ist und einen plausiblen Preis hat. Text-Marker allein warten
+    wie bisher — ein Alarm muss stimmen.
+    """
+    if not isinstance(r, dict) or r.get("klass") != "hit": return False
+    if r.get("preis") is None or ist_gebraucht(r.get("condition")): return False
+    if r.get("avail_state") != "in_stock": return False
+    if r.get("stock_source") not in ("jsonld", "remote"): return False
+    try: return bool(MIN_PREIS <= float(r["preis"]) <= 1500)
+    except (TypeError, ValueError): return False
+
+
+def _jitter(name):
+    """Stabiler Versatz pro Shop (-20 % .. +20 %).
+
+    Bewusst crc32 statt ``hash``: Pythons String-Hash ist pro Prozess
+    randomisiert, die Taktung waere dann zwischen App und Dienst verschieden
+    und Tests nicht reproduzierbar.
+    """
+    try: roh = zlib.crc32(str(name).encode("utf-8")) % 2001
+    except Exception: roh = 0
+    return (roh / 1000.0 - 1.0) * LIVE_JITTER
+
+
+def shop_intervall(name, health_daten=None, jetzt=None):
+    """Sekunden bis zur naechsten Pruefung - aus Zustand und Stoerung.
+
+    Die Reihenfolge ist Absicht: eine Sperre schlaegt den Trefferzustand,
+    sonst wuerde ein 403-Shop im 30-s-Takt weiter angeklopft.
+    """
+    e = health_daten.get(name) if isinstance(health_daten, dict) else None
+    e = e if isinstance(e, dict) else {}
+    status = str(e.get("last_status") or "")
+    if status == "challenge":
+        soll = LIVE_RUHE_S
+    elif status in ("parser", "error") and int(e.get("fail_streak") or 0) >= 2:
+        soll = LIVE_GESTOERT_S
+    elif im_drop_fenster(name, jetzt):
+        soll = LIVE_FENSTER_S
+    elif status in ("hit", "expensive"):
+        soll = LIVE_HEISS_S
+    else:
+        soll = LIVE_NORMAL_S
+    return max(5, int(round(soll * (1.0 + _jitter(name)))))
+
+
+def faellige_haendler(haendler, health_daten=None, jetzt=None,
+                      budget=None, aktiv=None):
+    """Shops der naechsten Live-Runde - die ueberfaelligsten zuerst.
+
+    ``budget`` ist die Rundengroesse, nicht das Minutenbudget: eine Runde
+    startet hoechstens alle ``LIVE_TAKT`` Sekunden. Weil absteigend nach
+    Ueberfaelligkeit sortiert und dann abgeschnitten wird, verhungert kein
+    Shop - was heute nicht dran war, steht in der naechsten Runde oben.
+    """
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    namen = set(aktiv) if aktiv else None
+    daten = health_daten if isinstance(health_daten, dict) else {}
+    faellig = []
+    for h in haendler or []:
+        name = h.get("name")
+        if not name: continue
+        if namen is not None and name not in namen: continue
+        e = daten.get(name) if isinstance(daten.get(name), dict) else {}
+        try: letzte = float(e.get("last_ts") or 0)
+        except (TypeError, ValueError): letzte = 0.0
+        alter = max(0.0, jetzt - letzte)
+        soll = shop_intervall(name, daten, jetzt)
+        # 0.5 s Toleranz: ein gerundetes Intervall soll nicht eine Runde warten.
+        if alter + 0.5 >= soll:
+            faellig.append((alter - soll, name, h))
+    faellig.sort(key=lambda t: (-t[0], t[1]))
+    out = [h for _, _, h in faellig]
+    if budget is not None:
+        try: out = out[:max(1, int(budget))]
+        except (TypeError, ValueError): pass
+    return out
+
+
+def health_uebersicht(health_daten=None, jetzt=None):
+    """Kompakte Auswertung pro Shop: Quote, Fehlerserie, Alter der Pruefung.
+
+    Rein lokal, kein Versand. Was hier fehlt, ist unbekannt - nicht gesund.
+    """
+    daten = health_daten if isinstance(health_daten, dict) else health().all()
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    out = {}
+    for name, e in (daten or {}).items():
+        if not isinstance(e, dict): continue
+        try: letzte = float(e.get("last_ts") or 0)
+        except (TypeError, ValueError): letzte = 0.0
+        checks = int(e.get("checks") or 0)
+        erfolge = int(e.get("successes") or 0)
+        out[name] = {"status": e.get("last_status") or "unknown",
+                     "checks": checks, "erfolge": erfolge,
+                     "quote": round(100.0 * erfolge / checks, 1) if checks else 0.0,
+                     "fail_streak": int(e.get("fail_streak") or 0),
+                     "alter": int(max(0.0, jetzt - letzte)) if letzte else None}
+    return out
+
+
 class History:
     def __init__(self):
         self.path=os.path.join(_data_dir(),HISTORY_FILE)

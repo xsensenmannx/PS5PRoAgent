@@ -1426,6 +1426,156 @@ def play_rebrand_tests():
     check("Store-Screenshots", len(shots) >= 2, True)
 
 
+def live_tests():
+    """Live-Taktung (v1.5): Intervalle, Faelligkeit, Budget, Fairness."""
+    # 15:00 Ortszeit: ausserhalb aller Drop-Fenster, sonst kippt der Takt.
+    jetzt = time.mktime((2026, 11, 16, 15, 0, 0, 0, 0, -1))
+
+    def nah(wert, ziel):
+        return abs(wert - ziel) <= ziel * core.LIVE_JITTER + 1
+
+    daten = {
+        "Heiss DE": {"last_status": "hit", "last_ts": jetzt - 40,
+                     "checks": 10, "successes": 9, "fail_streak": 0},
+        "Still DE": {"last_status": "unavail", "last_ts": jetzt - 10,
+                     "checks": 5, "successes": 5, "fail_streak": 0},
+        "Sperre DE": {"last_status": "challenge", "last_ts": jetzt - 60,
+                      "checks": 4, "successes": 3, "fail_streak": 1},
+        "Kaputt DE": {"last_status": "parser", "last_ts": jetzt - 100,
+                      "checks": 6, "successes": 4, "fail_streak": 2},
+        "Einmal DE": {"last_status": "parser", "last_ts": jetzt - 100,
+                      "checks": 2, "successes": 1, "fail_streak": 1},
+    }
+    check("Live heiss 30 s",
+          nah(core.shop_intervall("Heiss DE", daten, jetzt), core.LIVE_HEISS_S), True)
+    check("Live normal 240 s",
+          nah(core.shop_intervall("Still DE", daten, jetzt), core.LIVE_NORMAL_S), True)
+    check("Live Sperre 600 s",
+          nah(core.shop_intervall("Sperre DE", daten, jetzt), core.LIVE_RUHE_S), True)
+    check("Live Fehlerserie 720 s",
+          nah(core.shop_intervall("Kaputt DE", daten, jetzt), core.LIVE_GESTOERT_S), True)
+    check("Live einzelner Parserfehler bleibt normal",
+          nah(core.shop_intervall("Einmal DE", daten, jetzt), core.LIVE_NORMAL_S), True)
+    check("Live unbekannter Shop normal",
+          nah(core.shop_intervall("Nirgends DE", daten, jetzt), core.LIVE_NORMAL_S), True)
+    check("Live Sperre schlaegt Trefferzustand",
+          core.shop_intervall("Sperre DE",
+                              {"Sperre DE": {"last_status": "challenge",
+                                             "last_ts": jetzt, "fail_streak": 0}},
+                              jetzt) > core.LIVE_HEISS_S, True)
+    check("Live Jitter stabil",
+          core.shop_intervall("Heiss DE", daten, jetzt),
+          core.shop_intervall("Heiss DE", daten, jetzt))
+    alle = [core.shop_intervall(h["name"], {}, jetzt) for h in core.HAENDLER]
+    check("Live Jitter im Band",
+          all(core.LIVE_NORMAL_S * (1 - core.LIVE_JITTER) <= v
+              <= core.LIVE_NORMAL_S * (1 + core.LIVE_JITTER) + 1 for v in alle), True)
+
+    sh = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
+    due = {"A": {"last_status": "unavail", "last_ts": jetzt - 1000},
+           "B": {"last_status": "unavail", "last_ts": jetzt - 300},
+           "C": {"last_status": "unavail", "last_ts": jetzt - 5}}
+    check("Live nur faellige Shops",
+          [h["name"] for h in core.faellige_haendler(sh, due, jetzt)], ["A", "B"])
+    check("Live ueberfaelligste zuerst",
+          [h["name"] for h in core.faellige_haendler(sh, due, jetzt)][0], "A")
+    check("Live Rundengroesse deckelt",
+          [h["name"] for h in core.faellige_haendler(sh, due, jetzt, budget=1)], ["A"])
+    check("Live Auswahl filtert",
+          [h["name"] for h in core.faellige_haendler(sh, due, jetzt, aktiv={"B"})],
+          ["B"])
+    check("Live ohne Health alle faellig",
+          len(core.faellige_haendler(sh, {}, jetzt)), 3)
+    check("Live Budget null wird eins",
+          len(core.faellige_haendler(sh, {}, jetzt, budget=0)), 1)
+
+    # Fairness: 42 Shops, 5 pro Runde, 20-s-Takt - kein Shop bleibt liegen.
+    gesund = {}
+    gesehen = set()
+    t = jetzt
+    for _ in range(60):
+        for h in core.faellige_haendler(core.HAENDLER, gesund, t, budget=5):
+            gesehen.add(h["name"])
+            e = gesund.setdefault(h["name"], {"checks": 0, "successes": 0})
+            e["last_status"] = "unavail"; e["last_ts"] = t
+            e["checks"] += 1; e["successes"] += 1
+        t += core.LIVE_TAKT
+    check("Live kein Shop verhungert", len(gesehen), len(core.HAENDLER))
+
+    ueb = core.health_uebersicht(daten, jetzt)
+    check("Health-Quote", ueb["Heiss DE"]["quote"], 90.0)
+    check("Health-Status", ueb["Sperre DE"]["status"], "challenge")
+    check("Health-Alter", ueb["Heiss DE"]["alter"], 40)
+    check("Health kennt nur Gesehenes", "Nirgends DE" in ueb, False)
+
+    # ── Drop-Fenster ────────────────────────────────────────────────
+    def ts(h, m):
+        return time.mktime((2026, 11, 16, h, m, 0, 0, 0, -1))
+
+    check("Fenster PS Direct 10:00", core.im_drop_fenster("PS Direct DE", ts(10, 0)), True)
+    check("Fenster PS Direct 09:00", core.im_drop_fenster("PS Direct DE", ts(9, 0)), False)
+    check("Fenster PS Direct 10:25 Rand", core.im_drop_fenster("PS Direct DE", ts(10, 25)), True)
+    check("Fenster MM 09:30", core.im_drop_fenster("MediaMarkt DE", ts(9, 30)), True)
+    check("Fenster MM 11:30", core.im_drop_fenster("MediaMarkt DE", ts(11, 30)), False)
+    check("Fenster Shop ohne Zeitplan", core.im_drop_fenster("Amazon DE", ts(10, 0)), False)
+    check("Fenster unbekannter Shop", core.im_drop_fenster("Nirgends DE", ts(10, 0)), False)
+    try:
+        core.DROP_FENSTER["Nacht DE"] = ((23, 30, 0, 30),)
+        check("Fenster ueber Mitternacht", core.im_drop_fenster("Nacht DE", ts(23, 50)), True)
+        check("Fenster ueber Mitternacht frueh", core.im_drop_fenster("Nacht DE", ts(0, 10)), True)
+        check("Fenster ueber Mitternacht aussen", core.im_drop_fenster("Nacht DE", ts(1, 0)), False)
+    finally:
+        core.DROP_FENSTER.pop("Nacht DE", None)
+
+    im_fenster = {"PS Direct DE": {"last_status": "hit", "last_ts": ts(9, 59)}}
+    check("Intervall im Fenster 10 s",
+          nah(core.shop_intervall("PS Direct DE", im_fenster, ts(10, 0)),
+              core.LIVE_FENSTER_S), True)
+    check("Intervall ausserhalb Fenster 30 s",
+          nah(core.shop_intervall("PS Direct DE", im_fenster, ts(9, 0)),
+              core.LIVE_HEISS_S), True)
+    check("Sperre schlaegt Fenster",
+          nah(core.shop_intervall("PS Direct DE",
+                                  {"PS Direct DE": {"last_status": "challenge",
+                                                    "last_ts": ts(9, 0)}}, ts(10, 0)),
+              core.LIVE_RUHE_S), True)
+    check("Rundentakt im Fenster",
+          core.live_takt(core.HAENDLER, {"PS Direct DE"}, ts(10, 0)),
+          core.LIVE_TAKT_FENSTER)
+    check("Rundentakt ausserhalb",
+          core.live_takt(core.HAENDLER, {"PS Direct DE"}, ts(9, 0)), core.LIVE_TAKT)
+    check("Rundentakt respektiert Auswahl",
+          core.live_takt(core.HAENDLER, {"Amazon DE"}, ts(10, 0)), core.LIVE_TAKT)
+
+    # ── Sofortmeldung bei belegtem Treffer ──────────────────────────
+    belegt = {"klass": "hit", "preis": 899.99, "avail_state": "in_stock",
+              "stock_source": "jsonld", "condition": "new"}
+    check("Sofortmeldung JSON-LD", core.meldebereit(dict(belegt)), True)
+    check("Sofortmeldung Remote-Regel",
+          core.meldebereit({**belegt, "stock_source": "remote"}), True)
+    check("Sofortmeldung nur Text",
+          core.meldebereit({**belegt, "stock_source": "text"}), False)
+    check("Sofortmeldung ohne Zustand",
+          core.meldebereit({**belegt, "avail_state": "unknown"}), False)
+    check("Sofortmeldung Marktabholung",
+          core.meldebereit({**belegt, "avail_state": "pickup_only"}), False)
+    check("Sofortmeldung Gebrauchtware",
+          core.meldebereit({**belegt, "condition": "used"}), False)
+    check("Sofortmeldung ohne Preis", core.meldebereit({**belegt, "preis": None}), False)
+    check("Sofortmeldung kein Treffer",
+          core.meldebereit({**belegt, "klass": "unavail"}), False)
+
+    main_q = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+    check("App taktet live", "faellige_haendler" in main_q, True)
+    check("App nutzt LIVE_TAKT", "LIVE_TAKT" in main_q, True)
+    check("App ohne fixe 60-s-Runde", "jetzt+60" not in main_q, True)
+    check("App ohne Hot-Shop-Fixliste", "_schnell_shops" not in main_q, True)
+    check("App zeigt faellige Shops", "F\u00c4LLIG" in main_q, True)
+    check("App meldet belegte Treffer sofort", "meldebereit" in main_q, True)
+    check("App kennt Drop-Fenster", "live_takt" in main_q, True)
+    check("App zaehlt Nachtrag nicht doppelt", "self._process(r,nach)" in main_q, True)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -1440,6 +1590,7 @@ if __name__ == "__main__":
         capture_helper_tests()
         v13_tests()
         v14_tests()
+        live_tests()
         spec_tests()
         play_rebrand_tests()
     finally:

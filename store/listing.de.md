@@ -23,8 +23,8 @@ bewegt?
   Telegram oder Discord
 • Alarm-Regeln: nur sofort verfügbar, nur echte Tiefstpreise, Ruhezeit, Händler
   stummschalten, eigene Preisgrenze
-• Schnell-Modus: prüft die sechs wichtigsten Shops im Minutentakt, solange die App
-  offen ist
+• Live-Modus: prüft bei geöffneter App alle 20 Sekunden die fälligen Shops –
+  heiße Händler alle 30 Sekunden (im Hintergrund alle 15 Minuten)
 • Hintergrund-Scan mit sichtbarer Benachrichtigung, auch bei geschlossenem Display
 • Preis- und Verfügbarkeitsverlauf bleiben lokal auf dem Gerät
 

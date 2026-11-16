@@ -41,7 +41,8 @@ from scan_core import (
     alarm_erlaubt, alarm_ereignis, ist_gebraucht, install_crash_hook, read_crash_log,
     lade_shop_config, aktualisiere_shop_config, flush_http_cache,
     webhook_senden, webhook_preset, redact_url, sende_webhook_alarm,
-    verify_treffer, schnellscan_haendler, HOT_SHOPS, CHANCE_STATES,
+    verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
+    live_takt, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL, LIVE_RUNDE_MAX,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -308,9 +309,9 @@ def android_insets():
 def android_ist_wlan():
     """True, wenn das aktive Netz WLAN ist (oder die Pruefung nicht geht).
 
-    Der Schnell-Modus fragt alle 60 s sechs Shops ab; ohne WLAN waere das
-    mobil schnell teuer. Ist die Pruefung auf dem Geraet nicht verfuegbar,
-    bleibt der Modus lieber an, statt still gar nicht zu laufen.
+    Der Live-Modus fragt alle 20 s die faelligen Shops ab (Runde gedeckelt);
+    ohne WLAN waere das mobil schnell teuer. Ist die Pruefung auf dem Geraet
+    nicht verfuegbar, bleibt der Modus lieber an, statt still nicht zu laufen.
     """
     if platform!="android": return True
     try:
@@ -1587,8 +1588,12 @@ class MainUI(FloatLayout):
                                       if self._scan_total else "SCANNING")
             self.radar_hud_left.color=PS1_CYAN
         elif self.schnellscan:
-            n=len(self._schnell_shops())
-            self.radar_hud_left.text=f"SCHNELLSCAN · {n} SHOPS"
+            # Fällig statt fix: die Zahl ist die Wahrheit der nächsten Runde.
+            n=len(self._faellige_shops())
+            rest=int(max(0,self._fast_next-time.time())) if self._fast_next else 0
+            fenster=any(im_drop_fenster(name) for name in self.active_haendler)
+            self.radar_hud_left.text=(f"SCHNELLSCAN · {n} FÄLLIG · {rest:02d}S"
+                                      +(" · FENSTER" if fenster else ""))
             self.radar_hud_left.color=CARD_STATUS["hit"]
         else:
             self.radar_hud_left.text=f"{len(HAENDLER)} HÄNDLER · DE + AT"
@@ -1732,8 +1737,12 @@ class MainUI(FloatLayout):
             self.results_status.text=txt+(f" · BG {bg}" if bg else "")
         return True
     # ── Schnell-Modus ───────────────────────────────────────────────
-    def _schnell_shops(self):
-        return schnellscan_haendler(HAENDLER,self.active_haendler)
+    def _faellige_shops(self):
+        """Fällige Shops der aktiven Auswahl - überfällige zuerst."""
+        try: daten=health().all()
+        except Exception: daten={}
+        return faellige_haendler(HAENDLER,daten,jetzt=time.time(),
+                                 budget=LIVE_RUNDE_MAX,aktiv=self.active_haendler)
     def _toggle_schnellscan(self):
         self.schnellscan=not self.schnellscan
         self.settings.set("schnellscan",self.schnellscan)
@@ -1744,7 +1753,7 @@ class MainUI(FloatLayout):
         self._update_radar_hud()
     def _fast_start(self):
         if not self.schnellscan: return
-        self._fast_next=time.time()+60
+        self._fast_next=time.time()+live_takt(HAENDLER,self.active_haendler)
         if self._fast_event is None:
             self._fast_event=Clock.schedule_interval(self._fast_tick,1.0)
         self._update_radar_hud()
@@ -1757,13 +1766,13 @@ class MainUI(FloatLayout):
         if self.scanning: return True
         jetzt=time.time()
         if jetzt<self._fast_next: return True
-        shops=self._schnell_shops()
+        shops=self._faellige_shops()
         if not shops:
-            self._fast_next=jetzt+60; return True
+            self._fast_next=jetzt+live_takt(HAENDLER,self.active_haendler); return True
         if self.schnellscan_wlan and not android_ist_wlan():
             # Mobilnetz: seltener pruefen, aber nicht ganz aussetzen.
-            self._fast_next=jetzt+120; return True
-        self._fast_next=jetzt+60
+            self._fast_next=jetzt+LIVE_TAKT_MOBIL; return True
+        self._fast_next=jetzt+live_takt(HAENDLER,self.active_haendler)
         self._scan_start(nur=[h["name"] for h in shops])
         return True
     def _cycle_font_scale(self):
@@ -2600,13 +2609,19 @@ class MainUI(FloatLayout):
                 try: r=f.result()
                 except Exception as e: r=_res(futs[f],None,"error",0,str(e)[:60])
                 if r is None: continue
-                # Ein Treffer wird vor der Anzeige einmal gegengeprueft. Das
-                # kostet 2 s pro Treffer (selten), verhindert aber falsche
-                # Alarme durch veraltete Shop-Antworten.
+                # Ein Treffer wird gegengeprueft - aber nur, wer aus einem
+                # strukturierten Beleg stammt, muss darauf warten. Der Rest
+                # wartet wie bisher: ein Alarm muss stimmen.
                 if r.get("klass")=="hit" and not ist_gebraucht(r.get("condition")):
+                    r["_detect_ts"]=time.time()
+                    gemeldet=False
+                    if meldebereit(r):
+                        self.queue.put((tok,dict(r),False)); gemeldet=True
                     try: verify_treffer(futs[f],r,cancel)
                     except Exception as e: print(f"[Verify] {r.get('haendler','?')}: {e}")
-                self.queue.put((tok,r))
+                    self.queue.put((tok,r,gemeldet))
+                    continue
+                self.queue.put((tok,r,False))
         finally:
             # Der Cache puffert 304-Ergebnisse waehrend des Scans; hier wird
             # die Datei genau einmal statt pro Shop geschrieben.
@@ -2615,16 +2630,29 @@ class MainUI(FloatLayout):
             ex.shutdown(wait=False, cancel_futures=True)
     def _drain_queue(self,dt):
         while True:
-            try: tok,r=self.queue.get_nowait()
+            try: tok,r,nach=self.queue.get_nowait()
             except queue.Empty: break
             if tok==self._scan_token and self.scanning:
-                try: self._process(r)
+                try: self._process(r,nach)
                 except Exception as e: print(f"[Scan] {r.get('haendler','?')}: {e}")
         if not self.scanning: self._drain_event=None; return False
         return True
-    def _process(self,r):
+    def _process(self,r,nach=False):
         if not self.scanning: return
-        self._scan_done+=1; name=r.get("haendler","?")
+        name=r.get("haendler","?")
+        if nach:
+            # Nachtrag der Verifikation: Karte korrigieren, nicht erneut melden
+            # und den Fortschritt nicht doppelt zaehlen.
+            alt=self.scanned.get(name) or {}
+            for marke in ("_is_new","_restock"):
+                if alt.get(marke): r[marke]=True
+            self.scanned[name]=r
+            self._update_blip(name,r.get("klass") or "unknown")
+            if r.get("verify")=="weg":
+                self._toast(f"{name}: ZURÜCKGESTUFT",color=PS1_YELLOW)
+            self._rerender_throttled()
+            return
+        self._scan_done+=1
         self._update_radar_hud()
         try:
             if r["klass"] not in ("error","challenge","unavail","parser","chance"):
@@ -2703,9 +2731,11 @@ class MainUI(FloatLayout):
         if self.filter_mode=="verfuegbar":
             self.results_count.text=f"{len(hits)}/{len(self.scanned)}"
         if self.auto_scan: self.next_scan_at=time.time()+self.auto_interval
-        # Nach jedem Lauf (auch dem manuellen) mindestens eine Minute Ruhe,
-        # sonst schiesst der Schnell-Modus direkt hinterher.
-        self._fast_next=time.time()+60
+        # Nach einem vollen Lauf Ruhe; im Live-Modus nur der naechste Takt,
+        # sonst schiesst der Schnell-Modus nicht hinterher, sondern wartet
+        # seine Runde ab (20 s, im Drop-Fenster 10 s).
+        self._fast_next=time.time()+(live_takt(HAENDLER,self.active_haendler)
+                                     if self.schnellscan else 60)
 # ══════════ ROOT + APP ══════════
 class RootLayout(FloatLayout):
     def __init__(self,**kw):

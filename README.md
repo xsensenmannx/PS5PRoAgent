@@ -106,9 +106,15 @@ Signal, Preistiefs und den Preisverlauf:
   Cache geprüft. Die Karte zeigt `BESTÄTIGT`, `UNGEPRÜFT` oder `ABWEICHUNG`;
   ist der Shop beim zweiten Abruf ausverkauft, wird der Treffer zurückgestuft.
   Optional meldet die App nur bestätigte Treffer.
-* **Schnell-Modus**: Bei geöffneter App prüft sie alle 60 s nur die heißen
-  Shops (Amazon, MediaMarkt, Saturn, Otto, Cyberport, Coolblue) — im WLAN,
-  mit Backoff nach Bot-Schutz und ohne den vollen Scan zu überlappen.
+* **Live-Modus (v1.5)**: Bei geöffneter App startet alle 20 s eine Runde mit den
+  fälligen Händlern — heiße Shops (letzter Zustand kaufbar) alle 30 s, stille
+  alle 4 min, gestörte erst nach der Ruhepause; höchstens 12 Shops je Runde,
+  damit das Budget von 40 Requests/Minute hält. Die Kopfzeile zeigt
+  `SCHNELLSCAN · 4 FÄLLIG · 20S`. In bekannten Auflegefenstern (PS Direct
+  09:50–10:25, MediaMarkt/Saturn 09:00–11:00) taktet sie auf 10 s und zeigt `FENSTER`.
+  Treffer aus JSON-LD melden sofort, die Gegenprüfung läuft parallel und stuft bei
+  Ausverkauf zurück. Im WLAN, mit Backoff nach Bot-Schutz und ohne Überlappung mit dem
+  vollen Scan. Im Hintergrund bleibt es bei 15 Minuten.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
   Treffer eines Laufs werden gruppiert.
@@ -182,7 +188,7 @@ tools/ci_sign_apk.sh          signiert die APK mit dem festen Release-Schlüssel
 tools/ci_log_failure.sh       zeigt bei einem CI-Fehler den Buildozer-Log
 docs/screenshots/             Screenshots und Scan-GIF fuer dieses README
 docs/KONZEPT.md               Produktkonzept, Roadmap und bewusste Nicht-Ziele
-docs/PLAY_STORE.md            Launchplan, Policy-Risiken und Play-Checkliste
+docs/RELEASE_1_5.md           Etappenplan 1.5: Live-Überwachung und Händler-Erkennungdocs/PLAY_STORE.md            Launchplan, Policy-Risiken und Play-Checkliste
 docs/privacy.html             Datenschutzseite fuer GitHub Pages / Play
 docs/PRIVACY.md               Datenschutzerklaerung als Markdown
 store/                        Listing-Texte, Data-Safety- und Rating-Antworten
@@ -264,6 +270,13 @@ Aktueller Stand und Archiv:
   optionaler 70-%-Schwelle, Beleg-Ausschnitt mit Hash, GTIN/EAN- und
   Bundle-Erkennung, Marketplace-Hinweis und ein 304-Cache mit maximal sechs
   Stunden Alter. Dazu 777 Logiktests.
+* **v1.5.0 (unveröffentlicht, main)** – Live-Taktung statt starrer Runden:
+  Scheduler im Kern (`shop_intervall`, `faellige_haendler`) mit 30 s für heiße,
+  4 min für stille und 12 min für gestörte Shops, Circuit Breaker nach
+  Bot-Schutz, stabilem Jitter und Rundendeckel; dazu eine Health-Auswertung pro
+  Shop. Der Schnell-Modus verhält sich jetzt wie ein Live-Modus (20-s-Takt,
+  fällige statt sechs feste Shops), kennt Drop-Fenster mit 10-s-Takt und meldet
+  belegte Treffer sofort, während die Verifikation parallel läuft. 850 Logiktests.
 * **Review-Fixes (unveröffentlicht, main)** – `OnlineOnly` und
   `LimitedAvailability` zählen wie `InStock`, `Discontinued` wie `SoldOut`;
   Vorbestellungen laufen wieder über den v1.3-Pfad „NUR SOFORT"; nur belegte

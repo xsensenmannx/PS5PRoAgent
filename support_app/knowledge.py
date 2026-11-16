@@ -79,7 +79,7 @@ ENTRIES = [
         "steps": [
             "Preisgrenze anheben oder „nur bestätigte“ kurz ausschalten.",
             "Konfidenz-Schwelle auf 0 setzen und beobachten, was gemeldet wird.",
-            "Schnellmodus für die sechs heißen Shops aktivieren.",
+            "Live-Modus einschalten (Schalter „Schnellscan“): Er prüft zuerst die heißen Shops.",
             "Shop-Health prüfen: dauerhafte 403/429 sind keine Trefferquelle.",
         ],
         "note": "Ein Treffer braucht einen zweiten bestätigten Abruf — das kostet Zeit, verhindert aber Falschalarme.",
@@ -202,9 +202,11 @@ ENTRIES = [
             "zu langsam", "haeufigkeit", "60 minuten",
         ],
         "answer": (
-            "5 bis 60 Minuten sind einstellbar, dazu ein Schnellmodus für sechs "
-            "heiße Shops im Minutentakt. Kürzer heißt nicht besser: Shops "
-            "begrenzen Requests, und Sperren kosten mehr Zeit als sie sparen."
+            "5 bis 60 Minuten sind einstellbar, dazu der Live-Modus: bei "
+            "geöffneter App alle 20 Sekunden die fälligen Shops, heiße Shops "
+            "alle 30 Sekunden. Im Hintergrund bleiben es 15 Minuten. Kürzer "
+            "heißt nicht besser: Shops begrenzen Requests, und Sperren kosten "
+            "mehr Zeit als sie sparen."
         ),
         "steps": [
             "15 Minuten ist ein guter Kompromiss für den Alltag.",
