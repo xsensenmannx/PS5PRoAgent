@@ -186,7 +186,7 @@ HAENDLER = [
     _h("Otto AT","AT","https://www.otto.at/suche/playstation-5-pro-2tb/"),
     _h("GameStop AT","AT","https://www.gamestop.at/search?q=playstation+5+pro+konsole"),
     _h("Proshop AT","AT","https://www.proshop.at/Search?s=playstation+5+pro+2tb"),
-    _h("Amazon AT","AT","https://www.amazon.at/s?k=playstation+5+pro+2tb"),
+    _h("Amazon AT","AT","https://www.amazon.at/dp/B0FRYBZR91"),
     _h("Gameware AT","AT","https://www.gameware.at/suche?q=playstation+5+pro+konsole"),
     _h("shöpping.at","AT","https://www.shoepping.at/suche?q=playstation+5+pro+2tb"),
     _h("Geizhals AT","AT","https://geizhals.at/sony-playstation-5-pro-2tb-weiss-a3298140.html"),
@@ -386,7 +386,12 @@ BASE_HEADERS = {"Accept":"text/html,application/xhtml+xml,*/*;q=0.9",
 REFERERS = ["https://www.google.de/","https://www.google.at/","https://duckduckgo.com/"]
 CHALLENGE_PATTERNS = ["just a moment","checking your browser","pardon our interruption",
     "unusual traffic","verify you are human","access denied","cf-challenge",
-    "ddos protection","captcha","attention required"]
+    "ddos protection","captcha","attention required",
+    # Kasada (Otto) antwortet auf 4xx mit einem KPSDK-Fingerprint-Script statt
+    # einer Seite; Cloudflare liefert cf-chl/_cf_chl_opt. Ohne diese Marker
+    # stand bei Otto "HTTP 400" - das sieht nach kaputtem Parser aus, ist aber
+    # Bot-Schutz (gemessen 17.11.2026, otto.de/suche und otto.de/p).
+    "kpsdk","cf-chl","_cf_chl_opt","cdn-cgi/challenge-platform"]
 AUSVERKAUFT = ["nicht verfügbar","derzeit nicht verfügbar","ausverkauft","out of stock",
     "bald wieder verfügbar","nicht auf lager","liefertermin unbekannt","sold out",
     "currently unavailable","nicht bestellbar"]
@@ -633,6 +638,63 @@ def extract_meta_preis(html):
                 if p is not None and MIN_PREIS<=p<=1500: return p
         except re.error: continue
     return None
+# ── Amazon ───────────────────────────────────────────────────────────
+# Amazon liefert kein Product-JSON-LD: gemessen am 17.11.2026 auf amazon.de
+# und amazon.at jeweils 0 ld+json-Bloecke, dafuer 2,4 MB HTML. Preis und
+# Bestand stehen nur in der Kaufbox. Der generische Preis-Regex griff deshalb
+# irgendeine Euro-Zahl der Seite - gemessen 1.488,00 EUR aus einem
+# Fremdangebot, waehrend die Kaufbox 1.469,98 EUR zeigte. Dieser Pfad liest
+# ausschliesslich innerhalb der Kaufbox und laesst sonst den Preis offen.
+AMAZON_HOSTS = ("amazon.de", "amazon.at")
+AMAZON_PREIS_ANKER = ('id="corePrice_feature_div"',
+                      'id="corePriceDisplay_desktop_feature_div"',
+                      'id="apex_desktop"', 'id="buybox"')
+AMAZON_BESTAND_ANKER = 'id="availability"'
+AMAZON_PREIS_MAX = 1500
+
+
+def ist_amazon(url):
+    host = _host(url)
+    return any(host == a or host.endswith("." + a) for a in AMAZON_HOSTS)
+
+
+def extract_amazon(html):
+    """Preis und Bestand aus der Amazon-Kaufbox (kein JSON-LD vorhanden).
+
+    Rueckgabe mit ``None`` fuer alles, was die Seite nicht hergibt - ein
+    ausverkaufter oder gesperrter Artikel darf nicht als Preis geraten werden.
+    """
+    res = {"preis": None, "verfuegbar": None, "state": None}
+    text = html or ""
+    seg = ""
+    for anker in AMAZON_PREIS_ANKER:
+        i = text.find(anker)
+        if i >= 0:
+            seg = text[i:i + 4000]
+            break
+    if seg:
+        p = None
+        m = re.search(r'a-offscreen">([^<]{2,24})<', seg)
+        if m:
+            p = parse_preis_str(m.group(1))
+        if p is None:
+            # Ohne a-offscreen stehen Ganzzahl und Nachkommateil getrennt.
+            ganz = re.search(r'a-price-whole">([\d.]+)', seg)
+            bruch = re.search(r'a-price-fraction">(\d{1,2})', seg)
+            if ganz:
+                p = parse_preis_str(ganz.group(1).replace(".", "") + ","
+                                    + (bruch.group(1) if bruch else "00"))
+        if p is not None and MIN_PREIS <= p <= AMAZON_PREIS_MAX:
+            res["preis"] = p
+    i = text.find(AMAZON_BESTAND_ANKER)
+    if i >= 0:
+        roh = re.sub(r"<[^>]+>", " ", text[i:i + 1200])
+        v, explizit = _verfuegbarkeit_aus_text(roh)
+        if explizit:
+            res["verfuegbar"] = v
+            res["state"] = "in_stock" if v else "sold_out"
+    return res
+
 
 def _meta_availability_raw(html):
     pats = [
@@ -1056,6 +1118,18 @@ def _try_url(u, att, proxy=None, force=False):
                 meta["retry_after"]=_retry_after(r.headers.get("Retry-After"))
                 r.close(); return None,"HTTP 429",meta
             if r.status_code>=400:
+                # Kasada und Cloudflare verpacken ihre Sperre in eine kurze
+                # 4xx-Antwort. Nur bei diesen Codes den Anfang lesen, sonst
+                # bleibt es beim reinen Status - und ohne den Blick in den
+                # Body hiess es bei Otto "HTTP 400" statt "Bot-Schutz".
+                if r.status_code in (400,401,403,451,503):
+                    try:
+                        kopf=next(r.iter_content(2048),b"").decode(
+                            r.encoding or "utf-8",errors="replace")
+                    except Exception: kopf=""
+                    if kopf and detect_challenge(kopf[:3000].lower()):
+                        r.close()
+                        return None,"Bot-Schutz (HTTP %d)"%r.status_code,meta
                 r.close(); return None,f"HTTP {r.status_code}",meta
             roh,zu_gross=_read_capped(r)
             if zu_gross: return None,"Antwort zu gross",meta
@@ -1129,6 +1203,10 @@ def fetch_mit_cache(urls, cancel=None, force=False):
                     last="Bot-Challenge"; dauerhaft=True; break
                 return h,u,None,meta
             last=e
+            # Bot-Schutz schon im 4xx-Body erkannt (Kasada/Cloudflare): kein
+            # zweiter Versuch mit anderem User-Agent, das waere nur Last.
+            if e.startswith("Bot-Schutz"):
+                dauerhaft=True; break
             # 429: genau eine Chance, und nur wenn der Server nicht mehr als
             # RETRY_AFTER_MAX verlangt. Die Pause ist ueber STOP abrechbar.
             if e == "HTTP 429":
@@ -1208,6 +1286,7 @@ def scan_einen(h, cancel=None, force=False):
         if not pruefe_nur_konsole(html,s):
             return _res(h,None,"unknown",d,"nicht PS5 Pro 2TB",fu,
                         avail_state="unknown",stock_source="text")
+        amz = extract_amazon(html) if ist_amazon(fu or h["urls"][0]) else {}
         remote=remote_parser_ergebnis(html,h.get("parser"))
         meta_v,meta_sofort=extract_meta_verfuegbarkeit(html)
         meta_state=extract_meta_state(html)
@@ -1221,6 +1300,10 @@ def scan_einen(h, cancel=None, force=False):
             v=s.get("verfuegbar"); v_explizit=v is not None
             if state is None and s.get("state"):
                 state=s["state"]; quelle="jsonld"
+        if v is None and amz.get("verfuegbar") is not None:
+            v=amz["verfuegbar"]; v_explizit=True
+            if state is None and amz.get("state"):
+                state=amz["state"]; quelle="amazon"
         if v is None:
             v=meta_v; v_explizit=v is not None
             if state is None and meta_state:
@@ -1243,6 +1326,7 @@ def scan_einen(h, cancel=None, force=False):
             v=True; v_explizit=True
         p=remote.get("preis")
         if p is None: p=s.get("preis")
+        if p is None: p=amz.get("preis")
         if p is None: p=extract_meta_preis(html)
         # HTTP 200, Produkt erkannt, aber kein Preis: Das ist ein Parserfehler,
         # solange die Seite nicht ausdruecklich "nicht verfuegbar" sagt. Eine
@@ -1258,6 +1342,7 @@ def scan_einen(h, cancel=None, force=False):
                         bundle=bool(s.get("bundle")))
         signal=("remote" if remote.get("preis") is not None else
                 "jsonld" if s.get("preis") is not None else
+                "amazon" if amz.get("preis") is not None else
                 "meta" if p is not None else "text")
         sofort=remote.get("sofort")
         if sofort is None: sofort=s.get("sofort")
@@ -1722,17 +1807,35 @@ def dauer_text(sekunden):
     return f"{std} STD" if not minuten else f"{std} STD {minuten} MIN"
 
 
+def _iso_dt(iso):
+    """ISO-Zeitstempel als datetime; eine Stelle fuer alle Anzeigeformate."""
+    try: return datetime.fromisoformat(str(iso))
+    except (TypeError,ValueError): return None
+
+
 def kurz_zeit(iso):
     """ISO-Zeitstempel als '13.11., 10:35'; leer, wenn unbrauchbar."""
-    try: dt=datetime.fromisoformat(str(iso))
-    except (TypeError,ValueError): return ""
-    return dt.strftime("%d.%m., %H:%M")
+    dt=_iso_dt(iso)
+    return dt.strftime("%d.%m., %H:%M") if dt else ""
 
 
 def kurz_tag(iso):
     """Nur '13.11.' fuer enge Zeilen, sonst leer."""
-    text=kurz_zeit(iso)
-    return text.split(",")[0].strip() if text else ""
+    dt=_iso_dt(iso)
+    return dt.strftime("%d.%m.") if dt else ""
+
+
+def zeitraum_text(start, ende):
+    """'13.11., 10:35 – 10:36'; bei Tageswechsel mit zweitem Datum.
+
+    Das Datum steht nur einmal: vorher wurde dasselbe Datum zweimal
+    formatiert und die Zeile brach in der Detailansicht um.
+    """
+    a,b=_iso_dt(start),_iso_dt(ende)
+    if a is None and b is None: return ""
+    if a is None or b is None: return "?"
+    if a.date()==b.date(): return f"{a:%d.%m., %H:%M} – {b:%H:%M}"
+    return f"{a:%d.%m., %H:%M} – {b:%d.%m., %H:%M}"
 
 
 def event_zeile(e):
@@ -1755,18 +1858,32 @@ class Events:
     """Ringpuffer der Zustandswechsel (max. MAX_EVENTS), aelteste zuerst."""
     def __init__(self,path=None):
         self.path=path or os.path.join(_data_dir(),EVENTS_FILE)
+        self._stamp=self._datei_stamp()
         self.data=self._laden()
+    def _datei_stamp(self):
+        try: return (os.path.getmtime(self.path),os.path.getsize(self.path))
+        except OSError: return None
     def _laden(self):
         try:
             with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
         except Exception: return []
         return [dict(e) for e in data if isinstance(e,dict)] if isinstance(data,list) else []
     def reload(self):
-        """Datei neu lesen: der Hintergrunddienst schreibt im eigenen Prozess."""
-        self.data=self._laden()
+        """Datei nur neu lesen, wenn sie sich geaendert hat.
+
+        SETUP-Zaehler, Detailansicht und Ticker fragen bei jedem Oeffnen; der
+        Hintergrunddienst schreibt in einem eigenen Prozess. Vorher wurde die
+        Datei dabei jedes Mal neu geparst.
+        """
+        stamp=self._datei_stamp()
+        if stamp==self._stamp: return self
+        self.data=self._laden(); self._stamp=stamp
         return self
     def add(self,ereignis):
         if not isinstance(ereignis,dict): return False
+        # Erst den fremden Stand uebernehmen: sonst schriebe dieser Prozess
+        # nach einem LEEREN im anderen Prozess die alten Ereignisse zurueck.
+        self.reload()
         self.data=self.data+[dict(ereignis)]
         self.data=self.data[-MAX_EVENTS:]
         self._speichern()
@@ -1793,6 +1910,7 @@ class Events:
             with open(tmp,"w",encoding="utf-8") as f:
                 json.dump(self.data,f,ensure_ascii=False,indent=1)
             os.replace(tmp,self.path)
+            self._stamp=self._datei_stamp()
         except Exception: pass
 
 
@@ -1849,8 +1967,8 @@ class History:
         return str(ts) if ts else None
     @staticmethod
     def _sekunden_seit(iso):
-        try: dt=datetime.fromisoformat(str(iso))
-        except (TypeError,ValueError): return None
+        dt=_iso_dt(iso)
+        if dt is None: return None
         try: return max(0,int((datetime.now()-dt).total_seconds()))
         except (TypeError,ValueError): return None
     def get_serie(self,n):
@@ -1886,9 +2004,9 @@ class History:
             if av is not None:
                 alt["verfuegbar"]=av
                 # Ein neues Fenster startet jetzt; beim Zurueckspringen bleibt
-                # der Start stehen, sonst waere die Dauer verloren.
+                # der Start stehen, sonst waere die Dauer verloren. Die Uhrzeit
+                # des Endes steckt bereits im Ereignis (start + ts).
                 if av: alt["verfuegbar_zeit"]=now
-                else: alt["verfuegbar_weg_zeit"]=now
             if r.get("preis") is not None:
                 try: preis=float(r["preis"])
                 except (TypeError,ValueError): preis=None

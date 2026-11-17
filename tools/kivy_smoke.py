@@ -604,6 +604,25 @@ class SmokeApp(App):
         check("Trefferzeile: ausverkauft mit letztem Tag",
               any("ZUL. 13.11." in str(getattr(w, "text", ""))
                   for c in cards for w in c.walk()), True)
+        # Ein verfuegbarer, nur zu teurer Shop braucht kein "ZUL.": der Zusatz
+        # wuerde nur wiederholen, dass er gerade eben verfuegbar war.
+        self.ui.history.data["Shop E"] = {"preis": 1469.98, "verfuegbar": True,
+                                          "verfuegbar_zeit": "2026-11-13T10:35:00",
+                                          "serie": [["2026-11-13T10:35:00", 1469.98]]}
+        self.ui.scanned = {"Shop E": {"haendler": "Shop E", "preis": 1469.98,
+                                      "klass": "expensive", "land": "DE",
+                                      "zeit": "12:00", "condition": "new",
+                                      "url": "https://example.invalid/e"}}
+        self.ui.filter_mode = "alle"
+        self.ui._clear_results()
+        self.ui._rerender(); self.pump()
+        texte = [str(getattr(w, "text", ""))
+                 for w in self.ui.results_row.walk()]
+        check("Trefferzeile: zu teuer ohne ZUL.",
+              any("ZU TEUER" in t for t in texte), True)
+        check("Trefferzeile: ZUL. nur wenn nicht kaufbar",
+              any("ZUL." in t for t in texte), False)
+
         self.ui.scanned = {}
         self.ui.filter_mode = alt_filter
         self.ui._clear_results()

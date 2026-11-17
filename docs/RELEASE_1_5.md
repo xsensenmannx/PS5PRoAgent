@@ -469,3 +469,22 @@ Summe ohne Etappe 6: **rund 15 Arbeitstage** plus Puffer für Shop-Änderungen.
 4. **JSON-Pfad je Shop:** nur für die sechs heißen Shops (schnellster Nutzen) oder für
    alle 42 (mehr Arbeit, weniger Traffic überall). Empfehlung: heiße Shops zuerst,
    Rest in 1.5.1 nachziehen.
+
+---
+
+## 9. Abdeckung der heißen Shops (Messung 17.11.2026)
+
+Gemessen mit dem App-Pfad (`scan_core.fetch_mit_cache`/`scan_einen`), je URL ein
+Abruf, keine Umgehung von Bot-Schutz.
+
+| Shop | Befund | Maßnahme |
+|---|---|---|
+| Amazon DE | HTTP 200, 2,4 MB, **0** `ld+json`-Blöcke. Kaufbox zeigte 1.469,98 € („Nur noch 1 auf Lager“); der generische Preis-Regex nahm 1.488,00 € aus einem Fremdangebot. | Neuer Pfad `extract_amazon`: liest Preis nur in `corePrice_feature_div`/`apex_desktop` (auch getrennte Ganz-/Nachkommateile), Bestand aus `id="availability"`. Fixture auf Kaufbox-Markup umgestellt. |
+| Amazon AT | Wie DE, zusätzlich war die URL eine **Suchseite** (`/s?k=…`) ohne Kaufbox. | Produktseite `/dp/B0FRYBZR91` (HTTP 200, Kaufbox vorhanden) statt Suche. |
+| Otto DE | Alle getesteten Pfade (`/suche/…` mit und ohne Schrägstrich, `/p/…`) antworten **HTTP 400** mit Kasada-Script (`window.KPSDK`), auch mit Cookies aus einem vorherigen Aufruf der Startseite und vollen Browser-Headern. Startseite selbst: 200. | Kein Umweg (KONZEPT §7). `kpsdk` gilt jetzt als Bot-Schutz: der 400er wird im Body erkannt, als `challenge` gemeldet und nicht wiederholt. |
+| Otto AT | `www.otto.at` ist **OTTO Immobilien** (Immobilienmakler), nicht der Händler; jeder Produktpfad dort ist 404. Der Händler OTTO hat keinen österreichischen Shop. | Offen: Eintrag in einem Folgeschritt durch einen AT-Händler ersetzen — das ändert Shop-Liste, Fixtures, Zähler und Store-Texte und gehört nicht in diesen Fix. |
+| Cyberport DE/AT | **Jeder** Pfad inklusive `/robots.txt`, `/sitemap.xml` und Startseite: HTTP 403 „Just a moment…“ (Cloudflare). Am 16.11. kam noch Inhalt, die Suchseite hatte aber keinen Produktpreis. | Erkennung als Bot-Schutz (kein Retry). Eine Produkt-URL lässt sich derzeit nicht belegen — bewusst keine geratene URL. Offen: Produktseite aufnehmen, sobald ein Abruf durchgeht. |
+
+**Regel für Fixtures:** Was die Seite nicht hergibt, bleibt `None`. Die neuen
+Amazon-Fixtures enthalten deshalb kein JSON-LD, sondern genau die Kaufbox; der
+Selftest prüft, dass ein Fremdpreis außerhalb der Kaufbox nicht gewinnt.

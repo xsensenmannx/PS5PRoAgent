@@ -43,7 +43,7 @@ from scan_core import (
     webhook_senden, webhook_preset, redact_url, sende_webhook_alarm,
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
-    dauer_text, kurz_zeit, kurz_tag, event_zeile, events as verlauf_events,
+    dauer_text, kurz_zeit, kurz_tag, zeitraum_text, event_zeile, events as verlauf_events,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -1107,7 +1107,9 @@ class ResultCard(ButtonBehavior, BoxLayout):
             st=st+" · "+vmap2[r["verify"]]
         # Detail B: auch ausverkauft bleibt sichtbar, wann der Shop zuletzt
         # liefern konnte. Nur der Tag, damit die Zeile auf 320 dp heil bleibt.
-        if r["klass"] in ("unavail","unknown","error","challenge","parser","expensive"):
+        # "expensive" fehlt bewusst: dieser Shop ist jetzt verfuegbar, der
+        # Zusatz waere nur eine Wiederholung von "jetzt".
+        if r["klass"] in ("unavail","unknown","error","challenge","parser"):
             tag=kurz_tag(self._zuletzt)
             if tag: st=f"{st} · ZUL. {tag}"
         st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
@@ -2356,8 +2358,7 @@ class MainUI(FloatLayout):
         letztes=verlauf_events().reload().letztes(name)
         if isinstance(letztes,dict) and letztes.get("dauer") is not None:
             zeilen.append(("LETZTES FENSTER",
-                           f"{kurz_zeit(letztes.get('start')) or '?'} – "
-                           f"{kurz_zeit(letztes.get('ts')) or '?'} · "
+                           f"{zeitraum_text(letztes.get('start'), letztes.get('ts'))} · "
                            f"{dauer_text(letztes['dauer'])}"))
         hzustand=Health().all().get(name) or {}
         if hzustand.get("last_ts"):

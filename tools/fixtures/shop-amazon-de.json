@@ -3,12 +3,12 @@
   "name": "shop-amazon-de",
   "shop": "Amazon DE",
   "url": "https://www.amazon.de/dp/B0FRYBZR91",
-  "captured": "2026-11-12",
-  "format": "meta",
-  "html": "<html><head><title>PlayStation 5 Pro 2 TB — Amazon DE</title><meta property=\"product:price:amount\" content=\"849,00\"></head><body>PlayStation 5 Pro 2 TB · Auf Lager · in den Warenkorb</body></html>",
+  "captured": "2026-11-17",
+  "format": "amazon_kaufbox",
+  "html": "<html><head><title>Playstation 5 Pro 2 TB : Amazon.de: Games</title></head><body><div id=\"sponsored-teaser\">Andere Verkäufer<span class=\"a-offscreen\">1.488,00 €</span></div><span id=\"productTitle\">Playstation 5 Pro 2 TB</span><div id=\"corePrice_feature_div\"><span class=\"a-price\"><span class=\"a-offscreen\">899,99 €</span><span aria-hidden=\"true\"><span class=\"a-price-symbol\">€</span><span class=\"a-price-whole\">899<span class=\"a-price-decimal\">,</span></span><span class=\"a-price-fraction\">99</span></span></span></div><div id=\"availability\" class=\"a-section a-spacing-base\"><span class=\"a-color-success\">Auf Lager</span></div><div id=\"addToCart\">In den Einkaufswagen</div></body></html>",
   "expect": {
     "ist_konsole": true,
-    "preis": 849.0,
+    "preis": 899.99,
     "verfuegbar": true,
     "sofort": true
   }

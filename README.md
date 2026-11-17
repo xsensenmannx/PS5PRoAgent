@@ -79,7 +79,8 @@ Signal, Preistiefs und den Preisverlauf:
   Signalen (zweiter Abruf, Preis plausibel, Belegquelle, Zustand, Verkäufer,
   Frische, GTIN). Die Detailansicht zeigt den Beleg-Ausschnitt mit Zeitstempel
   und Hash; optional alarmiert die App erst ab 70 %.
-* **Fairer Bot-Schutz:** 403/CAPTCHA wird erkannt und nicht wiederholt; 429
+* **Fairer Bot-Schutz:** 403/CAPTCHA wird erkannt und nicht wiederholt; ebenso
+  die Kasada-Antwort von Otto (HTTP 400 mit `KPSDK`) und Cloudflare-Seiten. 429
   respektiert `Retry-After` und wird höchstens einmal erneut versucht. Kein
   Captcha-Solver, keine Proxy-Rotation, kein JavaScript-Challenge-Bypass.
 * **Preisverlauf**: Differenz zum letzten Scan pro Händler (`−20,00 €`, `STABIL`);

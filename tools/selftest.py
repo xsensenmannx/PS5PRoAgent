@@ -721,6 +721,16 @@ def feature_tests():
         check("Kurzzeit leer", core.kurz_zeit(None), "")
         check("Kurztag", core.kurz_tag("2026-11-13T10:35:00"), "13.11.")
         check("Kurztag unbrauchbar", core.kurz_tag("kaputt"), "")
+        # Ein Datum, zwei Zeiten: sonst stand der Tag zweimal in einer Zeile.
+        check("Zeitraum gleicher Tag", core.zeitraum_text(
+            "2026-11-13T10:35:00", "2026-11-13T10:36:35"),
+            "13.11., 10:35 – 10:36")
+        check("Zeitraum Tageswechsel", core.zeitraum_text(
+            "2026-11-13T23:50:00", "2026-11-14T00:05:00"),
+            "13.11., 23:50 – 14.11., 00:05")
+        check("Zeitraum ohne Ende",
+              core.zeitraum_text("2026-11-13T10:35:00", None), "?")
+        check("Zeitraum ohne Werte", core.zeitraum_text(None, None), "")
 
         # Nur echte Zustandswechsel kommen in den Ringpuffer; beim Wechsel auf
         # ausverkauft traegt der Eintrag die Dauer des abgelaufenen Fensters.
@@ -745,6 +755,8 @@ def feature_tests():
         check("Zuletzt verfuegbar bleibt stehen",
               hist.get_zuletzt_verfuegbar("Shop E"),
               hist.data["Shop E"]["verfuegbar_zeit"])
+        check("Kein ungenutztes Weg-Feld",
+              "verfuegbar_weg_zeit" in hist.data["Shop E"], False)
         zeile = core.event_zeile(letzte)
         check("Ticker nennt den Abgang", "WEG · Shop E" in zeile, True)
         check("Ticker nennt die Fensterdauer", "FENSTER 1 MIN" in zeile, True)
@@ -765,6 +777,17 @@ def feature_tests():
         check("Alte Eintraege fallen aus dem Ring", ev.fuer_shop("Shop E"), [])
         ev.clear()
         check("Verlauf leeren", core.Events().all(), [])
+        # Zwei Prozesse: der Dienst schreibt, die App liest nur bei Aenderung.
+        a, b = core.Events(), core.Events()
+        b.add({"typ": "verfuegbar", "haendler": "Shop Z",
+               "ts": "2026-11-13T10:00:00"})
+        check("Reload sieht fremdes Ereignis", len(a.reload().all()), 1)
+        b.clear()
+        a.add({"typ": "verfuegbar", "haendler": "Shop Y",
+               "ts": "2026-11-13T10:01:00"})
+        check("Add schreibt kein geleertes Ereignis zurueck",
+              [e["haendler"] for e in a.all()], ["Shop Y"])
+        a.clear()
 
         # Health: ein Fehler erhoeht den Zaehler, ein Erfolg setzt ihn zurueck.
         core.reset_health()
@@ -1004,10 +1027,17 @@ def fixture_tests():
             continue
         st = core.extract_structured(html)
         check("fixture %s ist konsole" % name, core.pruefe_nur_konsole(html, st), True)
+        # Amazon hat kein JSON-LD; dort prueft die Fixture denselben Pfad wie
+        # der Scan (extract_amazon), nicht den generischen Preis-Regex.
+        amz = (core.extract_amazon(html)
+               if core.ist_amazon(fx.get("url") or "") else {})
         for feld in ("preis", "condition", "seller", "verfuegbar", "sofort"):
             if feld not in exp: continue
             if feld == "verfuegbar":
-                wert = core.pruefe_verfuegbar(html, st)
+                wert = (amz["verfuegbar"] if amz.get("verfuegbar") is not None
+                        else core.pruefe_verfuegbar(html, st))
+            elif feld == "preis" and amz.get("preis") is not None:
+                wert = amz["preis"]
             elif feld == "preis" and st.get("preis") is None:
                 wert = core.extract_meta_preis(html)
             elif feld == "sofort" and st.get("sofort") is None:
@@ -1655,6 +1685,51 @@ def live_tests():
     check("App zaehlt Nachtrag nicht doppelt", "self._process(r,nach)" in main_q, True)
 
 
+def amazon_tests():
+    """Amazon ohne JSON-LD: nur die Kaufbox zaehlt, kein Fremdpreis."""
+    kaufbox = ('<div id="corePrice_feature_div"><span class="a-price">'
+               '<span class="a-offscreen">899,99 €</span></span></div>')
+    bestand = '<div id="availability"><span>Auf Lager</span></div>'
+    seite = ('<html><body><span class="a-offscreen">1.488,00 €</span>'
+             '<span id="productTitle">Playstation 5 Pro 2 TB</span>'
+             + kaufbox + bestand + '</body></html>')
+    st = core.extract_structured(seite)
+    check("Amazon ohne JSON-LD", st.get("preis"), None)
+    check("Amazon Kaufbox-Preis", core.extract_amazon(seite)["preis"], 899.99)
+    check("Amazon Kaufbox Bestand", core.extract_amazon(seite)["verfuegbar"], True)
+    check("Amazon Zustand", core.extract_amazon(seite)["state"], "in_stock")
+
+    # Ganzzahl und Nachkommateil getrennt, ohne a-offscreen.
+    geteilt = ('<div id="apex_desktop"><span class="a-price-whole">1.469'
+               '<span class="a-price-decimal">,</span></span>'
+               '<span class="a-price-fraction">98</span></div>')
+    check("Amazon geteilter Preis", core.extract_amazon(geteilt)["preis"], 1469.98)
+
+    aus = (kaufbox + '<div id="availability">Derzeit nicht verfügbar</div>')
+    check("Amazon ausverkauft", core.extract_amazon(aus)["verfuegbar"], False)
+    check("Amazon ausverkauft Zustand", core.extract_amazon(aus)["state"], "sold_out")
+
+    # Ohne Kaufbox bleibt der Preis offen - lieber kein Treffer als ein
+    # geratener Preis aus Werbung oder Zubehoer.
+    ohne = '<html><body><span class="a-offscreen">1.488,00 €</span></body></html>'
+    check("Amazon ohne Kaufbox kein Preis", core.extract_amazon(ohne)["preis"], None)
+
+    check("Amazon Host erkannt", core.ist_amazon("https://www.amazon.de/dp/B0FRYBZR91"), True)
+    check("Amazon AT Host erkannt", core.ist_amazon("https://www.amazon.at/dp/B0FRYBZR91"), True)
+    check("Amazon Fremdhost", core.ist_amazon("https://amazon.de.evil.example/x"), False)
+
+    # Bot-Schutz im 4xx-Body: Otto (Kasada) und Cloudflare antworten nicht mit
+    # einer Produktseite, sondern mit einem kurzen Schutz-Script.
+    kasada = "<!DOCTYPE html><html><body><script>window.KPSDK={};KPSDK.now=1;</script></body></html>"
+    check("Kasada erkannt", core.detect_challenge(kasada[:3000].lower()), True)
+    wolke = ("<html><head><title>Just a moment...</title></head>"
+             "<body>_cf_chl_opt</body></html>")
+    check("Cloudflare erkannt", core.detect_challenge(wolke[:3000].lower()), True)
+    check("Bot-Schutz ist Challenge-Klasse",
+          core.fehler_klasse("Bot-Schutz (HTTP 400)"), "challenge")
+    check("400 ohne Schutz bleibt Fehler", core.fehler_klasse("HTTP 400"), "error")
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -1666,6 +1741,7 @@ if __name__ == "__main__":
         feature_tests()
         adaptive_boot_tests()
         fixture_tests()
+        amazon_tests()
         capture_helper_tests()
         v13_tests()
         v14_tests()
