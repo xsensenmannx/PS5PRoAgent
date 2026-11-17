@@ -12,6 +12,11 @@ ps5pro_settings.json
 ps5pro_history.json
 fonts/
 
+# Lokale Arbeitsordner: Release-Schluessel (.freebuff/keys), Artefakte, Design-Quellen
+.freebuff/
+artifacts/
+design/
+
 # Build-Protokolle und lokale Signatur
 buildozer.log
 *.keystore

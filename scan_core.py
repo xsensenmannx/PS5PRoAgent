@@ -107,20 +107,33 @@ LIVE_JITTER = 0.2           # +/- 20 %, damit nicht alle gleichzeitig aufschlage
 LIVE_BUDGET = 40            # Obergrenze Requests pro Minute im Vordergrund
 # Aus dem Minutenbudget und dem Takt folgt die Rundengroesse (40 / 3 Runden).
 LIVE_RUNDE_MAX = 12
+LIVE_RUNDE_FENSTER = 6      # 10-s-Runden: 6 * 6 = 36 < 40 Requests/Minute
 # ── Drop-Fenster ────────────────────────────────────────────────────
-# Bekannte Auflegezeiten: PS Direct stellt um 10:00 ein, MM/S schalten
-# Kontingente in Schueben frei. In diesen Minuten entscheidet ein 10-s-Takt
-# darueber, ein Ein-Minuten-Fenster ueberhaupt zu sehen; ausserhalb waere er
-# nur Last. Zeiten sind lokale Ortszeit, minutengenau, Ende inklusive.
+# Nur belegte Zeiten eintragen - geraten wird hier nichts. Zeiten sind lokale
+# Ortszeit, minutengenau, Ende inklusive. Herkunft, Stand 17.11.2026:
+#
+#   * PlayStation Direct: Sony schaltet Kontingente "in unregelmaessigen
+#     Abstaenden" frei (merkur.de, 10.11.2026). Der Stempel-Feed eines
+#     Ueberwachungsdienstes zeigt Freischaltungen ueber den Tag verteilt
+#     (bestell.bar, Produktseite PS5 Pro: 17.11. 09:31 Uhr, 13.11. 10:28-10:35
+#     Uhr, jeweils "1 Min. verfuegbar"); Community-Beobachtungen streuen von
+#     08:57 bis 17:36 Uhr (foraum.de, 11.11.2026). Belegt ist also ein breites
+#     Tagesfenster, KEINE feste 10-Uhr-Zeit. Ein frueheres Fenster
+#     09:50-10:25 war Annahme aus dem PS5-Start 2020 und liess den ganzen
+#     Nachmittag unbeobachtet.
+#   * MediaMarkt/Saturn: Presse und Leitfaeden nennen nur "Schuebe" ohne
+#     Uhrzeit (bestell.bar-Leitfaden; pcgames.de, 22.09.2026: "hatten
+#     zwischendurch immer wieder Kontingente"). Fuer sie ist kein Zeitfenster
+#     belegbar - deshalb bewusst keins: lieber der normale Takt als 10 s rund
+#     um die Uhr.
+#
+# Ein Fenster ist eine Wahrscheinlichkeit, keine Garantie: ausserhalb bleibt
+# der Shop im normalen Takt und wird nicht ignoriert.
 LIVE_FENSTER_S = 10         # Takt innerhalb eines Drop-Fensters
 LIVE_TAKT_FENSTER = 10      # Rundentakt, solange ein Fenster offen ist
 DROP_FENSTER = {
-    "PS Direct DE": ((9, 50, 10, 25),),
-    "PS Direct AT": ((9, 50, 10, 25),),
-    "MediaMarkt DE": ((9, 0, 11, 0),),
-    "MediaMarkt AT": ((9, 0, 11, 0),),
-    "Saturn DE": ((9, 0, 11, 0),),
-    "Saturn AT": ((9, 0, 11, 0),),
+    "PS Direct DE": ((9, 0, 18, 0),),
+    "PS Direct AT": ((9, 0, 18, 0),),
 }
 BG_STATUS_FILE = "ps5pro_bg.json"
 HEALTH_FILE = "ps5pro_health.json"
@@ -1307,8 +1320,9 @@ _DATA_DIR = None
 
 def set_data_dir(p):
     """Datenverzeichnis der App uebernehmen (Service laeuft im eigenen Prozess)."""
-    global _DATA_DIR
+    global _DATA_DIR, _EVENTS
     _DATA_DIR = p or None
+    _EVENTS = None
 
 def _data_dir():
     if _DATA_DIR: return _DATA_DIR
@@ -1577,6 +1591,17 @@ def live_takt(haendler, aktiv=None, jetzt=None):
     return LIVE_TAKT
 
 
+def live_runden_max(takt):
+    """Rundengroesse, die das Minutenbudget nicht ueberschreitet.
+
+    Ohne diese Kopplung wuerde ein 10-s-Takt bei 12 Shops je Runde 72
+    Requests/Minute erzeugen - fast das Doppelte des Budgets.
+    """
+    try: takt = max(1, int(takt))
+    except (TypeError, ValueError): takt = LIVE_TAKT
+    return LIVE_RUNDE_FENSTER if takt <= LIVE_TAKT_FENSTER else LIVE_RUNDE_MAX
+
+
 def meldebereit(r):
     """Treffer mit strukturiertem Beleg darf ohne Warten auf die Verifikation melden.
 
@@ -1683,6 +1708,111 @@ def health_uebersicht(health_daten=None, jetzt=None):
     return out
 
 
+EVENTS_FILE="ps5pro_events.json"
+MAX_EVENTS=200
+
+
+def dauer_text(sekunden):
+    """Fensterdauer lesbar: 45 S · 12 MIN · 1 STD 5 MIN."""
+    try: s=int(max(0.0,float(sekunden)))
+    except (TypeError,ValueError): return "—"
+    if s<60: return f"{s} S"
+    if s<3600: return f"{s//60} MIN"
+    std,rest=divmod(s,3600); minuten=rest//60
+    return f"{std} STD" if not minuten else f"{std} STD {minuten} MIN"
+
+
+def kurz_zeit(iso):
+    """ISO-Zeitstempel als '13.11., 10:35'; leer, wenn unbrauchbar."""
+    try: dt=datetime.fromisoformat(str(iso))
+    except (TypeError,ValueError): return ""
+    return dt.strftime("%d.%m., %H:%M")
+
+
+def kurz_tag(iso):
+    """Nur '13.11.' fuer enge Zeilen, sonst leer."""
+    text=kurz_zeit(iso)
+    return text.split(",")[0].strip() if text else ""
+
+
+def event_zeile(e):
+    """Eine Ticker-Zeile: '13.11., 10:35 · WEG · MediaMarkt · FENSTER 1 MIN'."""
+    if not isinstance(e,dict): return ""
+    shop=str(e.get("haendler") or "?")
+    zeit=kurz_zeit(e.get("ts"))
+    if e.get("typ")=="verfuegbar":
+        text=f"VERFÜGBAR · {shop}"
+    elif e.get("typ")=="ausverkauft":
+        text=f"WEG · {shop}"
+        if e.get("dauer") is not None:
+            text=text+f" · FENSTER {dauer_text(e['dauer'])}"
+    else:
+        text=f"{str(e.get('typ') or 'EREIGNIS').upper()} · {shop}"
+    return f"{zeit} · {text}" if zeit else text
+
+
+class Events:
+    """Ringpuffer der Zustandswechsel (max. MAX_EVENTS), aelteste zuerst."""
+    def __init__(self,path=None):
+        self.path=path or os.path.join(_data_dir(),EVENTS_FILE)
+        self.data=self._laden()
+    def _laden(self):
+        try:
+            with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
+        except Exception: return []
+        return [dict(e) for e in data if isinstance(e,dict)] if isinstance(data,list) else []
+    def reload(self):
+        """Datei neu lesen: der Hintergrunddienst schreibt im eigenen Prozess."""
+        self.data=self._laden()
+        return self
+    def add(self,ereignis):
+        if not isinstance(ereignis,dict): return False
+        self.data=self.data+[dict(ereignis)]
+        self.data=self.data[-MAX_EVENTS:]
+        self._speichern()
+        return True
+    def all(self):
+        return [dict(e) for e in self.data]
+    def letzte(self,n=20):
+        try: n=max(1,int(n))
+        except (TypeError,ValueError): n=20
+        return [dict(e) for e in self.data[-n:]][::-1]
+    def fuer_shop(self,name):
+        return [dict(e) for e in self.data if e.get("haendler")==name]
+    def letztes(self,name):
+        """Juengstes Ereignis eines Shops oder None."""
+        for e in reversed(self.data):
+            if e.get("haendler")==name: return dict(e)
+        return None
+    def clear(self):
+        self.data=[]
+        self._speichern()
+    def _speichern(self):
+        try:
+            tmp=self.path+".tmp"
+            with open(tmp,"w",encoding="utf-8") as f:
+                json.dump(self.data,f,ensure_ascii=False,indent=1)
+            os.replace(tmp,self.path)
+        except Exception: pass
+
+
+_EVENTS=None
+
+
+def events():
+    """Prozessweiter Zugriff auf den Ereignis-Ringpuffer."""
+    global _EVENTS
+    if _EVENTS is None: _EVENTS=Events()
+    return _EVENTS
+
+
+def reset_events():
+    """Nach einem Wechsel des Datenverzeichnisses neu aufsetzen (Tests)."""
+    global _EVENTS
+    _EVENTS=None
+    return events()
+
+
 class History:
     def __init__(self):
         self.path=os.path.join(_data_dir(),HISTORY_FILE)
@@ -1707,6 +1837,22 @@ class History:
         if not isinstance(e,dict) or "verfuegbar" not in e: return None
         v=e.get("verfuegbar")
         return v if isinstance(v,bool) else None
+    def get_zuletzt_verfuegbar(self,n):
+        """Zeitpunkt des letzten 'verfuegbar' (ISO) oder None.
+
+        Bleibt beim Wechsel auf ausverkauft stehen; nur so laesst sich die
+        Dauer des abgelaufenen Fensters und 'zuletzt verfuegbar am' zeigen.
+        """
+        e=self.data.get(n)
+        if not isinstance(e,dict): return None
+        ts=e.get("verfuegbar_zeit")
+        return str(ts) if ts else None
+    @staticmethod
+    def _sekunden_seit(iso):
+        try: dt=datetime.fromisoformat(str(iso))
+        except (TypeError,ValueError): return None
+        try: return max(0,int((datetime.now()-dt).total_seconds()))
+        except (TypeError,ValueError): return None
     def get_serie(self,n):
         e=self.data.get(n)
         return self._saubere_serie(e.get("serie")) if isinstance(e,dict) else []
@@ -1736,8 +1882,13 @@ class History:
             # ein spaeterer Restock von einem gewoehnlichen Scan unterscheiden.
             av=True if r.get("klass") in ("hit","expensive") else (
                 False if r.get("klass")=="unavail" else None)
+            vorher=alt.get("verfuegbar") if isinstance(alt.get("verfuegbar"),bool) else None
             if av is not None:
-                alt["verfuegbar"]=av; alt["verfuegbar_zeit"]=now
+                alt["verfuegbar"]=av
+                # Ein neues Fenster startet jetzt; beim Zurueckspringen bleibt
+                # der Start stehen, sonst waere die Dauer verloren.
+                if av: alt["verfuegbar_zeit"]=now
+                else: alt["verfuegbar_weg_zeit"]=now
             if r.get("preis") is not None:
                 try: preis=float(r["preis"])
                 except (TypeError,ValueError): preis=None
@@ -1750,6 +1901,16 @@ class History:
                         serie[-1][0]=now
                     alt["preis"]=preis; alt["zeit"]=now
                     alt["serie"]=serie[-MAX_SERIE_PUNKTE:]
+            # Detail A: nur echte Wechsel landen im Ticker; beim Wechsel auf
+            # ausverkauft kommt die Dauer des abgelaufenen Fensters mit.
+            if av is not None and vorher is not None and av!=vorher:
+                start=alt.get("verfuegbar_zeit") if not av else now
+                verlauf_ereignis={"typ":"verfuegbar" if av else "ausverkauft",
+                                  "haendler":name,"ts":now,"start":start,
+                                  "dauer":None if av else self._sekunden_seit(start),
+                                  "preis":alt.get("preis"),
+                                  "url":r.get("url")}
+                events().add(verlauf_ereignis)
             if alt: self.data[name]=alt
         try:
             tmp=self.path+".tmp"

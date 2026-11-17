@@ -708,6 +708,64 @@ def feature_tests():
               core.alarm_ereignis({"klass": "hit", "preis": 799.0}, 799.0, False),
               "restock")
 
+        # ── Detail A/B: Fensterdauer, Ereignis-Ticker, zuletzt verfuegbar ──
+        check("Dauer 0 s", core.dauer_text(0), "0 S")
+        check("Dauer 59 s", core.dauer_text(59), "59 S")
+        check("Dauer 60 s", core.dauer_text(60), "1 MIN")
+        check("Dauer 125 s", core.dauer_text(125), "2 MIN")
+        check("Dauer 1 Std", core.dauer_text(3600), "1 STD")
+        check("Dauer 1 Std 5 Min", core.dauer_text(3900), "1 STD 5 MIN")
+        check("Dauer ohne Wert", core.dauer_text(None), "—")
+        check("Dauer unbrauchbar", core.dauer_text("x"), "—")
+        check("Kurzzeit", core.kurz_zeit("2026-11-13T10:35:00"), "13.11., 10:35")
+        check("Kurzzeit leer", core.kurz_zeit(None), "")
+        check("Kurztag", core.kurz_tag("2026-11-13T10:35:00"), "13.11.")
+        check("Kurztag unbrauchbar", core.kurz_tag("kaputt"), "")
+
+        # Nur echte Zustandswechsel kommen in den Ringpuffer; beim Wechsel auf
+        # ausverkauft traegt der Eintrag die Dauer des abgelaufenen Fensters.
+        core.reset_events()
+        ev = core.events(); ev.clear()
+        hist.update([{"haendler": "Shop E", "klass": "unavail", "preis": None}])
+        check("Erstes Sehen ohne Ereignis", ev.all(), [])
+        hist.update([{"haendler": "Shop E", "klass": "hit", "preis": 799.0}])
+        check("Wechsel zu verfuegbar", [e["typ"] for e in ev.all()], ["verfuegbar"])
+        check("Fensterstart notiert", bool(hist.get_zuletzt_verfuegbar("Shop E")), True)
+        hist.update([{"haendler": "Shop E", "klass": "hit", "preis": 799.0}])
+        check("Kein Ereignis ohne Wechsel", len(ev.all()), 1)
+        from datetime import datetime as _dt, timedelta as _td
+        hist.data["Shop E"]["verfuegbar_zeit"] = (
+            _dt.now() - _td(seconds=95)).isoformat(timespec="seconds")
+        hist.update([{"haendler": "Shop E", "klass": "unavail", "preis": None}])
+        letzte = ev.all()[-1]
+        check("Wechsel zu weg", letzte["typ"], "ausverkauft")
+        check("Fensterdauer rund 95 s", abs(int(letzte["dauer"]) - 95) <= 3, True)
+        check("Fensterstart im Ereignis", letzte["start"],
+              hist.data["Shop E"]["verfuegbar_zeit"])
+        check("Zuletzt verfuegbar bleibt stehen",
+              hist.get_zuletzt_verfuegbar("Shop E"),
+              hist.data["Shop E"]["verfuegbar_zeit"])
+        zeile = core.event_zeile(letzte)
+        check("Ticker nennt den Abgang", "WEG · Shop E" in zeile, True)
+        check("Ticker nennt die Fensterdauer", "FENSTER 1 MIN" in zeile, True)
+        check("Ticker ohne Zeitstempel", core.event_zeile(
+            {"typ": "verfuegbar", "haendler": "Shop E"}), "VERFÜGBAR · Shop E")
+        hist.update([{"haendler": "Shop E", "klass": "unavail", "preis": 899.0}])
+        check("Preis ohne Zustand kein Ereignis", len(ev.all()), 2)
+
+        check("Verlauf je Shop", len(ev.fuer_shop("Shop E")), 2)
+        for i in range(core.MAX_EVENTS + 5):
+            ev.add({"typ": "verfuegbar", "haendler": f"Ring {i}",
+                    "ts": "2026-11-13T10:00:00"})
+        check("Ringpuffer gedeckelt", len(ev.all()), core.MAX_EVENTS)
+        check("Ringpuffer verwirft die aeltesten", ev.all()[0]["haendler"], "Ring 5")
+        check("Neueste zuerst", ev.letzte(1)[0]["haendler"],
+              f"Ring {core.MAX_EVENTS + 4}")
+        check("Verlauf ueberlebt Neuladen", len(core.Events().all()), core.MAX_EVENTS)
+        check("Alte Eintraege fallen aus dem Ring", ev.fuer_shop("Shop E"), [])
+        ev.clear()
+        check("Verlauf leeren", core.Events().all(), [])
+
         # Health: ein Fehler erhoeht den Zaehler, ein Erfolg setzt ihn zurueck.
         core.reset_health()
         hh = core.health()
@@ -1428,8 +1486,8 @@ def play_rebrand_tests():
 
 def live_tests():
     """Live-Taktung (v1.5): Intervalle, Faelligkeit, Budget, Fairness."""
-    # 15:00 Ortszeit: ausserhalb aller Drop-Fenster, sonst kippt der Takt.
-    jetzt = time.mktime((2026, 11, 16, 15, 0, 0, 0, 0, -1))
+    # 20:00 Ortszeit: ausserhalb aller Drop-Fenster, sonst kippt der Takt.
+    jetzt = time.mktime((2026, 11, 16, 20, 0, 0, 0, 0, -1))
 
     def nah(wert, ziel):
         return abs(wert - ziel) <= ziel * core.LIVE_JITTER + 1
@@ -1509,14 +1567,21 @@ def live_tests():
     check("Health kennt nur Gesehenes", "Nirgends DE" in ueb, False)
 
     # ── Drop-Fenster ────────────────────────────────────────────────
+    # Belegt ist nur ein breites Tagesfenster fuer PS Direct (09:00-18:00);
+    # fuer MediaMarkt/Saturn gibt es keine belastbare Uhrzeit.
     def ts(h, m):
         return time.mktime((2026, 11, 16, h, m, 0, 0, 0, -1))
 
-    check("Fenster PS Direct 10:00", core.im_drop_fenster("PS Direct DE", ts(10, 0)), True)
-    check("Fenster PS Direct 09:00", core.im_drop_fenster("PS Direct DE", ts(9, 0)), False)
-    check("Fenster PS Direct 10:25 Rand", core.im_drop_fenster("PS Direct DE", ts(10, 25)), True)
-    check("Fenster MM 09:30", core.im_drop_fenster("MediaMarkt DE", ts(9, 30)), True)
-    check("Fenster MM 11:30", core.im_drop_fenster("MediaMarkt DE", ts(11, 30)), False)
+    check("Fenster PS Direct 09:30", core.im_drop_fenster("PS Direct DE", ts(9, 30)), True)
+    check("Fenster PS Direct 08:30 davor", core.im_drop_fenster("PS Direct DE", ts(8, 30)), False)
+    check("Fenster PS Direct 18:00 Rand", core.im_drop_fenster("PS Direct DE", ts(18, 0)), True)
+    check("Fenster PS Direct 18:30 danach", core.im_drop_fenster("PS Direct DE", ts(18, 30)), False)
+    check("Fenster PS Direct AT wie DE",
+          core.im_drop_fenster("PS Direct AT", ts(14, 0)), True)
+    check("Fenster MM ohne belegte Uhrzeit", "MediaMarkt DE" not in core.DROP_FENSTER, True)
+    check("Fenster MM 09:30 kein Takt",
+          core.im_drop_fenster("MediaMarkt DE", ts(9, 30)), False)
+    check("Fenster Saturn kein Takt", core.im_drop_fenster("Saturn AT", ts(9, 30)), False)
     check("Fenster Shop ohne Zeitplan", core.im_drop_fenster("Amazon DE", ts(10, 0)), False)
     check("Fenster unbekannter Shop", core.im_drop_fenster("Nirgends DE", ts(10, 0)), False)
     try:
@@ -1531,8 +1596,11 @@ def live_tests():
     check("Intervall im Fenster 10 s",
           nah(core.shop_intervall("PS Direct DE", im_fenster, ts(10, 0)),
               core.LIVE_FENSTER_S), True)
+    check("Intervall nachmittags im Fenster",
+          nah(core.shop_intervall("PS Direct DE", im_fenster, ts(15, 0)),
+              core.LIVE_FENSTER_S), True)
     check("Intervall ausserhalb Fenster 30 s",
-          nah(core.shop_intervall("PS Direct DE", im_fenster, ts(9, 0)),
+          nah(core.shop_intervall("PS Direct DE", im_fenster, ts(19, 0)),
               core.LIVE_HEISS_S), True)
     check("Sperre schlaegt Fenster",
           nah(core.shop_intervall("PS Direct DE",
@@ -1543,9 +1611,20 @@ def live_tests():
           core.live_takt(core.HAENDLER, {"PS Direct DE"}, ts(10, 0)),
           core.LIVE_TAKT_FENSTER)
     check("Rundentakt ausserhalb",
-          core.live_takt(core.HAENDLER, {"PS Direct DE"}, ts(9, 0)), core.LIVE_TAKT)
+          core.live_takt(core.HAENDLER, {"PS Direct DE"}, ts(19, 0)), core.LIVE_TAKT)
     check("Rundentakt respektiert Auswahl",
           core.live_takt(core.HAENDLER, {"Amazon DE"}, ts(10, 0)), core.LIVE_TAKT)
+
+    # Rundengroesse haelt das Minutenbudget auch im 10-s-Takt
+    check("Runden im Fenster kleiner", core.live_runden_max(core.LIVE_TAKT_FENSTER),
+          core.LIVE_RUNDE_FENSTER)
+    check("Runden normal", core.live_runden_max(core.LIVE_TAKT), core.LIVE_RUNDE_MAX)
+    check("Runden unbekannter Takt", core.live_runden_max("x"), core.LIVE_RUNDE_MAX)
+    check("Fensterbudget haelt 40 pro Minute",
+          core.LIVE_RUNDE_FENSTER * (60 // core.LIVE_TAKT_FENSTER) <= core.LIVE_BUDGET,
+          True)
+    check("Normalbudget haelt 40 pro Minute",
+          core.LIVE_RUNDE_MAX * (60 // core.LIVE_TAKT) <= core.LIVE_BUDGET, True)
 
     # ── Sofortmeldung bei belegtem Treffer ──────────────────────────
     belegt = {"klass": "hit", "preis": 899.99, "avail_state": "in_stock",

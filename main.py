@@ -42,7 +42,8 @@ from scan_core import (
     lade_shop_config, aktualisiere_shop_config, flush_http_cache,
     webhook_senden, webhook_preset, redact_url, sende_webhook_alarm,
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
-    live_takt, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL, LIVE_RUNDE_MAX,
+    live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
+    dauer_text, kurz_zeit, kurz_tag, event_zeile, events as verlauf_events,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -990,9 +991,10 @@ class Sparkline(Widget):
 
 class ResultCard(ButtonBehavior, BoxLayout):
     def __init__(self,result,is_new,prev,serie=None,detail_cb=None,best=False,
-                 font_scale=1.0,**kw):
+                 font_scale=1.0,zuletzt=None,**kw):
         super().__init__(**kw)
         self.result=result
+        self._zuletzt=zuletzt
         self._is_new=is_new; self._prev=prev; self._best=best
         try: self._font_scale=max(0.9,min(1.2,float(font_scale)))
         except (TypeError,ValueError): self._font_scale=1.0
@@ -1103,6 +1105,11 @@ class ResultCard(ButtonBehavior, BoxLayout):
                "weg":"WEG","unbestaetigt":"UNGEPRÜFT"}
         if r["klass"]=="hit" and r.get("verify") in vmap2:
             st=st+" · "+vmap2[r["verify"]]
+        # Detail B: auch ausverkauft bleibt sichtbar, wann der Shop zuletzt
+        # liefern konnte. Nur der Tag, damit die Zeile auf 320 dp heil bleibt.
+        if r["klass"] in ("unavail","unknown","error","challenge","parser","expensive"):
+            tag=kurz_tag(self._zuletzt)
+            if tag: st=f"{st} · ZUL. {tag}"
         st_lbl=Label(text=f"[b]{st}[/b]",markup=True,color=co,
                      font_size=fs(8.5),font_name=SST_FONT,
                      halign="left",valign="middle",
@@ -1741,8 +1748,11 @@ class MainUI(FloatLayout):
         """Fällige Shops der aktiven Auswahl - überfällige zuerst."""
         try: daten=health().all()
         except Exception: daten={}
+        # Rundengroesse folgt dem Takt: 10-s-Runden prüfen weniger Shops,
+        # damit das Minutenbudget von 40 Requests hält.
+        takt=live_takt(HAENDLER,self.active_haendler)
         return faellige_haendler(HAENDLER,daten,jetzt=time.time(),
-                                 budget=LIVE_RUNDE_MAX,aktiv=self.active_haendler)
+                                 budget=live_runden_max(takt),aktiv=self.active_haendler)
     def _toggle_schnellscan(self):
         self.schnellscan=not self.schnellscan
         self.settings.set("schnellscan",self.schnellscan)
@@ -1989,6 +1999,10 @@ class MainUI(FloatLayout):
                lambda: (ref["p"] and ref["p"].dismiss(),
                         Clock.schedule_once(lambda dt:self._open_health(),0.16)),
                PS1_BLUE)
+        action("VERLAUF",self._events_count,
+               lambda: (ref["p"] and ref["p"].dismiss(),
+                        Clock.schedule_once(lambda dt:self._open_events(),0.16)),
+               PS1_CYAN)
         action("TESTALARM",lambda: "SENDEN",self._send_test_alarm,PS1_CYAN)
 
         section("ALARM-KANAL")
@@ -2217,6 +2231,65 @@ class MainUI(FloatLayout):
         cfg.bind(on_release=load_cfg); box.add_widget(cfg)
         p.open()
 
+    def _events_count(self):
+        try: return f"{len(verlauf_events().reload().all())} EREIGNISSE"
+        except Exception: return "ÖFFNEN"
+
+    def _open_events(self):
+        """Detail A: Ticker der Zustandswechsel samt Fensterdauer."""
+        haptic(0.02)
+        ev=verlauf_events()
+        ev.reload()
+        liste=ev.letzte(30)
+        gesamt=len(ev.all())
+        box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(8))
+        kopf=Label(text="[b]VERLAUF[/b]",markup=True,color=PS1_SILVER,
+                   font_size=sp(12),font_name=SST_FONT,
+                   size_hint_y=None,height=dp(22),
+                   halign="left",valign="middle")
+        kopf.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        box.add_widget(kopf)
+        sub=Label(text=f"{gesamt} EREIGNISSE · FENSTERDAUER AUS EIGENEN SCANS",
+                  color=PS1_CYAN,font_size=sp(8.5),font_name=SST_FONT,
+                  size_hint_y=None,height=dp(14),halign="left",valign="middle",
+                  shorten=True,shorten_from="right")
+        sub.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        box.add_widget(sub)
+        sv=ScrollView(bar_width=dp(4))
+        inner=BoxLayout(orientation="vertical",size_hint_y=None,spacing=dp(2))
+        inner.bind(minimum_height=inner.setter("height"))
+        if not liste:
+            leer=Label(text="Noch keine Zustandswechsel. Der Ticker fuellt sich, "
+                            "sobald ein Shop zwischen verfuegbar und weg wechselt.",
+                       color=PS1_GREY,font_size=sp(9),font_name=SST_FONT,
+                       halign="left",valign="top",size_hint_y=None,height=dp(44))
+            leer.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            inner.add_widget(leer)
+        for e in liste:
+            neu=e.get("typ")=="verfuegbar"
+            row=BoxLayout(size_hint_y=None,height=dp(24),spacing=dp(4))
+            row.add_widget(Dot(PS1_GREEN if neu else PS1_SILVER))
+            lb=Label(text=event_zeile(e),color=PS1_TEXT if neu else PS1_SILVER,
+                     font_size=sp(9),font_name=SST_FONT,halign="left",valign="middle",
+                     shorten=True,shorten_from="right")
+            lb.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            row.add_widget(lb); inner.add_widget(row)
+        sv.add_widget(inner); box.add_widget(sv)
+        btns=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
+        lb2=PS1Button(text="LEEREN",accent=PS1_YELLOW,font_size=sp(9))
+        cb=PS1Button(text="ZU",accent=PS1_SILVER,font_size=sp(9))
+        btns.add_widget(lb2); btns.add_widget(cb); box.add_widget(btns)
+        p=Popup(title="",content=box,size_hint=(None,None),
+                width=min(dp(560),Window.width*0.92),
+                height=min(dp(520),Window.height*0.82),
+                background_color=(0.08,0.08,0.09,1),separator_height=0)
+        def leeren(*_):
+            ev.clear(); p.dismiss()
+            self._toast("VERLAUF GELEERT",color=PS1_GREY)
+        lb2.bind(on_release=leeren)
+        cb.bind(on_release=lambda *_:p.dismiss())
+        p.open()
+
     def _shop_config_bg(self,force=False):
         try: n=aktualisiere_shop_config(force)
         except Exception: n=0
@@ -2276,6 +2349,16 @@ class MainUI(FloatLayout):
               "unbestaetigt":"UNBESTÄTIGT"}
         if r.get("verify") in vmap:
             zeilen.append(("VERIFIKATION",vmap[r["verify"]]))
+        # Detail B: wann war dieser Shop zuletzt lieferbar?
+        zeilen.append(("ZULETZT VERFUEGBAR",
+                       kurz_zeit(self.history.get_zuletzt_verfuegbar(name))
+                       or "NOCH NIE"))
+        letztes=verlauf_events().reload().letztes(name)
+        if isinstance(letztes,dict) and letztes.get("dauer") is not None:
+            zeilen.append(("LETZTES FENSTER",
+                           f"{kurz_zeit(letztes.get('start')) or '?'} – "
+                           f"{kurz_zeit(letztes.get('ts')) or '?'} · "
+                           f"{dauer_text(letztes['dauer'])}"))
         hzustand=Health().all().get(name) or {}
         if hzustand.get("last_ts"):
             zeilen.append(("ZULETZT GEPRUEFT", self._age_text(hzustand["last_ts"])+" alt"))
@@ -2526,7 +2609,8 @@ class MainUI(FloatLayout):
                             self.history.get_serie(n),detail_cb=self._open_detail,
                             best=(r["klass"]=="hit" and best is not None and
                                   r["preis"]==best),
-                            font_scale=self.font_scale)
+                            font_scale=self.font_scale,
+                            zuletzt=self.history.get_zuletzt_verfuegbar(n))
             card.size_hint=(1,None)
             card.height=(dp(80) if r["klass"]=="challenge" else dp(56))*self.font_scale
             self.results_row.add_widget(card)

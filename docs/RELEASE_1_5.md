@@ -1,16 +1,16 @@
 # Release 1.5 — Live-Überwachung und Händler-Erkennung
 
 **Stand:** Plan, noch nicht umgesetzt. Ausgangspunkt ist v1.4.0 (`versionCode 10400`).
-**Ziel:** v1.5.0 (`versionCode 10500`) erkennt Restocks früh und findet neue Händler mit
+**Ziel:** v1.5.1 (`versionCode 10501`) erkennt Restocks früh und findet neue Händler mit
 einem nachvollziehbaren Verfahren — ohne Bot-Schutz zu umgehen, ohne Backend und ohne
 die Host-Allowlist der Remote-Konfiguration aufzuweichen.
 
-**Stand der Umsetzung (main):** Etappe 0 und 1 vollständig sowie aus Etappe 3 der
-Live-Takt mit 20-s-Runde und Rundendeckel 12, das **Drop-Fenster** (10-s-Takt,
-HUD `FENSTER`) und die **Sofortmeldung** für belegte Treffer. Offen aus Etappe 3:
-Event-Ticker mit Fensterdauer und „zuletzt verfügbar am". Offen außerdem: Etappe 2
-(JSON-Datenpfad), Etappe 4/5 (Discovery, Aufnahme, Marketplace-Zeile), Etappe 6
-(optional) und Etappe 7 (Tag und Veröffentlichung).
+**Stand der Umsetzung (main):** Etappe 0, 1 und 3 vollständig. Etappe 3 umfasst den
+Live-Takt mit 20-s-Runde und Rundendeckel 12, das **Drop-Fenster** (10-s-Takt, HUD
+`FENSTER`), die **Sofortmeldung** für belegte Treffer sowie den **Event-Ticker** mit
+Fensterdauer und „zuletzt verfügbar am" je Shop. Offen: Etappe 2 (JSON-Datenpfad),
+Etappe 4/5 (Discovery, Aufnahme, Marketplace-Zeile) und Etappe 6 (optional). Etappe 7
+läuft: Tag `v1.5.1`, die CI baut die signierte APK.
 
 ---
 
@@ -240,11 +240,16 @@ sichtbar.
   „Alarm 3 s nach Erkennung") — das ist der Nachweis, dass Live etwas bringt.
 * Hintergrund bleibt bei 15 min — im HUD und in der Hilfe klar benannt, nicht schöngeredet.
 * Der Schalter in SETUP heißt weiter „Schnellscan"; nur das Verhalten dahinter ändert sich.
-* **Drop-Fenster:** In bekannten Auflegefenstern (`DROP_FENSTER`: PS Direct 09:50–10:25,
-  MediaMarkt/Saturn 09:00–11:00, je DE und AT) prüft der Scheduler den Shop alle **10 s**
-  und auch die Runde startet im 10-s-Takt; das HUD zeigt zusätzlich `FENSTER`. Ausserhalb
-  bleibt es beim normalen Takt — kein Dauerfeuer, aber wach zur richtigen Minute. Eine
-  Sperre schlägt das Fenster: nach 403/429 wird nicht im 10-s-Takt angeklopft.
+* **Drop-Fenster:** In `DROP_FENSTER` stehen nur **belegte** Zeiten, die Herkunft steht
+  als Kommentar im Code (Sony schaltet „in unregelmäßigen Abständen" frei — merkur.de,
+  10.11.2026; Stempel eines Überwachungsdienstes 09:31 und 10:28–10:35 — bestell.bar;
+  Community-Beobachtungen 08:57–17:36 — foraum.de, 11.11.2026). Daraus folgt für
+  PlayStation Direct DE/AT das Fenster **09:00–18:00**: Scheduler-Takt 10 s, Runde im
+  10-s-Takt, HUD zeigt `FENSTER`; die Rundengröße sinkt auf **6 Shops**, damit das Budget
+  von 40 Requests/Minute hält. Für **MediaMarkt/Saturn ist keine Uhrzeit belegbar**
+  (Presse und Leitfäden nennen nur „Schübe") — sie bleiben im normalen Takt, statt 10 s
+  rund um die Uhr abgefragt zu werden. Eine Sperre schlägt das Fenster: nach 403/429
+  wird nicht im 10-s-Takt angeklopft.
 * **Sofortmeldung:** Ein Treffer aus JSON-LD oder einer belegten Remote-Regel, der
   ausdrücklich `in_stock` ist und einen plausiblen Preis hat, wird **sofort** gemeldet
   (`meldebereit`); der zweite Abruf läuft direkt danach als Nachtrag, korrigiert die Karte
@@ -290,6 +295,14 @@ noch lieferte, ist der Unterschied zwischen „beobachten" und „abschreiben".
 unverändert; STOP bricht eine Live-Runde ab; Hintergrunddienst unberührt. Dazu
 Selftest-Fälle für Fensterdauer-Formatierung, Ringpuffer-Deckel und „zuletzt verfügbar"
 mit und ohne Verlauf.
+
+**Stand (umgesetzt):** `Events` (Ringpuffer `ps5pro_events.json`, 200 Einträge) schreibt
+`History.update()` bei jedem echten Wechsel — im App-Prozess **und** im Hintergrunddienst;
+`dauer_text`, `kurz_zeit`/`kurz_tag` und `event_zeile` formatieren die Zeilen. Sichtbar ist
+es an drei Stellen: `VERLAUF` in SETUP (Ticker, 30 Einträge, mit `LEEREN`), `ZULETZT
+VERFUEGBAR` und `LETZTES FENSTER` in der Detailansicht sowie `ZUL. TT.MM.` in der
+Trefferzeile ausverkaufter Shops. Die Shop-Health-Liste bleibt bewusst bei der
+Scan-Gesundheit — dort „verfügbar" mit „OK/ERROR" zu mischen, wäre irreführend.
 **Risiko:** Akku/Datenvolumen. Gegenmaßnahme: nur Vordergrund, nur bei Bedarf, WLAN-Schalter
 bleibt, Takt in SETUP sichtbar.
 
@@ -370,20 +383,20 @@ bei einem Fehler verwerfen (wie heute), Host-Limit.
 **Empfehlung:** nicht in 1.5. Etappen 4 und 5 lösen das Problem ohne diese Öffnung;
 der Cloud-Wächter (v1.6) ist der natürlichere Ort dafür.
 
-### Etappe 7 — Release 1.5.0 (1 Tag)
+### Etappe 7 — Release 1.5.1 (1 Tag)
 
-1. `buildozer.spec` **und** `buildozer.play.spec`: `version = 1.5.0`,
-   `android.numeric_version = 10500` (`MAJOR*10000 + MINOR*100 + PATCH`).
-2. README: Download-Link auf `v1.5.0`, Versionshistorie, „Was die App kann".
+1. `buildozer.spec` **und** `buildozer.play.spec`: `version = 1.5.1`,
+   `android.numeric_version = 10501` (`MAJOR*10000 + MINOR*100 + PATCH`).
+2. README: Download-Link auf `v1.5.1`, Versionshistorie, „Was die App kann".
    `docs/KONZEPT.md`: Ist-Stand. `RELEASING.md` bleibt unverändert.
-3. Gates: `validate_shop_config.py`, `selftest.py` (≥ 830 Zusicherungen),
+3. Gates: `validate_shop_config.py`, `selftest.py` (890 Zusicherungen),
    `check_hilfe_specs.py`, `unittest discover -s support_app/tests`,
    `kivy_smoke.py` in allen sechs Läufen.
-4. Tag `v1.5.0` pushen; `set_version_from_tag.sh` leitet `1.5.0` / `10500` ab.
-5. Nach dem Lauf prüfen: genau ein APK-Asset, `versionName 1.5.0`,
-   `versionCode 10500`, nicht debuggable, Signatur gegen den hinterlegten
+4. Tag `v1.5.1` pushen; `set_version_from_tag.sh` leitet `1.5.1` / `10501` ab.
+5. Nach dem Lauf prüfen: genau ein APK-Asset, `versionName 1.5.1`,
+   `versionCode 10501`, nicht debuggable, Signatur gegen den hinterlegten
    Fingerprint, Release-Notes mit SHA-256.
-6. **Rollback:** v1.4.0 bleibt als Asset. Ein Downgrade über eine installierte 1.5.0
+6. **Rollback:** v1.4.0 bleibt als Asset. Ein Downgrade über eine installierte 1.5.1
    geht wegen des höheren `versionCode` nicht — nur Deinstallation und Neuinstallation
    von 1.4.0, Datenverlust inklusive. Das steht in den Release-Notes.
 
@@ -402,7 +415,7 @@ In Release-Notes und Commits erscheint nur `xsensenmannx` (siehe `AGENTS.md`).
 | 4 | Discovery-Werkzeug | 3–4 Tage | Kandidatenbericht erzeugt |
 | 5 | Aufnahme | 2 Tage | **M2:** ≥ 3 neue Händler mit Fixture |
 | 6 | Remote-Liste (optional) | 3–5 Tage | nur auf Wunsch |
-| 7 | Release 1.5.0 | 1 Tag | **M3:** APK veröffentlicht |
+| 7 | Release 1.5.1 | 1 Tag | **M3:** APK veröffentlicht |
 
 Summe ohne Etappe 6: **rund 15 Arbeitstage** plus Puffer für Shop-Änderungen.
 

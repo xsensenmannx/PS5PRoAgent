@@ -110,11 +110,14 @@ Signal, Preistiefs und den Preisverlauf:
   fälligen Händlern — heiße Shops (letzter Zustand kaufbar) alle 30 s, stille
   alle 4 min, gestörte erst nach der Ruhepause; höchstens 12 Shops je Runde,
   damit das Budget von 40 Requests/Minute hält. Die Kopfzeile zeigt
-  `SCHNELLSCAN · 4 FÄLLIG · 20S`. In bekannten Auflegefenstern (PS Direct
-  09:50–10:25, MediaMarkt/Saturn 09:00–11:00) taktet sie auf 10 s und zeigt `FENSTER`.
-  Treffer aus JSON-LD melden sofort, die Gegenprüfung läuft parallel und stuft bei
-  Ausverkauf zurück. Im WLAN, mit Backoff nach Bot-Schutz und ohne Überlappung mit dem
-  vollen Scan. Im Hintergrund bleibt es bei 15 Minuten.
+  `SCHNELLSCAN · 4 FÄLLIG · 20S`. In belegten Auflegefenstern (PlayStation Direct
+  09:00–18:00, weil Sony über den Tag verteilt freischaltet) taktet sie auf 10 s und
+  zeigt `FENSTER`; die Runde schrumpft dann auf 6 Shops, damit das Budget von
+  40 Requests/Minute hält. Für MediaMarkt/Saturn ist keine Uhrzeit belegt — sie bleiben
+  im normalen Takt, statt 10 s rund um die Uhr abgefragt zu werden. Treffer aus JSON-LD
+  melden sofort, die Gegenprüfung läuft parallel und stuft bei Ausverkauf zurück. Im
+  WLAN, mit Backoff nach Bot-Schutz und ohne Überlappung mit dem vollen Scan. Im
+  Hintergrund bleibt es bei 15 Minuten.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
   Treffer eines Laufs werden gruppiert.
@@ -270,13 +273,15 @@ Aktueller Stand und Archiv:
   optionaler 70-%-Schwelle, Beleg-Ausschnitt mit Hash, GTIN/EAN- und
   Bundle-Erkennung, Marketplace-Hinweis und ein 304-Cache mit maximal sechs
   Stunden Alter. Dazu 777 Logiktests.
-* **v1.5.0 (unveröffentlicht, main)** – Live-Taktung statt starrer Runden:
+* **v1.5.1** – versionCode 10501: Live-Taktung statt starrer Runden:
   Scheduler im Kern (`shop_intervall`, `faellige_haendler`) mit 30 s für heiße,
   4 min für stille und 12 min für gestörte Shops, Circuit Breaker nach
   Bot-Schutz, stabilem Jitter und Rundendeckel; dazu eine Health-Auswertung pro
   Shop. Der Schnell-Modus verhält sich jetzt wie ein Live-Modus (20-s-Takt,
   fällige statt sechs feste Shops), kennt Drop-Fenster mit 10-s-Takt und meldet
-  belegte Treffer sofort, während die Verifikation parallel läuft. 850 Logiktests.
+  belegte Treffer sofort, während die Verifikation parallel läuft. Neu ist der
+  Verlauf-Ticker (SETUP → VERLAUF) mit der Dauer des abgelaufenen Fensters und
+  „zuletzt verfügbar am" je Shop, auch im ausverkauften Zustand. 890 Logiktests.
 * **Review-Fixes (unveröffentlicht, main)** – `OnlineOnly` und
   `LimitedAvailability` zählen wie `InStock`, `Discontinued` wie `SoldOut`;
   Vorbestellungen laufen wieder über den v1.3-Pfad „NUR SOFORT"; nur belegte

@@ -157,6 +157,7 @@ class SmokeApp(App):
             self.setup_center()
             self.onboarding()
             self.detail()
+            self.verlauf()
             self.no_popup()
         except Exception:
             traceback.print_exc()
@@ -540,6 +541,8 @@ class SmokeApp(App):
         check("Detail: Zustand", "NEU" in text, True)
         check("Detail: Lieferstatus", "SOFORT" in text, True)
         check("Detail: Verkaeufer", "Amazon" in text, True)
+        check("Detail: zuletzt verfuegbar", "ZULETZT VERFUEGBAR" in text, True)
+        check("Detail: ohne Verlauf noch nie verfuegbar", "NOCH NIE" in text, True)
         check("Detail: Sparkline", any(isinstance(w, main.Sparkline)
                                         for w in p.content.walk()), True)
 
@@ -561,6 +564,76 @@ class SmokeApp(App):
         check("Detail: leerer Verlauf", any("Noch zu wenig Preisverlauf" in str(getattr(w, "text", ""))
                                             for w in p.content.walk()), True)
         self.close(p, "SCHLIESSEN")
+
+    # ── Detail A/B: Verlauf und zuletzt verfuegbar ─────────────────────
+    def verlauf(self):
+        scan_core.reset_events()
+        ev = scan_core.events(); ev.clear()
+        ev.add({"typ": "verfuegbar", "haendler": "Shop A",
+                "ts": "2026-11-13T10:35:00", "start": "2026-11-13T10:35:00",
+                "dauer": None})
+        ev.add({"typ": "ausverkauft", "haendler": "Shop A",
+                "ts": "2026-11-13T10:36:35", "start": "2026-11-13T10:35:00",
+                "dauer": 95})
+        self.ui._open_setup()
+        p = self.popup("System Config mit Verlauf")
+        b = next(w for w in p.content.walk()
+                 if isinstance(w, main.PS1Button) and str(w.text).startswith("VERLAUF"))
+        check("Setup: Verlauf nennt die Anzahl", "2 EREIGNISSE" in str(b.text), True)
+        b.dispatch("on_release")
+        p = self.popup("Verlauf")
+        text = " ".join(self.texts(p))
+        check("Verlauf: Restock", "VERFÜGBAR · Shop A" in text, True)
+        check("Verlauf: Fensterdauer", "FENSTER 1 MIN" in text, True)
+        self.close(p, "ZU")
+
+        # Ausverkaufte Trefferzeile zeigt den letzten Tag (Detail B).
+        alt_filter = self.ui.filter_mode
+        self.ui.scanned = {"Shop C": {"haendler": "Shop C", "preis": 899.0,
+                                     "klass": "unavail", "land": "DE",
+                                     "zeit": "12:00", "condition": "new",
+                                     "url": "https://example.invalid/c"}}
+        self.ui.filter_mode = "alle"
+        self.ui.history.data["Shop C"] = {"preis": 899.0, "verfuegbar": False,
+                                          "verfuegbar_zeit": "2026-11-13T10:35:00",
+                                          "serie": [["2026-11-13T10:35:00", 899.0]]}
+        self.ui._clear_results()
+        self.ui._rerender(); self.pump()
+        cards = [w for w in self.ui.results_row.walk()
+                 if isinstance(w, main.ResultCard)]
+        check("Trefferzeile: ausverkauft mit letztem Tag",
+              any("ZUL. 13.11." in str(getattr(w, "text", ""))
+                  for c in cards for w in c.walk()), True)
+        self.ui.scanned = {}
+        self.ui.filter_mode = alt_filter
+        self.ui._clear_results()
+
+        # Detailansicht eines ausverkauften Shops: letzte Verfuegbarkeit und
+        # Dauer des abgelaufenen Fensters.
+        self.ui.history.data["Shop D"] = {"preis": 899.0, "verfuegbar": False,
+                                          "verfuegbar_zeit": "2026-11-13T10:35:00",
+                                          "serie": [["2026-11-13T10:35:00", 899.0]]}
+        ev.add({"typ": "ausverkauft", "haendler": "Shop D",
+                "ts": "2026-11-13T10:36:35", "start": "2026-11-13T10:35:00",
+                "dauer": 95})
+        self.ui._open_detail({"haendler": "Shop D", "preis": 899.0,
+                              "klass": "unavail", "condition": "new",
+                              "sofort": False, "signal": "jsonld",
+                              "verfuegbarkeit": "SoldOut",
+                              "url": "https://example.invalid/d"},
+                             [["2026-11-13T10:35:00", 899.0]])
+        p = self.popup("Detail ausverkauft")
+        text = " ".join(self.texts(p))
+        check("Detail: letzter Tag", "13.11., 10:35" in text, True)
+        check("Detail: letztes Fenster", "LETZTES FENSTER" in text, True)
+        check("Detail: Fensterdauer", "1 MIN" in text, True)
+        self.close(p, "SCHLIESSEN")
+
+        # LEEREN raeumt nur den Verlauf, nicht die Preishistorie.
+        self.ui._open_events()
+        p = self.popup("Verlauf leeren")
+        self.button(p, "LEEREN").dispatch("on_release"); self.pump()
+        check("Verlauf: geleert", scan_core.events().all(), [])
 
 
 # Ausserhalb der App-Klasse, damit die ersetzten globalen Funktionen die
