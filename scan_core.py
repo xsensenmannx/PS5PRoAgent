@@ -196,7 +196,10 @@ HAENDLER = [
     _h("Conrad AT","AT","https://www.conrad.at/de/search.html?search=playstation+5+pro+2tb"),
     _h("Quelle AT","AT","https://www.quelle.at/suche?q=playstation+5+pro+konsole"),
     _h("Universal AT","AT","https://www.universal.at/suche?q=playstation+5+pro+konsole"),
-    _h("Otto AT","AT","https://www.otto.at/suche/playstation-5-pro-2tb/"),
+    # Ersatz fuer "Otto AT": www.otto.at gehoert OTTO Immobilien, der Haendler
+    # OTTO hat keinen AT-Shop. e-tec ist ein oesterreichischer Haendler mit
+    # eigener Produktseite (JSON-LD, gemessen 17.11.2026).
+    _h("e-tec AT","AT","https://www.e-tec.at/de/shop/produkt/142611/sony-playstation-5-pro-digital-2tb-weiss-e-chassis.html"),
     _h("GameStop AT","AT","https://www.gamestop.at/search?q=playstation+5+pro+konsole"),
     _h("Proshop AT","AT","https://www.proshop.at/Search?s=playstation+5+pro+2tb"),
     _h("Amazon AT","AT","https://www.amazon.at/dp/B0FRYBZR91"),
@@ -1181,6 +1184,12 @@ def _try_url(u, att, proxy=None, force=False):
                 r.close(); return None,f"HTTP {r.status_code}",meta
             roh,zu_gross=_read_capped(r)
             if zu_gross: return None,"Antwort zu gross",meta
+            # UTF-8 zuerst: requests faellt fuer text/html ohne charset im
+            # Header auf ISO-8859-1 zurueck und zerlegt damit Umlaute (e-tec,
+            # gemessen 17.11.2026: "weiÃ" statt "weiß"). Erst wenn striktes
+            # UTF-8 scheitert, gilt die deklarierte Kodierung.
+            try: return roh.decode("utf-8"),None,meta
+            except UnicodeDecodeError: pass
             enc=r.encoding or "utf-8"
             try: return roh.decode(enc,errors="replace"),None,meta
             except LookupError: return roh.decode("utf-8",errors="replace"),None,meta

@@ -481,9 +481,17 @@ Abruf, keine Umgehung von Bot-Schutz.
 |---|---|---|
 | Amazon DE | HTTP 200, 2,4 MB, **0** `ld+json`-Blöcke. Kaufbox zeigte 1.469,98 € („Nur noch 1 auf Lager“); der generische Preis-Regex nahm 1.488,00 € aus einem Fremdangebot. | Neuer Pfad `extract_amazon`: liest Preis nur in `corePrice_feature_div`/`apex_desktop` (auch getrennte Ganz-/Nachkommateile), Bestand aus `id="availability"`. Fixture auf Kaufbox-Markup umgestellt. |
 | Amazon AT | Wie DE, zusätzlich war die URL eine **Suchseite** (`/s?k=…`) ohne Kaufbox. | Produktseite `/dp/B0FRYBZR91` (HTTP 200, Kaufbox vorhanden) statt Suche. |
-| Otto DE | Alle getesteten Pfade (`/suche/…` mit und ohne Schrägstrich, `/p/…`) antworten **HTTP 400** mit Kasada-Script (`window.KPSDK`), auch mit Cookies aus einem vorherigen Aufruf der Startseite und vollen Browser-Headern. Startseite selbst: 200. | Kein Umweg (KONZEPT §7). `kpsdk` gilt jetzt als Bot-Schutz: der 400er wird im Body erkannt, als `challenge` gemeldet und nicht wiederholt. |
-| Otto AT | `www.otto.at` ist **OTTO Immobilien** (Immobilienmakler), nicht der Händler; jeder Produktpfad dort ist 404. Der Händler OTTO hat keinen österreichischen Shop. | Offen: Eintrag in einem Folgeschritt durch einen AT-Händler ersetzen — das ändert Shop-Liste, Fixtures, Zähler und Store-Texte und gehört nicht in diesen Fix. |
-| Cyberport DE/AT | **Jeder** Pfad inklusive `/robots.txt`, `/sitemap.xml` und Startseite: HTTP 403 „Just a moment…“ (Cloudflare). Am 16.11. kam noch Inhalt, die Suchseite hatte aber keinen Produktpreis. | Erkennung als Bot-Schutz (kein Retry). Eine Produkt-URL lässt sich derzeit nicht belegen — bewusst keine geratene URL. Offen: Produktseite aufnehmen, sobald ein Abruf durchgeht. |
+| Otto DE | Alle getesteten Pfade (`/suche/…` mit und ohne Schrägstrich, `/p/…`) antworten **HTTP 400** mit Kasada-Script (`window.KPSDK`), auch mit Cookies aus einem vorherigen Aufruf der Startseite und vollen Browser-Headern. Startseite selbst: 200. | **Gesperrt, bleibt gelistet.** Kein Umweg (KONZEPT §7). `kpsdk` gilt als Bot-Schutz: der 400er wird im Body erkannt, als `challenge` gemeldet und nicht wiederholt. |
+| Otto AT → **e-tec AT** | `www.otto.at` ist **OTTO Immobilien** (Immobilienmakler), nicht der Händler; jeder Produktpfad dort ist 404. Der Händler OTTO hat keinen österreichischen Shop — der Eintrag war schlicht falsch und wurde am 17.11.2026 ersetzt. | Neuer AT-Eintrag **e-tec AT** (siehe nächste Zeile). Shop-Liste bleibt bei 42: `scan_core.HAENDLER`, `support_app/shops.py`, Fixture `shop-e-tec-at.json` statt `shop-otto-at.json`; `shop_config.json` und `HOT_SHOPS` unverändert. |
+| e-tec AT | Produktseite aus dem eigenen Sitemap gefunden: HTTP 200, JSON-LD mit 1.699,00 €, `InStock`, `NewCondition`, Artikel-Nr. 435526. Gelistet ist die **Digital-2-TB (E-Chassis)**; eine Disc-Variante führt e-tec derzeit nicht. Umlaute kamen zuerst als `weiÃ` an (fehlender Charset-Header) — der Abruf dekodiert jetzt UTF-8 zuerst. | Aufgenommen als AT-Ersatz, Fixture per `capture_fixture.py` aus der echten Seite erzeugt, Scan liefert `expensive` (über 900 €, AT-Deckel gilt). |
+| Cyberport DE/AT | **Jeder** Pfad inklusive `/robots.txt`, `/sitemap.xml` und Startseite: HTTP 403 „Just a moment…“ (Cloudflare), Messung 17.11.2026. Am 16.11. kam noch Inhalt, die Suchseite hatte aber keinen Produktpreis. | **Gesperrt, bleibt gelistet.** Erkennung als Bot-Schutz (kein Retry). Eine Produkt-URL lässt sich derzeit nicht belegen — bewusst keine geratene URL. Offen: Produktseite aufnehmen, sobald ein Abruf durchgeht. |
+
+**Sperren (Stand 17.11.2026):** Otto DE (Kasada, HTTP 400) und Cyberport DE/AT
+(Cloudflare, HTTP 403) sind als Händler erreichbar, aber für Produktpfade
+dauerhaft bot-gesperrt. Beide bleiben in der Liste, damit die Abdeckung sichtbar
+bleibt: Sie erscheinen im Scan und in SHOP-HEALTH als `challenge`, nicht als
+welcher Fehler auch immer, und werden nicht wiederholt. Eine Umgehung (Solver,
+Proxy-Rotation, JS-Challenge) findet nicht statt — KONZEPT §7.
 
 **Regel für Fixtures:** Was die Seite nicht hergibt, bleibt `None`. Die neuen
 Amazon-Fixtures enthalten deshalb kein JSON-LD, sondern genau die Kaufbox; der

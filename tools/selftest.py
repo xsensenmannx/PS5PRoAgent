@@ -663,6 +663,34 @@ def feature_tests():
         check("Antwort-Limit liefert nichts", roh, None)
         roh, gross = core._read_capped(_Antwort([b"12345"]))
         check("kleine Antwort bleibt", (roh, gross), (b"12345", False))
+        core.MAX_HTML_BYTES = alt_max
+
+        # UTF-8 zuerst: ohne Charset im Header dekodiert requests als
+        # ISO-8859-1, Umlaute kaemen als "weiÃY" an (e-tec, 17.11.2026).
+        class _Seite:
+            status_code = 200
+            headers = {}
+            encoding = "iso-8859-1"
+            def __init__(self, body): self.body = body
+            def iter_content(self, n): yield self.body
+            def close(self): pass
+        class _SeiteSession:
+            def __init__(self, seite): self.seite = seite
+            def get(self, *a, **k): return self.seite
+
+        alt_session = core._session
+        try:
+            core._session = lambda: _SeiteSession(
+                _Seite("<title>PS5 Pro wei\u00df</title>".encode("utf-8")))
+            html, fehler, _ = core._try_url("https://shop/utf8", 0)
+            check("HTML UTF-8 ohne Charset", (html, fehler),
+                  ("<title>PS5 Pro wei\u00df</title>", None))
+            core._session = lambda: _SeiteSession(
+                _Seite("Preis gr\u00fcn".encode("iso-8859-1")))
+            html, fehler, _ = core._try_url("https://shop/latin1", 0)
+            check("HTML deklarierte Kodierung", (html, fehler), ("Preis gr\u00fcn", None))
+        finally:
+            core._session = alt_session
 
         pfad = os.path.join(tmp, "cache.json")
         c = core.HttpCache(pfad)

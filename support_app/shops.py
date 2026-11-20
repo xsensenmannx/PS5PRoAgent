@@ -43,7 +43,7 @@ SHOPS = (
     "Conrad AT",
     "Quelle AT",
     "Universal AT",
-    "Otto AT",
+    "e-tec AT",
     "GameStop AT",
     "Proshop AT",
     "Amazon AT",
