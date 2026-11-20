@@ -217,7 +217,8 @@ def main():
         intervall = core.bg_intervall(settings.get("auto_interval"), MIN_INTERVALL)
         namen = set(settings.get("active_haendler") or [])
         haendler = [h for h in core.HAENDLER if not namen or h["name"] in namen]
-        max_preis = settings.get("max_preis", core.MAX_PREIS)
+        # Deckel je Land: AT darf einen eigenen Wert haben, sonst erbt es DE.
+        max_preis = core.preis_deckel_aus(settings)
         try:
             ergebnisse = core.scan_alle(haendler, max_preis)
         except Exception as e:

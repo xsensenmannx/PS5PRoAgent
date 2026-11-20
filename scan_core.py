@@ -47,6 +47,9 @@ def _session():
     return s
 
 MAX_PREIS, MIN_PREIS, MSRP_ZIEL = 900.0, 550.0, 799.99
+# Grenzen fuer einen gewaehlten Deckel. 400 EUR ist unter jedem realistischen
+# Preis fuer die 2-TB-Konsole, 1500 EUR deckt die teuersten AT-Angebote ab.
+DECKEL_MIN, DECKEL_MAX = 400.0, 1500.0
 PRICE_OPTIONS = [700.0, 800.0, 900.0, None]
 SORT_OPTIONS = ["Preis","Händler","Zeit"]
 AUTO_INTERVALS = [(300,"5m"),(600,"10m"),(900,"15m"),(1800,"30m"),(3600,"60m")]
@@ -57,6 +60,11 @@ TIMEOUT, WORKER = 20, 6
 RETRY_AFTER_MAX = 15
 HISTORY_FILE, SETTINGS_FILE = "ps5pro_history.json", "ps5pro_settings.json"
 HTTP_CACHE_FILE = "ps5pro_http_cache.json"
+# Kaufprotokoll: Haendler, Preis, Zeitpunkt. Bewusst klein und ohne URL -
+# es beantwortet nur "was habe ich wann fuer wie viel gekauft".
+KAEUFE_FILE = "ps5pro_kaeufe.json"
+MAX_KAEUFE = 50
+KAUF_STUMM_S = 24 * 3600
 # Obergrenze fuer eine HTML-Antwort. Manche Shops liefern riesige Kategorieseiten;
 # alles darueber ist fuer die Preiserkennung nutzlos und kostet nur Traffic.
 MAX_HTML_BYTES = 5 * 1024 * 1024
@@ -952,6 +960,41 @@ def classify(v,p,m,state=None):
     if m is None or p<=m: return "hit"
     return "expensive"
 
+
+def deckel_wert(v,ersatz=MAX_PREIS):
+    """Deckel als Zahl; ``None`` heisst "kein Deckel", Unsinn ergibt ``ersatz``.
+
+    Die Grenze DECKEL_MIN..DECKEL_MAX steht nur hier - App, Dienst und
+    Einstellungsdatei pruefen damit dieselbe Regel.
+    """
+    if v is None: return None
+    try: p=float(v)
+    except (TypeError,ValueError): return ersatz
+    return p if DECKEL_MIN<=p<=DECKEL_MAX else ersatz
+
+
+def preis_deckel(land,max_preis=None):
+    """Preis-Deckel fuer das Land eines Treffers.
+
+    ``max_preis`` ist eine Zahl (gilt fuer alle Laender), ``None`` (Standard
+    MAX_PREIS) oder ein Dict je Land; ein Land ohne Eintrag gilt als Standard.
+    """
+    if not isinstance(max_preis,dict):
+        return MAX_PREIS if max_preis is None else deckel_wert(max_preis)
+    return deckel_wert(max_preis.get(str(land or "").upper(),MAX_PREIS))
+
+
+def preis_deckel_aus(settings):
+    """Deckel je Land aus den Einstellungen: DE global, AT optional.
+
+    AT erbt den DE-Wert, solange kein eigener gesetzt ist - ohne dass
+    bestehende Einstellungen sich aendern. Ein unsinniger AT-Wert erbt
+    ebenfalls, statt mit einem stillen Standard zu ueberraschen.
+    """
+    de=deckel_wert(_setting(settings,"max_preis",MAX_PREIS))
+    at=deckel_wert(_setting(settings,"max_preis_at"),de)
+    return {"DE":de,"AT":de if at is None else at}
+
 def _read_capped(resp):
     """Liest hoechstens MAX_HTML_BYTES und meldet, ob die Antwort zu gross war."""
     stuecke=[]; gesamt=0
@@ -1426,8 +1469,11 @@ def data_dir():
     return _data_dir()
 
 def scan_alle(haendler, max_preis=None, fortschritt=None, cancel=None):
-    """Alle Haendler parallel scannen - dieselbe Logik wie im Vordergrund."""
-    mp = MAX_PREIS if max_preis is None else max_preis
+    """Alle Haendler parallel scannen - dieselbe Logik wie im Vordergrund.
+
+    ``max_preis`` ist eine Zahl, ein Dict je Land (siehe ``preis_deckel``) oder
+    None fuer den Standard.
+    """
     ergebnisse = []
     ex = ThreadPoolExecutor(max_workers=WORKER)
     try:
@@ -1439,7 +1485,8 @@ def scan_alle(haendler, max_preis=None, fortschritt=None, cancel=None):
             r = f.result()
             if r is None: continue
             if r.get("klass") not in ("error", "challenge", "unavail", "parser", "chance"):
-                r["klass"] = classify(True, r.get("preis"), mp)
+                r["klass"] = classify(True, r.get("preis"),
+                                      preis_deckel(r.get("land"), max_preis))
             ergebnisse.append(r)
             if fortschritt is not None:
                 try: fortschritt(len(ergebnisse), len(haendler))
@@ -2141,6 +2188,45 @@ class History:
             os.replace(tmp,self.path)
         except Exception: pass
 
+class Kaeufe:
+    """Kaufprotokoll: Haendler, Preis und Zeitpunkt der "Gekauft"-Markierung."""
+    def __init__(self,path=None):
+        self.path=path or os.path.join(_data_dir(),KAEUFE_FILE)
+        self.data=self._laden()
+    def _laden(self):
+        try:
+            with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
+        except Exception: return []
+        return [dict(e) for e in data if isinstance(e,dict)] if isinstance(data,list) else []
+    def alle(self): return [dict(e) for e in self.data]
+    def letzter(self,haendler):
+        for e in reversed(self.data):
+            if str(e.get("haendler") or "")==str(haendler or ""): return dict(e)
+        return None
+    def merken(self,r,jetzt=None):
+        """Einen Kauf festhalten. Rueckgabe des Eintrags oder None."""
+        if not isinstance(r,dict): return None
+        ts=jetzt if isinstance(jetzt,datetime) else datetime.now()
+        try: preis=None if r.get("preis") is None else float(r["preis"])
+        except (TypeError,ValueError): preis=None
+        eintrag={"haendler":str(r.get("haendler") or "?"),"preis":preis,
+                 "ts":ts.replace(microsecond=0).isoformat()}
+        self.data=(self.data+[eintrag])[-MAX_KAEUFE:]
+        try: _json_schreiben(self.path,self.data)
+        except Exception: pass
+        return eintrag
+
+
+def stumm_bis(settings,haendler,jetzt=None):
+    """Ende der zeitlichen Stummschaltung (epoch) oder None, wenn abgelaufen."""
+    bis=_setting(settings,"mute_bis",{}) or {}
+    if not isinstance(bis,dict): return None
+    try: ende=float(bis.get(str(haendler or "")) or 0)
+    except (TypeError,ValueError): return None
+    jetzt=time.time() if jetzt is None else jetzt
+    return ende if ende>jetzt else None
+
+
 class Settings:
     def __init__(self):
         self.path=os.path.join(_data_dir(),SETTINGS_FILE)
@@ -2188,6 +2274,9 @@ def alarm_erlaubt(r,tief,settings,jetzt=None):
     try:
         if r.get("haendler") in set(stumm): return False
     except TypeError: pass
+    # "Gekauft" schaltet den Shop 24 Stunden stumm: nach dem Kauf ist jede
+    # weitere Meldung fuer denselben Shop nur Laerm.
+    if stumm_bis(settings,r.get("haendler")): return False
     if _setting(settings,"quiet_hours",False):
         try:
             start=int(_setting(settings,"quiet_start",23)); end=int(_setting(settings,"quiet_end",7))

@@ -67,7 +67,8 @@ Signal, Preistiefs und den Preisverlauf:
   inklusive Filter gegen Zubehör (DualSense Edge, Portal, Laufwerk …) und gegen alles,
   was nicht die 2-TB-Konsole ist. Bei mehreren Angeboten gewinnt das günstigste
   neue Angebot vor Gebrauchtware; Fremdwährungen werden nicht als Euro gezählt.
-* **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen),
+* **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen
+  für Deutschland, eigener Deckel für Österreich, der sonst den DE-Wert erbt),
   sonst „ZU TEUER"; Bot-Schutz und Fehler werden getrennt ausgewiesen.
 * **Verfügbarkeitszustände (v1.4)**: `InStoreOnly`, Vorbestellung,
   Nachbestellung, Lotterie, Einladung und Ausverkauf sind getrennte Zustände;
@@ -98,6 +99,9 @@ Signal, Preistiefs und den Preisverlauf:
 * **Alarm-Regeln**: nur sofort verfügbar, nur echte Tiefstpreise, Ruhezeit
   23–07, eigene Preisgrenze und Händler-Stummschaltung. Ein Restock wird auch
   dann gemeldet, wenn der Preis gegenüber dem letzten Treffer unverändert ist.
+* **Gekauft**: markiert einen Treffer als gekauft, schaltet den Shop 24 Stunden
+  stumm („HANDLER LAUT" hebt das wieder auf) und hält Preis und Zeitpunkt im
+  Kaufprotokoll fest (sichtbar in der Detailansicht).
 * **Webhook-Alarme**: optional zusätzlich zur Android-Meldung an **ntfy**,
   **Telegram** oder einen **Discord**-Webhook (oder eine eigene HTTPS-URL).
   Der Testknopf in SETUP zeigt den HTTP-Status. Eine gemeinsame Dedupe-Datei

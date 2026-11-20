@@ -451,6 +451,7 @@ class SmokeApp(App):
         check("Setup: Titel", "SYSTEM CONFIG" in text, True)
         check("Setup: Scan-Aktionen", "AUTO-SCAN" in text and "INTERVALL" in text, True)
         check("Setup: Filter-Aktionen", "MAX-PREIS" in text and "SORTIERUNG" in text, True)
+        check("Setup: Deckel je Land", "MAX-PREIS DE" in text and "MAX-PREIS AT" in text, True)
         check("Setup: Schrift-Skalierung", "SCHRIFT" in text and "100 %" in text, True)
         check("Setup: System-Aktionen", "SHOP-HEALTH" in text and "ALARM-REGELN" in text, True)
         check("Setup: Alarm-Kanal", "WEBHOOK" in text and "WEBHOOK-TEST" in text, True)
@@ -568,6 +569,28 @@ class SmokeApp(App):
         p = self.popup("Detailansicht ohne Serie")
         check("Detail: leerer Verlauf", any("Noch zu wenig Preisverlauf" in str(getattr(w, "text", ""))
                                             for w in p.content.walk()), True)
+        self.close(p, "SCHLIESSEN")
+
+        # Gekauft: Preis und Zeitpunkt ins Protokoll, Shop 24 Stunden stumm.
+        self.ui.settings.set("mute_bis", {})
+        self.ui._open_detail(result, serie)
+        p = self.popup("Detail mit Kauf")
+        self.button(p, "GEKAUFT · 24 H STUMM").dispatch("on_release")
+        bis = self.ui.settings.get("mute_bis") or {}
+        check("Detail: Gekauft schaltet stumm", "Amazon DE" in bis, True)
+        check("Detail: Gekauft laeuft 24 h", bis.get("Amazon DE", 0) > time.time() + 86000,
+              True)
+        kauf = main.Kaeufe().letzter("Amazon DE") or {}
+        check("Detail: Gekauft protokolliert", kauf.get("preis"), 799.0)
+        self.close(p, "SCHLIESSEN")
+        # Beim naechsten Oeffnen steht der Kauf mit Preis und Zeit in der Liste.
+        self.ui._open_detail(result, serie)
+        p = self.popup("Detail nach Kauf")
+        check("Detail: Kauf-Zeile", any("GEKAUFT" in str(getattr(w, "text", ""))
+                                         for w in p.content.walk()), True)
+        check("Detail: Kauf-Stummstand sichtbar",
+              any(str(getattr(w, "text", "")).startswith("GEKAUFT · STUMM BIS")
+                  for w in p.content.walk()), True)
         self.close(p, "SCHLIESSEN")
 
     # ── Detail A/B: Verlauf und zuletzt verfuegbar ─────────────────────

@@ -45,10 +45,14 @@ from scan_core import (
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
     dauer_text, kurz_zeit, kurz_tag, zeitraum_text, event_zeile, events as verlauf_events,
+    preis_deckel, deckel_wert, stumm_bis, Kaeufe, KAUF_STUMM_S,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
 PRICE_OPTIONS = [700.0, 800.0, 900.0, None]
+# AT-Deckel: None heisst "wie DE". Die Werte liegen bewusst etwas hoeher -
+# AT-Angebote lagen in den Messungen regelmaessig ueber den DE-Preisen.
+PRICE_OPTIONS_AT = [None, 800.0, 900.0, 1000.0, 1100.0]
 SORT_OPTIONS = ["Preis","H\u00e4ndler","Zeit"]
 AUTO_INTERVALS = [(300,"5m"),(600,"10m"),(900,"15m"),(1800,"30m"),(3600,"60m")]
 FONT_SCALES = [1.0,1.1,1.2]
@@ -1339,12 +1343,10 @@ class MainUI(FloatLayout):
         if self.filter_mode not in ("verfuegbar","alle"): self.filter_mode="verfuegbar"
         self.sort_mode=self.settings.get("sort","Preis")
         if self.sort_mode not in SORT_OPTIONS: self.sort_mode="Preis"
-        mp=self.settings.get("max_preis",MAX_PREIS)
-        try:
-            self.max_preis=(None if mp is None else float(mp))
-            if self.max_preis is not None and not (400<=self.max_preis<=1500):
-                self.max_preis=MAX_PREIS
-        except (TypeError,ValueError): self.max_preis=MAX_PREIS
+        # Grenzen und Normalisierung liegen in scan_core (deckel_wert).
+        self.max_preis=deckel_wert(self.settings.get("max_preis",MAX_PREIS))
+        # Eigener Deckel fuer AT; None heisst "erbt den DE-Wert".
+        self.max_preis_at=deckel_wert(self.settings.get("max_preis_at"),None)
         self.auto_scan=bool(self.settings.get("auto_scan",False))
         ai=self.settings.get("auto_interval",600)
         self.auto_interval=ai if ai in [x[0] for x in AUTO_INTERVALS] else 600
@@ -1559,6 +1561,12 @@ class MainUI(FloatLayout):
         return lbl.replace("m"," MIN").upper()
     def _max_text(self):
         return "MAX OFFEN" if self.max_preis is None else f"MAX {int(self.max_preis)} €"
+    def _max_at_text(self):
+        return "WIE DE" if self.max_preis_at is None else f"{int(self.max_preis_at)} €"
+    def _deckel(self,land):
+        """Deckel fuer das Land des Treffers; AT erbt DE, solange es keinen gibt."""
+        if self.max_preis_at is None: return preis_deckel(land,{"DE":self.max_preis})
+        return preis_deckel(land,{"DE":self.max_preis,"AT":self.max_preis_at})
     def _sort_text(self):
         return f"SORT: {self.sort_mode.upper()}"
 
@@ -1704,13 +1712,20 @@ class MainUI(FloatLayout):
         self.max_preis_chip.text=self._max_text()
         self.settings.set("max_preis",self.max_preis)
         self._reclassify_all(); self._rerender()
+    def _cycle_max_preis_at(self):
+        try: idx=PRICE_OPTIONS_AT.index(self.max_preis_at)
+        except ValueError: idx=0
+        self.max_preis_at=PRICE_OPTIONS_AT[(idx+1)%len(PRICE_OPTIONS_AT)]
+        self.settings.set("max_preis_at",self.max_preis_at)
+        self._reclassify_all(); self._rerender()
     def _reclassify_all(self):
         for r in self.scanned.values():
             if r["klass"] in ("error","challenge","unavail","parser","chance"): continue
             if r.get("avail_state") in CHANCE_STATES:
                 r["klass"]="chance"; continue
+            deckel=self._deckel(r.get("land"))
             if r["preis"] is None: r["klass"]="unknown"
-            elif self.max_preis is None or r["preis"]<=self.max_preis: r["klass"]="hit"
+            elif deckel is None or r["preis"]<=deckel: r["klass"]="hit"
             else: r["klass"]="expensive"
         nb=[]
         for b in self.radar.blips:
@@ -2012,9 +2027,10 @@ class MainUI(FloatLayout):
                self._toggle_notify,PS1_PINK)
 
         section("TREFFER")
-        action("MAX-PREIS",lambda: ("OFFEN" if self.max_preis is None
-                                     else f"{int(self.max_preis)} €"),
+        action("MAX-PREIS DE",lambda: ("OFFEN" if self.max_preis is None
+                                        else f"{int(self.max_preis)} €"),
                self._cycle_max_preis,PS1_RED)
+        action("MAX-PREIS AT",self._max_at_text,self._cycle_max_preis_at,PS1_RED)
         action("SORTIERUNG",lambda: self.sort_mode.upper(),self._cycle_sort,PS1_BLUE)
         action("SCHRIFT",lambda: f"{int(self.font_scale*100)} %",
                self._cycle_font_scale,PS1_CYAN)
@@ -2157,6 +2173,7 @@ class MainUI(FloatLayout):
                      font_size=sp(9),size_hint_y=None,height=dp(30))
         def clear_mute(*_):
             self.settings.set("mute_haendler",[])
+            self.settings.set("mute_bis",{})
             mb.text="STUMME SHOPS: 0  ·  LISTE LEEREN"
             self._toast("STUMM-LISTE GELEERT",color=PS1_GREY)
         mb.bind(on_release=clear_mute); box.add_widget(mb)
@@ -2407,6 +2424,12 @@ class MainUI(FloatLayout):
         hzustand=Health().all().get(name) or {}
         if hzustand.get("last_ts"):
             zeilen.append(("ZULETZT GEPRUEFT", self._age_text(hzustand["last_ts"])+" alt"))
+        # Kaufprotokoll: Preis und Zeitpunkt der eigenen "Gekauft"-Markierung.
+        kauf=Kaeufe().letzter(name)
+        if isinstance(kauf,dict) and kauf.get("ts"):
+            preis_txt=(format_preis(kauf["preis"]) if kauf.get("preis") is not None
+                       else "—")
+            zeilen.append(("GEKAUFT", f"{preis_txt} · {kurz_zeit(kauf.get('ts'))}"))
         for k,v in zeilen:
             row=BoxLayout(size_hint_y=None,height=dp(20))
             a=Label(text=k,color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
@@ -2441,10 +2464,36 @@ class MainUI(FloatLayout):
             if name in mute: mute.discard(name)
             else: mute.add(name)
             self.settings.set("mute_haendler",sorted(mute))
+            if name not in mute:
+                # "LAUT" muss auch eine Kauf-Stummschaltung aufheben, sonst
+                # bliebe der Shop ohne sichtbaren Weg 24 h still.
+                bis=dict(self.settings.get("mute_bis",{}) or {})
+                if bis.pop(name,None) is not None:
+                    self.settings.set("mute_bis",bis)
             mb.text="HANDLER LAUT" if name in mute else "HANDLER STUMM"
             self._toast("HANDLER STUMM" if name in mute else "HANDLER LAUT",
                         color=PS1_GREY)
         mb.bind(on_release=toggle_mute); box.add_widget(mb)
+        # Gekauft: Preis und Zeitpunkt ins Protokoll, den Shop 24 Stunden
+        # stumm. Das wirkt auch im Dienst, weil alarm_erlaubt die Frist liest.
+        kb=PS1Button(text="GEKAUFT · 24 H STUMM",accent=PS1_GREEN,
+                     font_size=sp(9),size_hint_y=None,height=dp(32))
+        bis_ende=stumm_bis(self.settings,name)
+        if bis_ende:
+            kb.text="GEKAUFT · STUMM BIS "+time.strftime("%H:%M",
+                                                         time.localtime(bis_ende))
+        def kaufen(*_):
+            eintrag=Kaeufe().merken(r)
+            bis=dict(self.settings.get("mute_bis",{}) or {})
+            ende=time.time()+KAUF_STUMM_S
+            bis[name]=ende
+            self.settings.set("mute_bis",bis)
+            kb.text="GEKAUFT · STUMM BIS "+time.strftime("%H:%M",time.localtime(ende))
+            if eintrag:
+                self._toast(f"GEKAUFT · {name} 24 H STUMM",color=PS1_GREEN)
+            else:
+                self._toast("KAUF NICHT GESPEICHERT",color=PS1_YELLOW)
+        kb.bind(on_release=kaufen); box.add_widget(kb)
         row=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
         ob=PS1Button(text="SHOP OEFFNEN",accent=PS1_GREEN,font_size=sp(9))
         cb=PS1Button(text="SCHLIESSEN",accent=PS1_SILVER,font_size=sp(9))
@@ -2498,7 +2547,7 @@ class MainUI(FloatLayout):
             if not isinstance(r,dict) or not r.get("haendler"): continue
             try:
                 if r.get("klass") not in ("error","challenge","unavail","parser"):
-                    r["klass"]=classify(True,r.get("preis"),self.max_preis)
+                    r["klass"]=classify(True,r.get("preis"),self._deckel(r.get("land")))
                 self.scanned[r["haendler"]]=r
             except Exception: continue
         # Der Service hat die History bereits fortgeschrieben - neu einlesen,
@@ -2785,7 +2834,8 @@ class MainUI(FloatLayout):
         self._update_radar_hud()
         try:
             if r["klass"] not in ("error","challenge","unavail","parser","chance"):
-                r["klass"]=classify(True,r["preis"],self.max_preis,r.get("avail_state"))
+                r["klass"]=classify(True,r["preis"],self._deckel(r.get("land")),
+                                    r.get("avail_state"))
             prev=self.history.get_last(name)
             vorher_av=self.history.get_verfuegbar(name)
             ereignis=alarm_ereignis(r,prev,vorher_av)

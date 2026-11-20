@@ -576,6 +576,18 @@ def service_tests():
           ["expensive", "hit"])
     check("scan_alle liefert alle", len(rs), 2)
 
+    # Deckel je Land: derselbe Preis ist in AT ein Treffer, in DE zu teuer.
+    core._safe_scan = fake
+    try:
+        rs = core.scan_alle([{"name": "C", "land": "DE", "urls": ["https://c.de"]},
+                             {"name": "D", "land": "AT", "urls": ["https://d.at"]}],
+                            {"DE": 900.0, "AT": 1000.0})
+    finally:
+        core._safe_scan = alt
+    check("scan_alle Deckel je Land",
+          {r["haendler"]: r["klass"] for r in rs},
+          {"C": "expensive", "D": "hit"})
+
 
 def spec_tests():
     """Der Build-Pin entscheidet ueber Erfolg oder Abbruch - deshalb geprueft.
@@ -1746,6 +1758,79 @@ def webhook_tests():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def deckel_tests():
+    """Preis-Deckel je Land: AT darf einen eigenen Wert haben."""
+    check("Deckel Zahl", core.preis_deckel("DE", 900.0), 900.0)
+    check("Deckel ohne Angabe", core.preis_deckel("DE", None), core.MAX_PREIS)
+    check("Deckel offen", core.preis_deckel("DE", {"DE": None}), None)
+    check("Deckel Dict DE", core.preis_deckel("DE", {"DE": 900.0, "AT": 1000.0}), 900.0)
+    check("Deckel Dict AT", core.preis_deckel("AT", {"DE": 900.0, "AT": 1000.0}), 1000.0)
+    check("Deckel Dict klein geschrieben", core.preis_deckel("at", {"AT": 1000.0}), 1000.0)
+    check("Deckel Land ohne Eintrag", core.preis_deckel("CH", {"DE": 900.0}),
+          core.MAX_PREIS)
+    check("Deckel Unsinn faellt zurueck", core.preis_deckel("DE", 12), core.MAX_PREIS)
+    check("Deckel Grenze", core.deckel_wert(core.DECKEL_MAX), core.DECKEL_MAX)
+    check("Deckel ausserhalb", core.deckel_wert(core.DECKEL_MAX + 1), core.MAX_PREIS)
+    check("Deckel Ersatzwert", core.deckel_wert("x", None), None)
+
+    class _S:
+        def __init__(self, d): self.d = d
+        def get(self, k, d=None): return self.d.get(k, d)
+
+    check("Deckel aus Einstellungen erbt",
+          core.preis_deckel_aus(_S({"max_preis": 900.0})),
+          {"DE": 900.0, "AT": 900.0})
+    check("Deckel aus Einstellungen mit AT",
+          core.preis_deckel_aus(_S({"max_preis": 900.0, "max_preis_at": 1000.0})),
+          {"DE": 900.0, "AT": 1000.0})
+    check("Deckel aus Einstellungen offen",
+          core.preis_deckel_aus(_S({"max_preis": None})),
+          {"DE": None, "AT": None})
+    check("Deckel aus Einstellungen unsinniges AT erbt",
+          core.preis_deckel_aus(_S({"max_preis": 850.0, "max_preis_at": 99})),
+          {"DE": 850.0, "AT": 850.0})
+
+
+def kauf_tests():
+    """"Gekauft": Protokoll mit Preis/Zeit und 24 Stunden Stumm-Schaltung."""
+    alt_dir = core._data_dir()
+    tmp = tempfile.mkdtemp(prefix="ps5pro-kauf-")
+    try:
+        core.set_data_dir(tmp)
+        k = core.Kaeufe()
+        check("Kauf: Protokoll leer", k.alle(), [])
+        e = k.merken({"haendler": "Amazon DE", "preis": 799.0, "land": "DE"})
+        check("Kauf: Haendler", e.get("haendler"), "Amazon DE")
+        check("Kauf: Preis", e.get("preis"), 799.0)
+        check("Kauf: Zeitpunkt lesbar", core.kurz_zeit(e.get("ts")) != "", True)
+        check("Kauf: auf Platte", core.Kaeufe().letzter("Amazon DE").get("preis"),
+              799.0)
+        k.merken({"haendler": "Saturn DE", "preis": 819.0})
+        check("Kauf: letzter je Shop", core.Kaeufe().letzter("Amazon DE").get("preis"),
+              799.0)
+        check("Kauf: zwei Eintraege", len(core.Kaeufe().alle()), 2)
+        check("Kauf: ohne Preis",
+              core.Kaeufe().merken({"haendler": "Otto DE"}).get("preis"), None)
+
+        # 24 Stunden stumm: innerhalb der Frist kein Alarm, danach wieder.
+        jetzt = time.time()
+        settings = {"mute_bis": {"Amazon DE": jetzt + 3600}}
+        treffer = {"haendler": "Amazon DE", "preis": 799.0, "klass": "hit",
+                   "condition": "new", "sofort": True}
+        check("Gekauft: stumm", core.alarm_erlaubt(treffer, None, settings), False)
+        check("Gekauft: Ende bekannt",
+              core.stumm_bis(settings, "Amazon DE") is not None, True)
+        check("Gekauft: nach Ablauf wieder laut",
+              core.alarm_erlaubt(treffer, None,
+                                 {"mute_bis": {"Amazon DE": jetzt - 1}}), True)
+        check("Gekauft: anderer Shop bleibt laut",
+              core.alarm_erlaubt(dict(treffer, haendler="Saturn DE"), None, settings),
+              True)
+    finally:
+        core.set_data_dir(alt_dir)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def amazon_tests():
     """Amazon ohne JSON-LD: nur die Kaufbox zaehlt, kein Fremdpreis."""
     kaufbox = ('<div id="corePrice_feature_div"><span class="a-price">'
@@ -1806,6 +1891,8 @@ if __name__ == "__main__":
         capture_helper_tests()
         v13_tests()
         webhook_tests()
+        deckel_tests()
+        kauf_tests()
         v14_tests()
         live_tests()
         spec_tests()
