@@ -175,13 +175,24 @@ class DiagnoseScreen(Screen):
         knoepfe.add_widget(beispiel)
         root.add_widget(knoepfe)
 
+        self.plan_knopf = Button(
+            text="PLAN KOPIEREN", size_hint_y=None, height=dp(40),
+            bold=True, font_size=dp(11), background_normal="",
+            background_color=PANEL, color=TEXT, disabled_color=MUTED,
+        )
+        self.plan_knopf.bind(on_release=self.plan_kopieren)
+        self.plan_knopf.disabled = True
+        root.add_widget(self.plan_knopf)
+        self._plan = ""
+
         self.liste = BlasenListe()
         self.sv = _scrollbereich(self.liste)
         root.add_widget(self.sv)
         self.add_widget(root)
         self.schreibe(
             "Füge den Diagnose-Block aus dem Radar ein. Ich suche Shops, "
-            "letzten Scan, Treffer, Konfidenz, Webhook-Fehler und 403/429."
+            "letzten Scan, Treffer, Konfidenz, Webhook-Fehler und 403/429. "
+            "Nach der Prüfung kannst du den priorisierten Lösungsplan kopieren."
         )
 
     def schreibe(self, text, bg=None):
@@ -190,9 +201,27 @@ class DiagnoseScreen(Screen):
 
     def beispiel(self, *_):
         self.eingabe.text = support_core.BEISPIEL_BERICHT
+        self._plan = ""
+        self.plan_knopf.disabled = True
+
+    def plan_kopieren(self, *_):
+        """Kopiert den priorisierten Plan in die Zwischenablage."""
+        if not self._plan:
+            return
+        try:
+            Clipboard.copy(self._plan)
+        except Exception:
+            self.schreibe("Der Lösungsplan konnte nicht kopiert werden.")
+            return
+        self.schreibe(
+            "Lösungsplan kopiert. Arbeite die Schritte von oben nach unten "
+            "ab; die Einstellungen stehen jeweils in der Aktion."
+        )
 
     def pruefen(self, *_):
         text = self.eingabe.text.strip()
+        self._plan = ""
+        self.plan_knopf.disabled = True
         self.liste.clear_widgets()
         if len(text) < 5:
             self.schreibe("Der Bericht ist leer. Kopiere den Diagnose-Block "
@@ -210,6 +239,14 @@ class DiagnoseScreen(Screen):
                 "%s · %s\n\n%s" % (befund["stufe"].upper(), befund["titel"],
                                    befund["text"]),
                 bg=STUFE_FARBE.get(befund["stufe"], PANEL),
+            )
+        self._plan = support_core.loesungsplan(bericht, befunde)
+        self.plan_knopf.disabled = not bool(self._plan)
+        if self._plan:
+            self.schreibe(
+                "Lösungsplan bereit: %d Schritte, nach Dringlichkeit "
+                "sortiert. Mit „PLAN KOPIEREN“ in die Zwischenablage legen."
+                % len(befunde)
             )
 
 

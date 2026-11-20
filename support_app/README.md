@@ -22,7 +22,7 @@ spricht die App mit dem Netz, und der Key bleibt im privaten App-Speicher.
 |---|---|
 | Fragen | Freitextfragen gegen 16 Themenkarten, umlaut- und umgangssprachfest |
 | Suche | Wunsch wie „unter 700, nur Amazon, nur neu“ wird zu Einstellungen, Schritten und Hinweisen — mit den echten Schlüsseln des Radars |
-| Diagnose | Füge den Diagnose-Text aus dem Radar ein: Shops, letzter Scan, Treffer, Konfidenz, Webhook-Fehler, 403/429 |
+| Diagnose | Füge den Diagnose-Text aus dem Radar ein: Shops, letzter Scan, Treffer, Konfidenz, Webhook-Fehler, 403/429. Danach steht ein priorisierter Lösungsplan zum Kopieren bereit |
 | Themen | Alle Karten als Liste, ein Tipp öffnet die Antwort im Chat; unten Version und Release-Link (öffnet nur auf Klick) |
 | KI | Optional: Freitext an ein Modell des gewählten Anbieters, mit eigenem Key; passende Karten gehen als Beleg mit, Antworten sind kurz. Die letzte Antwort lässt sich mit Kategorie und optionaler Notiz melden |
 
@@ -30,7 +30,8 @@ spricht die App mit dem Netz, und der Key bleibt im privaten App-Speicher.
 
 - **Sie liest keine Daten des Radars.** Android erlaubt keiner App den Zugriff
   auf den privaten Speicher einer anderen. Deshalb der Weg über den
-  Diagnose-Text: kopieren, einfügen, prüfen.
+  Diagnose-Text: kopieren, einfügen, prüfen — der priorisierte Lösungsplan
+  lässt sich anschließend mit einem Tipp kopieren.
 - Ohne Key keine Modell-Antworten: Jede Antwort ist dann eine feste,
   prüfbare Karte.
 - Kein eingebauter Key und keine Telemetrie. Die KI kostet Guthaben des

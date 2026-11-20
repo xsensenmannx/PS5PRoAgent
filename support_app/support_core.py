@@ -285,6 +285,10 @@ def diagnose(bericht):
                 "Diagnose-Block aus dem Radar ein — er enthält Shops, letzten "
                 "Scan, Treffer, Konfidenz und Fehlercodes."
             ),
+            "aktion": (
+                "Diagnose-Block erneut kopieren und auf Paket, Shops, letzten "
+                "Scan, Treffer, Konfidenz und Webhook prüfen."
+            ),
         }]
 
     befunde = []
@@ -304,6 +308,10 @@ def diagnose(bericht):
                 "schalte VPN oder Proxy aus. Weitere Versuche verlängern die "
                 "Sperre nur." % " · ".join(teile)
             ),
+            "aktion": (
+                "Scan 10–30 Minuten pausieren, Intervall auf 15–30 Minuten "
+                "stellen und VPN/Proxy ausschalten."
+            ),
         })
 
     if bericht["webhook_fehler"]:
@@ -315,6 +323,10 @@ def diagnose(bericht):
                 "401/403 heißt meist falscher oder abgelaufener Token, 404 eine "
                 "falsche Topic- oder Chat-ID. Ein Testalarm zeigt es sofort."
                 % bericht["webhook_fehler"]
+            ),
+            "aktion": (
+                "Webhook-Preset öffnen, Token und URL neu einsetzen und einen "
+                "Testalarm senden."
             ),
         })
 
@@ -328,6 +340,10 @@ def diagnose(bericht):
                 "Zeitüberschreitungen oder daran, dass Android den Dienst beendet."
                 % bericht["shops"]
             ),
+            "aktion": (
+                "Akku-Optimierung und Autostart prüfen, Intervall erhöhen und "
+                "einen Scan im Vordergrund testen."
+            ),
         })
 
     if bericht["konfidenz"] is not None and 0 < bericht["konfidenz"] < 70:
@@ -338,6 +354,10 @@ def diagnose(bericht):
                 "%d liegt unter 70. Solche Treffer werden bewusst nicht "
                 "gemeldet. Senke die Schwelle nur, wenn du Falschalarme "
                 "akzeptierst — oder prüfe den Beleg im Detail." % bericht["konfidenz"]
+            ),
+            "aktion": (
+                "Beleg im Treffer-Detail prüfen; die Schwelle nur bewusst "
+                "senken."
             ),
         })
 
@@ -350,6 +370,10 @@ def diagnose(bericht):
                 "Konfidenz-Schwelle und „nur bestätigte“. Erst wenn dieselben "
                 "Shops über Tage 403/429 liefern, ist die Abdeckung das Problem."
             ),
+            "aktion": (
+                "Preisgrenze, Konfidenz und „nur bestätigte“ prüfen; erst "
+                "dann einen Treffer erwarten."
+            ),
         })
 
     if bericht["paket"] == "de.ps5pro.ps5prosearchagent":
@@ -361,10 +385,32 @@ def diagnose(bericht):
                 "Store, und die Play-App hat ein eigenes Paket mit getrennten "
                 "Daten."
             ),
+            "aktion": (
+                "Update-Weg der Sideload-App prüfen; Play- und Sideload-Daten "
+                "bleiben getrennt."
+            ),
         })
 
     befunde.sort(key=lambda b: _STUFE_RANG.get(b["stufe"], 9))
     return befunde
+
+
+def loesungsplan(bericht, befunde=None):
+    """Priorisierter, kopierbarer Plan aus den Diagnosebefunden."""
+    if befunde is None:
+        befunde = diagnose(bericht)
+    if not befunde:
+        return ""
+    zeilen = ["LÖSUNGSPLAN", summarize(bericht), "",
+              "In dieser Reihenfolge abarbeiten:"]
+    for nummer, befund in enumerate(befunde, 1):
+        aktion = (befund.get("aktion") or
+                  "Befund im Diagnose-Reiter prüfen.")
+        zeilen.append("%d. [%s] %s" % (
+            nummer, befund.get("stufe", "info").upper(),
+            befund.get("titel", "Befund")))
+        zeilen.append("   " + aktion)
+    return "\n".join(zeilen)
 
 
 def summarize(bericht):

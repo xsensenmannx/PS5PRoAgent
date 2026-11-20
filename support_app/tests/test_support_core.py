@@ -144,6 +144,24 @@ class BerichtTest(unittest.TestCase):
         self.assertIn("42 Shops", text)
         self.assertIn("12:04", text)
 
+    def test_loesungsplan_ist_priorisiert_und_kopierbar(self):
+        bericht = support_core.parse_report(support_core.BEISPIEL_BERICHT)
+        befunde = support_core.diagnose(bericht)
+        plan = support_core.loesungsplan(bericht, befunde)
+        self.assertIn("LÖSUNGSPLAN", plan)
+        self.assertIn("42 Shops", plan)
+        self.assertIn("[HOCH]", plan)
+        self.assertIn("[INFO]", plan)
+        self.assertIn("Scan 10–30 Minuten pausieren", plan)
+        self.assertLess(plan.index("[HOCH]"), plan.index("[INFO]"))
+        self.assertTrue(all(befund.get("aktion") for befund in befunde))
+
+    def test_loesungsplan_ohne_befund_ist_leer(self):
+        bericht = support_core.parse_report(
+            "Paket: de.konsolenradar.app\nShops: 42\nTreffer: 1\nKonfidenz: 80")
+        self.assertEqual(support_core.diagnose(bericht), [])
+        self.assertEqual(support_core.loesungsplan(bericht), "")
+
 
 if __name__ == "__main__":
     unittest.main()
