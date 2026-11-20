@@ -442,6 +442,9 @@ class SmokeApp(App):
               scaled_hint.height >= scaled_size[1], True)
 
     def setup_center(self):
+        # Eine gescheiterte Zustellung muss in SETUP stehen, nicht nur im Toast:
+        # genau dieser Eintrag bleibt auch nach einem Neustart sichtbar.
+        main.webhook_status_merken(False, "HTTP 401", "Otto DE")
         self.ui._open_setup()
         p = self.popup("System Config")
         text = " ".join(self.texts(p))
@@ -451,6 +454,8 @@ class SmokeApp(App):
         check("Setup: Schrift-Skalierung", "SCHRIFT" in text and "100 %" in text, True)
         check("Setup: System-Aktionen", "SHOP-HEALTH" in text and "ALARM-REGELN" in text, True)
         check("Setup: Alarm-Kanal", "WEBHOOK" in text and "WEBHOOK-TEST" in text, True)
+        check("Setup: Webhook-Fehlschlag sichtbar",
+              "LETZTE ZUSTELLUNG" in text and "FEHLGESCHLAGEN" in text, True)
         check("Setup: Schnellscan", "SCHNELLSCAN" in text, True)
         felder = [w for w in p.walk() if isinstance(w, main.TextInput)]
         check("Setup: Webhook-Feld", len(felder) >= 1, True)

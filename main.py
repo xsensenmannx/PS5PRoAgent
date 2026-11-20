@@ -41,6 +41,7 @@ from scan_core import (
     alarm_erlaubt, alarm_ereignis, ist_gebraucht, install_crash_hook, read_crash_log,
     lade_shop_config, aktualisiere_shop_config, flush_http_cache,
     webhook_senden, webhook_preset, redact_url, sende_webhook_alarm,
+    webhook_status_lesen, webhook_status_merken,
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
     dauer_text, kurz_zeit, kurz_tag, zeitraum_text, event_zeile, events as verlauf_events,
@@ -1840,6 +1841,8 @@ class MainUI(FloatLayout):
                 if res is None: return
                 ok,info=res
                 self.webhook_status=("OK" if ok else str(info)[:40])
+                try: Clock.schedule_once(lambda dt:self._refresh_webhook_status(),0)
+                except Exception: pass
                 if not ok:
                     try:
                         Clock.schedule_once(
@@ -1853,6 +1856,31 @@ class MainUI(FloatLayout):
         txt=f"{webhook_preset(self.webhook_url).upper()} · {redact_url(self.webhook_url)}"
         return txt+(" · "+self.webhook_status if self.webhook_status else "")
 
+    def _webhook_letzte(self):
+        """Letzte Zustellung als Zeile - auch ein Fehlschlag aus dem Dienst.
+
+        Die Quelle ist die gemeinsame Datei, nicht der Sitzungsspeicher: nur so
+        sieht man in SETUP auch, was der Hintergrunddienst nicht losgeworden ist.
+        """
+        st=webhook_status_lesen() or {}
+        tag=kurz_zeit(st.get("ts"))
+        if not tag: return "",PS1_GREY
+        if st.get("ok"):
+            text=f"LETZTE ZUSTELLUNG: OK · {tag}"
+            farbe=CARD_STATUS["hit"]
+        else:
+            text=f"LETZTE ZUSTELLUNG: FEHLGESCHLAGEN · {str(st.get('status') or '?')[:24]} · {tag}"
+            farbe=PS1_YELLOW
+        wer=str(st.get("haendler") or "")
+        return ((wer+" · "+text) if wer else text), farbe
+
+    def _refresh_webhook_status(self):
+        """Statuszeile in SETUP nachziehen, falls der Dialog offen ist."""
+        cb=getattr(self,"_webhook_refresh",None)
+        if cb:
+            try: cb()
+            except Exception: pass
+
     def _send_test_webhook(self):
         u=self.webhook_url.strip()
         if not u:
@@ -1862,7 +1890,10 @@ class MainUI(FloatLayout):
                                         branding.TEST_TITLE,"Webhook funktioniert.")
             except Exception as e: ok,info=False,str(e)[:40]
             self.webhook_status=("OK" if ok else str(info)[:40])
+            # Auch die Testmeldung wird zur sichtbaren Quittung in SETUP.
+            webhook_status_merken(ok,info)
             def ui(dt):
+                self._refresh_webhook_status()
                 self._toast("WEBHOOK OK" if ok else f"WEBHOOK: {info}",
                             color=CARD_STATUS["hit"] if ok else PS1_YELLOW)
             try: Clock.schedule_once(ui,0)
@@ -2025,11 +2056,24 @@ class MainUI(FloatLayout):
                 self._toast("WEBHOOK BRAUCHT HTTPS",color=PS1_YELLOW); return
             self.webhook_url=u; self.settings.set("webhook_url",u)
             winfo.text=f"WEBHOOK: {self._webhook_text()}"
+            sync_wlast()
             self._toast("WEBHOOK GESPEICHERT" if u else "WEBHOOK ENTFERNT",
                         color=CARD_STATUS["hit"] if u else PS1_GREY)
         wsb.bind(on_release=save_webhook)
         wrow.add_widget(wti); wrow.add_widget(wsb); box.add_widget(wrow)
         action("WEBHOOK-TEST",lambda: "SENDEN",self._send_test_webhook,PS1_GREEN)
+        # Ein 401/403 im Hintergrund ist sonst unsichtbar: hier steht die letzte
+        # Zustellung mit Zeit und Grund, egal welcher Prozess sie versucht hat.
+        wlast=Label(text="",color=PS1_GREY,font_size=sp(8.5),font_name=SST_FONT,
+                    halign="left",valign="middle",shorten=True,
+                    shorten_from="right",size_hint_y=None,height=dp(16))
+        wlast.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        def sync_wlast():
+            text,farbe=self._webhook_letzte()
+            wlast.text=text or "LETZTE ZUSTELLUNG: —"
+            wlast.color=farbe if text else PS1_GREY
+        self._webhook_refresh=sync_wlast
+        sync_wlast(); box.add_widget(wlast)
         action("SCHNELLSCAN",lambda: "AN" if self.schnellscan else "AUS",
                self._toggle_schnellscan,PS1_BLUE)
 

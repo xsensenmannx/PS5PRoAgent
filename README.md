@@ -100,9 +100,11 @@ Signal, Preistiefs und den Preisverlauf:
   dann gemeldet, wenn der Preis gegenüber dem letzten Treffer unverändert ist.
 * **Webhook-Alarme**: optional zusätzlich zur Android-Meldung an **ntfy**,
   **Telegram** oder einen **Discord**-Webhook (oder eine eigene HTTPS-URL).
-  Der Testknopf in SETUP zeigt den HTTP-Status. Tokens werden maskiert und
-  niemals geloggt. Damit kommt ein Treffer auch an, wenn das Handy den
-  Hintergrunddienst beendet hat.
+  Der Testknopf in SETUP zeigt den HTTP-Status. Eine gemeinsame Dedupe-Datei
+  verhindert, dass App und Hintergrunddienst denselben Treffer zweimal melden;
+  die letzte Zustellung steht mit Zeit und Grund in SETUP, auch wenn sie im
+  Dienst fehlgeschlagen ist. Tokens werden maskiert und niemals geloggt. Damit
+  kommt ein Treffer auch an, wenn das Handy den Hintergrunddienst beendet hat.
 * **Treffer-Verifikation**: Jeder Treffer wird nach 2 s ein zweites Mal ohne
   Cache geprüft. Die Karte zeigt `BESTÄTIGT`, `UNGEPRÜFT` oder `ABWEICHUNG`;
   ist der Shop beim zweiten Abruf ausverkauft, wird der Treffer zurückgestuft.

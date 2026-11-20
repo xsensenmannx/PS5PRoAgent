@@ -84,9 +84,14 @@ CHANCE_PATTERNS = (
                      "click and collect", "abholung im markt", "im markt abholbar")),
 )
 # Webhook-Alarme: ein Versuch plus ein Retry, danach ist der Kanal fuer diesen
-# Treffer erledigt. Der Cooldown verhindert Doppelmeldungen aus App und Dienst.
+# Treffer erledigt. App und Dienst laufen in getrennten Prozessen; der Anspruch
+# auf eine Meldung steht deshalb in einer gemeinsamen Datei, der Prozess-Cache
+# ist nur der Rueckfall, wenn die Datei nicht schreibbar ist.
 WEBHOOK_TIMEOUT = 8
 WEBHOOK_COOLDOWN = 600
+WEBHOOK_DEDUPE_FILE = "ps5pro_webhook_dedupe.json"
+# Letzte Zustellung (ok oder Fehler) - die Quelle fuer die Anzeige in SETUP.
+WEBHOOK_STATUS_FILE = "ps5pro_webhook_status.json"
 WEBHOOK_PRESETS = ("ntfy","telegram","discord","generisch")
 # Shops, die fuer den Schnell-Modus zuerst geprueft werden. Alle Namen muessen
 # in HAENDLER vorkommen; unbekannte werden ignoriert.
@@ -1541,24 +1546,119 @@ def webhook_senden(url, preset=None, titel="", text="", ziel_url=None,
 _WEBHOOK_SEEN={}
 _WEBHOOK_LOCK=threading.Lock()
 
+
+def _json_lesen(pfad):
+    try:
+        with open(pfad,"r",encoding="utf-8") as f: return json.load(f)
+    except Exception: return None
+
+
+def _json_schreiben(pfad,daten):
+    tmp=pfad+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f:
+        json.dump(daten,f,ensure_ascii=False,indent=1)
+    os.replace(tmp,pfad)
+
+
+class _Sperrdatei:
+    """Kurze Sperre fuer eine Datei, die auch ueber Prozesse gilt.
+
+    Angelegt per O_EXCL auf ``<datei>.lock``. Bleibt eine Sperre nach einem
+    Absturz liegen, wird sie nach ``veraltet`` Sekunden uebernommen. Ist das
+    Verzeichnis nicht schreibbar, laeuft der Aufrufer ohne Sperre weiter:
+    lieber eine kleine Restchance auf doppelt als gar kein Alarm.
+    """
+    def __init__(self,pfad,geduld=2.0,veraltet=10.0):
+        self.pfad=pfad; self.geduld=geduld; self.veraltet=veraltet
+        self.ok=False
+    def __enter__(self):
+        ende=time.time()+self.geduld
+        while True:
+            try:
+                os.close(os.open(self.pfad,os.O_CREAT|os.O_EXCL|os.O_WRONLY))
+                self.ok=True; return self
+            except FileExistsError:
+                pass
+            except OSError:
+                return self
+            try:
+                if time.time()-os.path.getmtime(self.pfad)>self.veraltet:
+                    os.remove(self.pfad); continue
+            except OSError: pass
+            if time.time()>=ende: return self
+            time.sleep(0.02)
+    def __exit__(self,*_):
+        if self.ok:
+            try: os.remove(self.pfad)
+            except OSError: pass
+        return False
+
+
+def _webhook_dedupe_datei():
+    return os.path.join(_data_dir(),WEBHOOK_DEDUPE_FILE)
+
+
 def webhook_dedupe(haendler,preis,restock=False,jetzt=None,cooldown=WEBHOOK_COOLDOWN):
     """True, wenn dieser Treffer noch nicht gemeldet wurde.
 
-    Der Key ist Haendler + Preis + Restock-Flag. App und Dienst laufen in
-    getrennten Prozessen; der Cooldown wirkt deshalb pro Prozess.
+    Der Anspruch steht in einer gemeinsamen Datei, damit App und
+    Hintergrunddienst denselben Treffer nur einmal melden: wer ihn zuerst
+    schreibt, sendet; der andere sieht ihn und schweigt. Eintraege aelter als
+    ``cooldown`` fallen dabei raus. Ohne schreibbare Datei entscheidet der
+    Prozess-Cache wie bisher.
     """
     jetzt=time.time() if jetzt is None else jetzt
-    key=(str(haendler or "?"),round(float(preis or 0),2),bool(restock))
+    # Schluessel: Haendler, Preis und Restock-Art.
+    try: p=float(preis or 0)
+    except (TypeError,ValueError): p=0.0
+    key="%s\t%.2f\t%d" % (str(haendler or "?"),p,int(bool(restock)))
     with _WEBHOOK_LOCK:
-        for k in [k for k,t in _WEBHOOK_SEEN.items() if jetzt-t>cooldown]:
-            _WEBHOOK_SEEN.pop(k,None)
-        if key in _WEBHOOK_SEEN: return False
-        _WEBHOOK_SEEN[key]=jetzt
-        return True
+        pfad=_webhook_dedupe_datei()
+        try:
+            with _Sperrdatei(pfad+".lock"):
+                alt=_json_lesen(pfad)
+                if not isinstance(alt,dict): alt={}
+                frisch=dict((k,t) for k,t in alt.items()
+                            if isinstance(t,(int,float)) and jetzt-t<=cooldown)
+                if key in frisch: return False
+                frisch[key]=jetzt
+                _json_schreiben(pfad,frisch)
+            return True
+        except (OSError,ValueError):
+            for k in [k for k,t in _WEBHOOK_SEEN.items() if jetzt-t>cooldown]:
+                _WEBHOOK_SEEN.pop(k,None)
+            if key in _WEBHOOK_SEEN: return False
+            _WEBHOOK_SEEN[key]=jetzt
+            return True
 
 def reset_webhook_dedupe():
     """Nur fuer Tests."""
-    with _WEBHOOK_LOCK: _WEBHOOK_SEEN.clear()
+    with _WEBHOOK_LOCK:
+        _WEBHOOK_SEEN.clear()
+        try: os.remove(_webhook_dedupe_datei())
+        except OSError: pass
+
+
+def webhook_status_merken(ok,status,haendler=None):
+    """Letzte Zustellung festhalten - gemeinsam fuer App und Dienst.
+
+    Ein Fehlschlag im Hintergrund darf nicht unsichtbar bleiben, nur weil die
+    App den Treffer selbst nie gesehen hat; SETUP liest diesen Eintrag.
+    """
+    daten={"ok":bool(ok),"status":str(status or "")[:80],
+           "ts":datetime.now().replace(microsecond=0).isoformat(),
+           "haendler":str(haendler or "")}
+    try:
+        _json_schreiben(os.path.join(_data_dir(),WEBHOOK_STATUS_FILE),daten)
+    except (OSError,ValueError): pass
+    return daten
+
+
+def webhook_status_lesen():
+    """Letzte Zustellung oder None; eine kaputte Datei zaehlt als keine."""
+    daten=_json_lesen(os.path.join(_data_dir(),WEBHOOK_STATUS_FILE))
+    return dict(daten) if isinstance(daten,dict) else None
+
 
 def sende_webhook_alarm(r, settings, titel, text, tester=False):
     """Webhook fuer einen Treffer. None = kein Kanal oder schon gemeldet."""
@@ -1569,7 +1669,11 @@ def sende_webhook_alarm(r, settings, titel, text, tester=False):
     if not tester and not webhook_dedupe(r.get("haendler"),r.get("preis"),
                                         bool(r.get("_restock"))):
         return None
-    return webhook_senden(url,preset,titel,text,r.get("url"))
+    ok,info=webhook_senden(url,preset,titel,text,r.get("url"))
+    # Ergebnis auch bei Fehler merken: der Dienst meldet damit genauso
+    # sichtbar wie die App (SETUP zeigt "LETZTE ZUSTELLUNG").
+    webhook_status_merken(ok,info,r.get("haendler"))
+    return ok,info
 
 # ── Treffer-Verifikation ───────────────────────────────────────────
 def verify_entscheidung(erster,zweiter):

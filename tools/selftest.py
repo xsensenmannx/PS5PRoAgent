@@ -1685,6 +1685,67 @@ def live_tests():
     check("App zaehlt Nachtrag nicht doppelt", "self._process(r,nach)" in main_q, True)
 
 
+def webhook_tests():
+    """Alarmzuverlaessigkeit: gemeinsame Dedupe-Datei und sichtbarer Fehler."""
+    alt_dir = core._data_dir()
+    tmp = tempfile.mkdtemp(prefix="ps5pro-webhook-")
+    try:
+        core.set_data_dir(tmp)
+        core.reset_webhook_dedupe()
+        check("Dedupe: erster Anspruch", core.webhook_dedupe("Amazon DE", 799), True)
+        pfad = os.path.join(tmp, core.WEBHOOK_DEDUPE_FILE)
+        check("Dedupe: gemeinsame Datei", os.path.exists(pfad), True)
+        # Frischer Prozessspeicher, dieselbe Datei: der Anspruch bleibt. Genau
+        # das fehlte, als App und Dienst denselben Treffer doppelt meldeten.
+        with core._WEBHOOK_LOCK:
+            core._WEBHOOK_SEEN.clear()
+        check("Dedupe: gilt ueber Prozesse",
+              core.webhook_dedupe("Amazon DE", 799), False)
+        check("Dedupe: Haendler zaehlt", core.webhook_dedupe("Saturn DE", 799), True)
+        check("Dedupe: Preis zaehlt", core.webhook_dedupe("Amazon DE", 819), True)
+        check("Dedupe: Restock zaehlt",
+              core.webhook_dedupe("Amazon DE", 799, True), True)
+        check("Dedupe: nach Cooldown frei",
+              core.webhook_dedupe("Amazon DE", 799, jetzt=time.time() + 601), True)
+        daten = core._json_lesen(pfad) or {}
+        check("Dedupe: alte Ansprueche fallen raus", len(daten), 1)
+
+        # Ohne beschreibbares Verzeichnis darf der Alarm nicht sterben.
+        core.set_data_dir(os.path.join(tmp, "fehlt"))
+        with core._WEBHOOK_LOCK:
+            core._WEBHOOK_SEEN.clear()
+        check("Dedupe: Rueckfall ohne Datei", core.webhook_dedupe("Shop Q", 700), True)
+        check("Dedupe: Rueckfall zweit", core.webhook_dedupe("Shop Q", 700), False)
+
+        core.set_data_dir(tmp)
+        check("Status: noch keiner", core.webhook_status_lesen(), None)
+        core.webhook_status_merken(False, "HTTP 401", "Otto DE")
+        st = core.webhook_status_lesen() or {}
+        check("Status: Fehler gemerkt",
+              (st.get("ok"), st.get("status"), st.get("haendler")),
+              (False, "HTTP 401", "Otto DE"))
+        check("Status: Zeit anzeigbar", core.kurz_zeit(st.get("ts")) != "", True)
+
+        # sende_webhook_alarm schreibt das Ergebnis, damit auch ein Fehlschlag
+        # des Dienstes in SETUP auftaucht.
+        alt_send = core.webhook_senden
+        core.webhook_senden = lambda *a, **k: (False, "HTTP 403")
+        try:
+            core.sende_webhook_alarm({"haendler": "Otto DE", "preis": 799.0,
+                                      "url": "https://shop/x"},
+                                     {"webhook_url": "https://ntfy.sh/t"}, "T", "X")
+        finally:
+            core.webhook_senden = alt_send
+        st = core.webhook_status_lesen() or {}
+        check("Status: Alarm meldet Fehlschlag",
+              (st.get("ok"), st.get("status")), (False, "HTTP 403"))
+    finally:
+        with core._WEBHOOK_LOCK:
+            core._WEBHOOK_SEEN.clear()
+        core.set_data_dir(alt_dir)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def amazon_tests():
     """Amazon ohne JSON-LD: nur die Kaufbox zaehlt, kein Fremdpreis."""
     kaufbox = ('<div id="corePrice_feature_div"><span class="a-price">'
@@ -1744,6 +1805,7 @@ if __name__ == "__main__":
         amazon_tests()
         capture_helper_tests()
         v13_tests()
+        webhook_tests()
         v14_tests()
         live_tests()
         spec_tests()
