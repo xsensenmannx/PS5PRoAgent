@@ -898,6 +898,167 @@ def feature_tests():
         hist.update([{"haendler": "Shop E", "klass": "unavail", "preis": 899.0}])
         check("Preis ohne Zustand kein Ereignis", len(ev.all()), 2)
 
+        # Erfolge: Verfuegbarkeitsfenster mit Preis und Dauer aus den Ereignissen.
+        fenster = core.erfolgs_fenster(ev.all())
+        check("Erfolg aus Verlauf", len(fenster), 1)
+        check("Erfolg geschlossen", fenster[0].get("offen"), False)
+        check("Erfolg Dauer aus Verlauf",
+              abs(int(fenster[0]["dauer"]) - 95) <= 3, True)
+        check("Erfolg Preis aus Verlauf", fenster[0].get("preis"), 799.0)
+        fz = core.erfolg_zeile(fenster[0])
+        check("Erfolg Zeile Shop", "Shop E" in fz, True)
+        check("Erfolg Zeile Preis", "799,00 €" in fz, True)
+        check("Erfolg Zeile Fenster", "FENSTER 1 MIN" in fz, True)
+        offen = core.erfolgs_fenster(ev.all() + [
+            {"typ": "verfuegbar", "haendler": "Shop G",
+             "ts": (_dt.now() + _td(hours=1)).isoformat(timespec="seconds"),
+             "preis": 899.0}])
+        check("Erfolg offen zuerst", offen[0].get("haendler"), "Shop G")
+        check("Erfolg offen markiert", offen[0].get("offen"), True)
+        check("Erfolg offen ohne Dauer", offen[0].get("dauer"), None)
+        check("Erfolg Zeile offen", "OFFEN" in core.erfolg_zeile(offen[0]), True)
+        nur_weg = core.erfolgs_fenster([
+            {"typ": "ausverkauft", "haendler": "Shop H",
+             "ts": "2026-11-13T12:01:00", "start": "2026-11-13T12:00:00",
+             "dauer": 60, "preis": 899.0}])
+        check("Erfolg ohne Start-Ereignis", len(nur_weg), 1)
+        check("Erfolg Dauer ohne Start-Ereignis", nur_weg[0].get("dauer"), 60)
+        check("Erfolg ignoriert Unbrauchbares",
+              core.erfolgs_fenster([None, {}, {"typ": "x", "haendler": "Y"}]),
+              [])
+
+        # OFFEN nur bei frischem Stand. Ohne Abschluss und ohne aktuellen
+        # Scan ist der Shop nur "letzter bekannter Stand", nicht verfuegbar.
+        jetzt = _dt(2026, 11, 20, 12, 0, 0)
+        frisch = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Shop J",
+             "ts": "2026-11-20T11:30:00", "preis": 799.0}], jetzt=jetzt)
+        check("Erfolg frisch offen", frisch[0].get("offen"), True)
+        check("Erfolg frisch nicht veraltet", frisch[0].get("veraltet"), None)
+        check("Erfolg frisch Zeile", "OFFEN" in core.erfolg_zeile(frisch[0]), True)
+        alt = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Shop J",
+             "ts": "2026-11-18T09:00:00", "preis": 899.0}], jetzt=jetzt)
+        check("Erfolg alt nicht offen", alt[0].get("offen"), False)
+        check("Erfolg alt veraltet", alt[0].get("veraltet"), True)
+        check("Erfolg alt letzter Stand", alt[0].get("letzter_stand"),
+              "2026-11-18T09:00:00")
+        alt_zeile = core.erfolg_zeile(alt[0])
+        check("Erfolg alt Zeile letzter Stand",
+              "LETZTER STAND" in alt_zeile, True)
+        check("Erfolg alt Zeile kein OFFEN", "OFFEN" in alt_zeile, False)
+        check("Erfolg alt ohne Dauer", alt[0].get("dauer"), None)
+        check("Erfolg alt behaelt Preis", alt[0].get("preis"), 899.0)
+        grenze = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Shop K",
+             "ts": "2026-11-20T11:00:00"}], jetzt=jetzt, max_alter=3600)
+        check("Erfolg Grenze noch offen", grenze[0].get("offen"), True)
+        knapp_alt = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Shop K",
+             "ts": "2026-11-20T10:59:00"}], jetzt=jetzt, max_alter=3600)
+        check("Erfolg eine Minute zu alt", knapp_alt[0].get("offen"), False)
+        ohne_ts = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Shop L", "preis": 899.0}],
+            jetzt=jetzt)
+        check("Erfolg ohne Zeit kein OFFEN", ohne_ts[0].get("offen"), False)
+        check("Erfolg ohne Zeit veraltet", ohne_ts[0].get("veraltet"), True)
+        gemischt = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Shop M",
+             "ts": "2026-11-20T11:45:00"},
+            {"typ": "verfuegbar", "haendler": "Shop N",
+             "ts": "2026-11-17T08:00:00"}], jetzt=jetzt)
+        check("Erfolg nur frischer Shop offen",
+              [f["haendler"] for f in gemischt if f.get("offen")], ["Shop M"])
+        check("Erfolg geschlossen ohne letzten Stand",
+              "LETZTER STAND" in fz, False)
+        check("Erfolg Default-Frische", core.ERFOLG_OFFEN_MAX, 3600)
+
+        # Die Frische folgt dem eingestellten Takt: Ein 5-Minuten-Takt darf
+        # einen 20 Minuten alten Stand nicht als OFFEN zeigen.
+        check("Erfolg Takt 5m", core.erfolg_offen_max(300), 420)
+        check("Erfolg Takt 10m", core.erfolg_offen_max(600), 720)
+        check("Erfolg Takt 60m gedeckelt", core.erfolg_offen_max(3600), 3600)
+        check("Erfolg Takt kurz", core.erfolg_offen_max(5), 125)
+        check("Erfolg Takt ungueltig", core.erfolg_offen_max("x"), 720)
+        takt = core.erfolg_offen_max(300)
+        im_takt = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Takt A",
+             "ts": "2026-11-20T11:53:00"}], jetzt=jetzt, max_alter=takt)
+        check("Erfolg im Takt offen", im_takt[0].get("offen"), True)
+        ausser_takt = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Takt A",
+             "ts": "2026-11-20T11:52:00"}], jetzt=jetzt, max_alter=takt)
+        check("Erfolg ausserhalb des Takts veraltet",
+              ausser_takt[0].get("offen"), False)
+        check("Erfolg ausserhalb des Takts letzter Stand",
+              ausser_takt[0].get("veraltet"), True)
+
+        # Ein frischer Erfolgs-Scan bestaetigt den Stand auch dann, wenn seit
+        # dem verfuegbar-Wechsel kein neues Ereignis geschrieben wurde.
+        bestaetigt = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Takt B",
+             "ts": "2026-11-20T09:00:00", "preis": 799.0}],
+            jetzt=jetzt, max_alter=takt,
+            letzte_scans={"Takt B": jetzt.timestamp() - 60})
+        check("Erfolg frischer Scan bestaetigt",
+              bestaetigt[0].get("offen"), True)
+        check("Erfolg frischer Scan ohne letzten Stand",
+              bestaetigt[0].get("veraltet"), None)
+        check("Erfolg Zeile frischer Scan OFFEN",
+              "OFFEN" in core.erfolg_zeile(bestaetigt[0]), True)
+        alter_scan = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Takt B",
+             "ts": "2026-11-20T09:00:00"}],
+            jetzt=jetzt, max_alter=takt,
+            letzte_scans={"Takt B": jetzt.timestamp() - 3600})
+        check("Erfolg alter Scan bleibt veraltet",
+              alter_scan[0].get("offen"), False)
+        check("Erfolg alter Scan letzter Stand",
+              alter_scan[0].get("veraltet"), True)
+        ohne_scan = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Takt B",
+             "ts": "2026-11-20T09:00:00"}], jetzt=jetzt, max_alter=takt)
+        check("Erfolg ohne Scan veraltet", ohne_scan[0].get("offen"), False)
+        ohne_zeit = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Takt C"}],
+            jetzt=jetzt, max_alter=takt,
+            letzte_scans={"Takt C": jetzt.timestamp()})
+        check("Erfolg ohne Ereigniszeit kein OFFEN",
+              ohne_zeit[0].get("offen"), False)
+        gemischt_scan = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Takt D",
+             "ts": "2026-11-20T09:00:00"},
+            {"typ": "verfuegbar", "haendler": "Takt E",
+             "ts": "2026-11-20T09:00:00"}],
+            jetzt=jetzt, max_alter=takt,
+            letzte_scans={"Takt D": jetzt.timestamp() - 30})
+        check("Erfolg Scan gilt nur fuer den eigenen Shop",
+              [f["haendler"] for f in gemischt_scan if f.get("offen")],
+              ["Takt D"])
+        health_daten = {
+            "Takt D": {"last_status": "hit", "ok_ts": 100.0},
+            "Takt E": {"last_status": "unavail", "ok_ts": 100.0},
+            "Takt F": {"last_status": "expensive", "ok_ts": "200"},
+            "Takt G": {"last_status": "hit", "ok_ts": "x"},
+            "Takt H": {"last_status": "chance", "ok_ts": 300.0},
+            "Takt I": "kaputt",
+        }
+        check("Erfolg Scan-Staende nur verfuegbare",
+              core.erfolg_letzte_scans(health_daten),
+              {"Takt D": 100.0, "Takt F": 200.0, "Takt H": 300.0})
+        check("Erfolg Scan-Staende ohne Daten", core.erfolg_letzte_scans(None), {})
+        check("Erfolg Scan-Staende ohne Dict", core.erfolg_letzte_scans([]), {})
+
+        # Ein wiederholtes verfuegbar verschiebt den Fensterstart nicht.
+        doppelt = core.erfolgs_fenster([
+            {"typ": "verfuegbar", "haendler": "Shop O",
+             "ts": "2026-11-20T11:50:00"},
+            {"typ": "verfuegbar", "haendler": "Shop O",
+             "ts": "2026-11-20T11:55:00", "preis": 799.0}], jetzt=jetzt)
+        check("Erfolg Start bleibt der erste", doppelt[0].get("start"),
+              "2026-11-20T11:50:00")
+        check("Erfolg Preis vom letzten Wechsel", doppelt[0].get("preis"), 799.0)
+
         check("Verlauf je Shop", len(ev.fuer_shop("Shop E")), 2)
         for i in range(core.MAX_EVENTS + 5):
             ev.add({"typ": "verfuegbar", "haendler": f"Ring {i}",

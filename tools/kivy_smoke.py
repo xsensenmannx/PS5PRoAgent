@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 import traceback
+from datetime import datetime, timedelta
 
 # Vor dem Kivy-Import setzen: sonst versucht Kivy, argv zu parsen.
 os.environ["KIVY_NO_ARGS"] = "1"
@@ -159,6 +160,8 @@ class SmokeApp(App):
             self.onboarding()
             self.detail()
             self.verlauf()
+            self.erfolge()
+            self.erfolge_takt()
             self.no_popup()
         except Exception:
             traceback.print_exc()
@@ -555,6 +558,22 @@ class SmokeApp(App):
         }
         serie = [["2026-11-01T10:00:00", 849.0],
                  ["2026-11-02T10:00:00", 799.0]]
+        # Dieselben Fenster wie in SETUP -> ERFOLGE muessen auch hier stehen:
+        # ein abgeschlossenes, ein aktuelles und ein alter Stand.
+        scan_core.reset_events()
+        ev = scan_core.events(); ev.clear()
+        jetzt = datetime.now()
+        ev.add({"typ": "verfuegbar", "haendler": "Amazon DE",
+                "ts": "2026-11-13T10:35:00", "start": "2026-11-13T10:35:00",
+                "dauer": None, "preis": 799.0})
+        ev.add({"typ": "ausverkauft", "haendler": "Amazon DE",
+                "ts": "2026-11-13T10:36:35", "start": "2026-11-13T10:35:00",
+                "dauer": 95, "preis": 799.0})
+        ev.add({"typ": "verfuegbar", "haendler": "Amazon DE",
+                "ts": jetzt.isoformat(timespec="seconds"), "preis": 749.0})
+        ev.add({"typ": "verfuegbar", "haendler": "Shop S",
+                "ts": (jetzt - timedelta(days=2)).isoformat(timespec="seconds"),
+                "preis": 899.0})
         self.ui.settings.set("mute_haendler", [])
         self.ui._open_detail(result, serie)
         p = self.popup("Detailansicht")
@@ -566,8 +585,35 @@ class SmokeApp(App):
         check("Detail: Verkaeufer", "Amazon" in text, True)
         check("Detail: zuletzt verfuegbar", "ZULETZT VERFUEGBAR" in text, True)
         check("Detail: ohne Verlauf noch nie verfuegbar", "NOCH NIE" in text, True)
+        check("Detail: letzte Erfolge", "LETZTE ERFOLGE" in text, True)
+        check("Detail: aktueller Erfolg offen",
+              any("Amazon DE" in t and "OFFEN" in t
+                  for t in self.texts(p)), True)
+        check("Detail: Erfolgsfenster mit Dauer",
+              any("Amazon DE" in t and "FENSTER 1 MIN" in t
+                  for t in self.texts(p)), True)
         check("Detail: Sparkline", any(isinstance(w, main.Sparkline)
                                         for w in p.content.walk()), True)
+        # Dieselben Zeilen wie in ERFOLGE: Text und Punktfarbe muessen stimmen
+        # und bei 360 dp vollstaendig in die Zeile passen.
+        erfolg_labels=[w for w in p.content.walk()
+                       if isinstance(w,main.Label) and
+                       ("FENSTER 1 MIN" in str(w.text) or
+                        str(w.text).endswith("OFFEN"))]
+        check("Detail: zwei Erfolgszeilen", len(erfolg_labels), 2)
+        for lb in erfolg_labels:
+            check("Detail: Erfolgszeile nicht abgeschnitten", fits(lb), True)
+        det_dots=[w for w in p.content.walk() if isinstance(w,main.Dot)]
+        check("Detail: offener Erfolg gruen",
+              sum(1 for w in det_dots if w._c == main.PS1_GREEN), 1)
+        check("Detail: geschlossener Erfolg cyan",
+              sum(1 for w in det_dots if w._c == main.PS1_CYAN), 1)
+        # Die Tief-Zeile ist linksbuendig; ohne text_size zentriert Kivy sie.
+        tief=next((w for w in p.content.walk()
+                   if isinstance(w,main.Label) and
+                   "30-TAGE-TIEF" in str(w.text)), None)
+        check("Detail: Tief-Zeile linksbuendig",
+              bool(tief) and tief.text_size[0] == tief.width, True)
 
         # Stummschalten wirkt sofort auf die Einstellung und den Button.
         self.button(p, "HANDLER STUMM").dispatch("on_release")
@@ -608,6 +654,25 @@ class SmokeApp(App):
         check("Detail: Kauf-Stummstand sichtbar",
               any(str(getattr(w, "text", "")).startswith("GEKAUFT · STUMM BIS")
                   for w in p.content.walk()), True)
+        self.close(p, "SCHLIESSEN")
+
+        # Ein alter offener Stand darf auch hier nicht als OFFEN erscheinen.
+        self.ui._open_detail({"haendler": "Shop S", "preis": 899.0,
+                              "klass": "unavail", "condition": "new",
+                              "sofort": False, "signal": "jsonld",
+                              "verfuegbarkeit": "SoldOut",
+                              "url": "https://example.invalid/s"}, [])
+        p = self.popup("Detail alter Stand")
+        alt_zeile = next((t for t in self.texts(p)
+                          if "Shop S" in t and "LETZTER STAND" in t), "")
+        check("Detail: alter Erfolg letzter Stand", bool(alt_zeile), True)
+        check("Detail: alter Erfolg nicht offen", "OFFEN" in alt_zeile, False)
+        alt_lb=next(w for w in p.content.walk()
+                    if isinstance(w,main.Label) and str(w.text) == alt_zeile)
+        check("Detail: alter Erfolg nicht abgeschnitten", fits(alt_lb), True)
+        alt_dots=[w for w in p.content.walk() if isinstance(w,main.Dot)]
+        check("Detail: alter Erfolg gelb",
+              sum(1 for w in alt_dots if w._c == main.PS1_YELLOW), 1)
         self.close(p, "SCHLIESSEN")
 
     # ── Detail A/B: Verlauf und zuletzt verfuegbar ─────────────────────
@@ -689,7 +754,7 @@ class SmokeApp(App):
         p = self.popup("Detail ausverkauft")
         text = " ".join(self.texts(p))
         check("Detail: letzter Tag", "13.11., 10:35" in text, True)
-        check("Detail: letztes Fenster", "LETZTES FENSTER" in text, True)
+        check("Detail: letzte Erfolge", "LETZTE ERFOLGE" in text, True)
         check("Detail: Fensterdauer", "1 MIN" in text, True)
         self.close(p, "SCHLIESSEN")
 
@@ -698,6 +763,123 @@ class SmokeApp(App):
         p = self.popup("Verlauf leeren")
         self.button(p, "LEEREN").dispatch("on_release"); self.pump()
         check("Verlauf: geleert", scan_core.events().all(), [])
+
+    # ── Erfolge: offen nur bei frischem Stand ───────────────────────────
+    def erfolge(self):
+        scan_core.reset_events()
+        ev = scan_core.events(); ev.clear()
+        jetzt = datetime.now()
+        frisch = jetzt.isoformat(timespec="seconds")
+        alt = (jetzt - timedelta(days=2)).isoformat(timespec="seconds")
+        ev.add({"typ": "verfuegbar", "haendler": "Shop A",
+                "ts": "2026-11-13T10:35:00", "start": "2026-11-13T10:35:00",
+                "dauer": None, "preis": 849.0})
+        ev.add({"typ": "ausverkauft", "haendler": "Shop A",
+                "ts": "2026-11-13T10:36:35", "start": "2026-11-13T10:35:00",
+                "dauer": 95, "preis": 849.0})
+        ev.add({"typ": "verfuegbar", "haendler": "Shop B",
+                "ts": frisch, "preis": 799.0})
+        ev.add({"typ": "verfuegbar", "haendler": "Shop C",
+                "ts": alt, "preis": 899.0})
+        self.ui._open_setup()
+        p = self.popup("System Config mit Erfolgen")
+        b = next(w for w in p.content.walk()
+                 if isinstance(w, main.PS1Button) and str(w.text).startswith("ERFOLGE"))
+        check("Setup: Erfolge nennt die Anzahl", "3 FENSTER" in str(b.text), True)
+        b.dispatch("on_release")
+        p = self.popup("Erfolge")
+        text = " ".join(self.texts(p))
+        check("Erfolge: Zusammenfassung",
+              "3 FENSTER" in text and "3 SHOPS" in text, True)
+        check("Erfolge: Bestpreis", "799,00 €" in text, True)
+        zeilen = [str(getattr(w, "text", "")) for w in p.content.walk()
+                  if isinstance(w, main.Label)]
+        frisch_zeile = next((z for z in zeilen if "Shop B" in z), "")
+        alt_zeile = next((z for z in zeilen if "Shop C" in z), "")
+        zu_zeile = next((z for z in zeilen if "Shop A" in z), "")
+        check("Erfolge: aktueller Shop offen", "OFFEN" in frisch_zeile, True)
+        check("Erfolge: alter Shop letzter Stand",
+              "LETZTER STAND" in alt_zeile, True)
+        check("Erfolge: alter Shop nicht offen", "OFFEN" in alt_zeile, False)
+        check("Erfolge: geschlossenes Fenster", "FENSTER 1 MIN" in zu_zeile, True)
+        check("Erfolge: geschlossen ohne letzten Stand",
+              "LETZTER STAND" in zu_zeile, False)
+        # Gruen nur fuer den aktuellen Stand, gelb fuer den alten, cyan fuer zu.
+        dots = [w for w in p.content.walk() if isinstance(w, main.Dot)]
+        check("Erfolge: ein Punkt je Zeile", len(dots), 3)
+        check("Erfolge: nur ein gruener Punkt",
+              sum(1 for w in dots if w._c == main.PS1_GREEN), 1)
+        check("Erfolge: alter Stand gelb",
+              sum(1 for w in dots if w._c == main.PS1_YELLOW), 1)
+        check("Erfolge: geschlossenes Fenster cyan",
+              sum(1 for w in dots if w._c == main.PS1_CYAN), 1)
+        # Kein shorten: bei 360 dp muss jede Zeile komplett lesbar bleiben.
+        for name,zeile in (("offen",frisch_zeile),("alt",alt_zeile),
+                           ("zu",zu_zeile)):
+            lb=next(w for w in p.content.walk()
+                    if isinstance(w,main.Label) and str(w.text) == zeile)
+            check(f"Erfolge: Zeile {name} nicht abgeschnitten", fits(lb), True)
+        summary=next(w for w in p.content.walk()
+                     if isinstance(w,main.Label) and "FENSTER" in str(w.text)
+                     and "SHOPS" in str(w.text))
+        check("Erfolge: Zusammenfassung nicht abgeschnitten", fits(summary), True)
+        # LEEREN raeumt die Erfolge wie den Verlauf.
+        self.button(p, "LEEREN").dispatch("on_release"); self.pump()
+        check("Erfolge: geleert", scan_core.events().all(), [])
+        # Der Leerzustand laeuft durch dasselbe Popup-Geruest wie der Verlauf.
+        self.ui._open_erfolge()
+        p = self.popup("Erfolge leer")
+        check("Erfolge: Leerzustand",
+              any("Noch keine Erfolge" in t for t in self.texts(p)), True)
+        self.close(p, "ZU")
+
+    # ── Erfolge: Frische folgt Takt und letztem Erfolgs-Scan ────────────
+    def erfolge_takt(self):
+        scan_core.reset_events()
+        ev = scan_core.events(); ev.clear()
+        jetzt = datetime.now()
+        ev.add({"typ": "verfuegbar", "haendler": "Shop T",
+                "ts": (jetzt - timedelta(minutes=10)).isoformat(timespec="seconds"),
+                "preis": 849.0})
+        ev.add({"typ": "verfuegbar", "haendler": "Scan Shop",
+                "ts": (jetzt - timedelta(minutes=20)).isoformat(timespec="seconds"),
+                "preis": 799.0})
+        # Ein frischer Erfolgs-Scan bestaetigt den Stand von "Scan Shop".
+        health = scan_core.Health()
+        health.record({"haendler": "Scan Shop", "klass": "hit"})
+        health.save()
+        alt = self.ui.auto_interval
+        try:
+            # 5-Minuten-Takt: 7 Minuten Frische. Shop T ist 10 Minuten alt.
+            self.ui.auto_interval = 300
+            self.ui._open_erfolge()
+            p = self.popup("Erfolge im 5-Minuten-Takt")
+            zeilen = [str(getattr(w, "text", "")) for w in p.content.walk()
+                      if isinstance(w, main.Label)]
+            shop_t = next(z for z in zeilen if "Shop T" in z)
+            scan_shop = next(z for z in zeilen if "Scan Shop" in z)
+            check("Takt: 10-Minuten-Stand veraltet",
+                  "LETZTER STAND" in shop_t, True)
+            check("Takt: 10-Minuten-Stand nicht OFFEN",
+                  "OFFEN" in shop_t, False)
+            check("Takt: frischer Scan bestaetigt OFFEN",
+                  "OFFEN" in scan_shop, True)
+            self.close(p, "ZU")
+
+            # 30-Minuten-Takt: derselbe Stand liegt jetzt im Frischefenster.
+            self.ui.auto_interval = 1800
+            self.ui._open_erfolge()
+            p = self.popup("Erfolge im 30-Minuten-Takt")
+            zeilen = [str(getattr(w, "text", "")) for w in p.content.walk()
+                      if isinstance(w, main.Label)]
+            shop_t = next(z for z in zeilen if "Shop T" in z)
+            check("Takt: 10-Minuten-Stand bei 30-Minuten-Takt OFFEN",
+                  "OFFEN" in shop_t, True)
+            self.close(p, "ZU")
+        finally:
+            self.ui.auto_interval = alt
+            scan_core.reset_events()
+            scan_core.events().clear()
 
 
 # Ausserhalb der App-Klasse, damit die ersetzten globalen Funktionen die

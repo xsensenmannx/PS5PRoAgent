@@ -2203,6 +2203,42 @@ def health_uebersicht(health_daten=None, jetzt=None):
 
 EVENTS_FILE="ps5pro_events.json"
 MAX_EVENTS=200
+# Ein offenes Fenster gilt nur als aktuell, wenn der letzte verfuegbar-Wechsel
+# hoechstens einen Scan-Takt plus Kulanz zurueckliegt. ERFOLG_OFFEN_MAX bleibt
+# die Obergrenze fuer den 60-Minuten-Takt. Ein frischer, erfolgreicher Scan
+# desselben Shops bestaetigt den Stand auch ohne neues Ereignis.
+ERFOLG_OFFEN_MAX=3600
+ERFOLG_OFFEN_MIN=120
+ERFOLG_OFFEN_KULANZ=120
+# Nur diese Scan-Ergebnisse belegen Verfuegbarkeit. Ein erfolgreicher Abruf
+# mit "unavail" darf ein offenes Fenster nicht wieder als OFFEN bestaetigen.
+ERFOLG_SCAN_GUELTIG=frozenset(("hit","expensive","chance","unknown"))
+
+
+def erfolg_offen_max(intervall=None):
+    """Frische-Fenster aus dem eingestellten Scan-Takt in Sekunden.
+
+    Ein 5-Minuten-Takt ergibt 7 Minuten, ein 60-Minuten-Takt bleibt bei der
+    Stunde gedeckelt. Ungueltige oder fehlende Taktwerte fallen auf 10 Minuten
+    zurueck, das ist der Standard in den Einstellungen.
+    """
+    try: takt=int(intervall)
+    except (TypeError,ValueError): takt=600
+    if takt<=0: takt=600
+    return max(ERFOLG_OFFEN_MIN, min(ERFOLG_OFFEN_MAX, takt+ERFOLG_OFFEN_KULANZ))
+
+
+def erfolg_letzte_scans(health_daten=None):
+    """Letzter Scan je Shop, der Verfuegbarkeit bestaetigt (Epoch-Sekunden)."""
+    out={}
+    if not isinstance(health_daten,dict): return out
+    for name,e in health_daten.items():
+        if not isinstance(e,dict): continue
+        if e.get("last_status") not in ERFOLG_SCAN_GUELTIG: continue
+        try: ts=float(e.get("ok_ts"))
+        except (TypeError,ValueError): continue
+        if ts>0: out[str(name)]=ts
+    return out
 
 
 def dauer_text(sekunden):
@@ -2260,6 +2296,161 @@ def event_zeile(e):
     else:
         text=f"{str(e.get('typ') or 'EREIGNIS').upper()} · {shop}"
     return f"{zeit} · {text}" if zeit else text
+
+
+def _fenster_dauer(start, ende):
+    """Sekunden zwischen zwei ISO-Zeitstempeln; None, wenn unbrauchbar."""
+    a, b = _iso_dt(start), _iso_dt(ende)
+    if a is None or b is None:
+        return None
+    try:
+        return max(0, int((b - a).total_seconds()))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _alter_sekunden(iso, jetzt=None):
+    """Sekunden seit einem ISO-Zeitstempel; None, wenn unbrauchbar."""
+    dt = _iso_dt(iso)
+    if dt is None:
+        return None
+    if jetzt is None:
+        jetzt = datetime.now()
+    elif not isinstance(jetzt, datetime):
+        jetzt = _iso_dt(jetzt)
+    if jetzt is None:
+        return None
+    try:
+        return max(0, int((jetzt - dt).total_seconds()))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _alter_scan(ts, jetzt=None):
+    """Sekunden seit einem Scan-Zeitstempel (Epoch oder ISO)."""
+    try: epoch=float(ts)
+    except (TypeError,ValueError): return _alter_sekunden(ts, jetzt)
+    if isinstance(jetzt, datetime): jetzt=jetzt.timestamp()
+    elif jetzt is None: jetzt=time.time()
+    else:
+        dt=_iso_dt(jetzt)
+        if dt is None: return None
+        jetzt=dt.timestamp()
+    try: return max(0,int(jetzt-epoch))
+    except (TypeError,ValueError,OverflowError): return None
+
+
+def erfolgs_fenster(ereignisse, jetzt=None, max_alter=ERFOLG_OFFEN_MAX,
+                    letzte_scans=None):
+    """Verfuegbarkeitsfenster aus dem Event-Ticker.
+
+    Paart jeden Wechsel auf ``verfuegbar`` mit dem naechsten Wechsel auf
+    ``ausverkauft`` desselben Shops. Rueckgabe neueste zuerst.
+
+    ``offen: True`` traegt nur ein Fenster ohne Abschluss, dessen letzter
+    ``verfuegbar``-Wechsel hoechstens ``max_alter`` Sekunden zurueckliegt -
+    oder dessen Shop laut ``letzte_scans`` seither erfolgreich als verfuegbar
+    geprueft wurde (Shop -> Epoch- oder ISO-Zeitstempel). Aeltere offene
+    Fenster tragen ``veraltet: True``, ``letzter_stand`` und keine Dauer; sie
+    zeigen also den letzten bekannten Stand.
+    """
+    try: max_alter=max(0,int(max_alter))
+    except (TypeError,ValueError): max_alter=ERFOLG_OFFEN_MAX
+    scans=letzte_scans if isinstance(letzte_scans,dict) else {}
+    offen = {}
+    fenster = []
+    for e in ereignisse or []:
+        if not isinstance(e, dict):
+            continue
+        shop = str(e.get("haendler") or "")
+        typ = e.get("typ")
+        if not shop or typ not in ("verfuegbar", "ausverkauft"):
+            continue
+        if typ == "verfuegbar":
+            # Ein zweites verfuegbar ohne Abschluss verschiebt den Start nicht.
+            alt = offen.get(shop) or {}
+            offen[shop] = {
+                "haendler": shop,
+                "start": alt.get("start") or e.get("ts") or e.get("start"),
+                "gesehen": e.get("ts") or alt.get("gesehen"),
+                "ende": None,
+                "dauer": None,
+                "preis": e.get("preis") if e.get("preis") is not None else alt.get("preis"),
+                "url": e.get("url") or alt.get("url"),
+                "offen": True,
+            }
+            continue
+        alt = offen.pop(shop, None) or {}
+        start = alt.get("start") or e.get("start")
+        if not start:
+            continue
+        dauer = e.get("dauer")
+        if dauer is None:
+            dauer = _fenster_dauer(start, e.get("ts"))
+        try:
+            dauer = max(0, int(dauer)) if dauer is not None else None
+        except (TypeError, ValueError):
+            dauer = None
+        preis = alt.get("preis")
+        if preis is None:
+            preis = e.get("preis")
+        fenster.append({
+            "haendler": shop,
+            "start": start,
+            "ende": e.get("ts"),
+            "dauer": dauer,
+            "preis": preis,
+            "url": alt.get("url") or e.get("url"),
+            "offen": False,
+        })
+    for f in offen.values():
+        stand = f.get("gesehen") or f.get("start")
+        alter = _alter_sekunden(stand, jetzt)
+        if alter is not None:
+            # Ein frischer Erfolgs-Scan bestaetigt den Stand, auch wenn seit
+            # dem Wechsel kein neues Ereignis geschrieben wurde.
+            scan_alter=_alter_scan(scans.get(f.get("haendler")), jetzt)
+            if scan_alter is not None:
+                alter=min(alter,scan_alter)
+        if alter is not None and alter <= max_alter:
+            f["offen"] = True
+        else:
+            # Kein Abschluss, aber zu alt fuer eine Aussage ueber jetzt.
+            f["offen"] = False
+            f["veraltet"] = True
+            f["letzter_stand"] = stand
+        f.pop("gesehen", None)
+        fenster.append(f)
+
+    def _sortiert(f):
+        dt = _iso_dt(f.get("start"))
+        return dt.timestamp() if dt else 0.0
+
+    return sorted(fenster, key=_sortiert, reverse=True)
+
+
+def erfolg_zeile(f):
+    """Eine Erfolgszeile: '13.11., 10:35 · Shop · 899,00 € · FENSTER 1 MIN'."""
+    if not isinstance(f, dict):
+        return ""
+    teile = []
+    zeit = kurz_zeit(f.get("start"))
+    if zeit:
+        teile.append(zeit)
+    teile.append(str(f.get("haendler") or "?"))
+    preis = f.get("preis")
+    if preis is not None:
+        try:
+            teile.append(format_preis(float(preis)))
+        except (TypeError, ValueError):
+            pass
+    if f.get("offen"):
+        teile.append("OFFEN")
+    elif f.get("veraltet"):
+        teile.append("LETZTER STAND")
+    elif f.get("dauer") is not None:
+        teile.append("FENSTER " + dauer_text(f["dauer"]))
+    return " · ".join(teile)
 
 
 class Events:

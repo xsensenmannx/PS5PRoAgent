@@ -289,6 +289,15 @@ Aktueller Stand und Archiv:
   belegte Treffer sofort, während die Verifikation parallel läuft. Neu ist der
   Verlauf-Ticker (SETUP → VERLAUF) mit der Dauer des abgelaufenen Fensters und
   „zuletzt verfügbar am" je Shop, auch im ausverkauften Zustand. 890 Logiktests.
+* **Erfolge (unveröffentlicht, main)** – SETUP → ERFOLGE bündelt die
+  Verfügbarkeitsfenster aus dem Verlauf: Shop, Preis, Dauer und Bestpreis.
+  `OFFEN` steht nur, solange der letzte `verfügbar`-Wechsel innerhalb des
+  eingestellten Scan-Takts plus zwei Minuten liegt oder ein frischer,
+  erfolgreicher Scan den Stand bestätigt; ältere offene Fenster sind als
+  `LETZTER STAND` gekennzeichnet. Beim 60-Minuten-Takt bleibt eine Stunde
+  die Obergrenze. Dieselbe Fensterlogik steht in der Detailansicht eines
+  Produkts (`LETZTE ERFOLGE`, bis zu drei Fenster). Die Rohdaten liefert
+  derselbe Event-Ticker wie `VERLAUF`, ohne zusätzliche Abrufe.
 * **Review-Fixes (unveröffentlicht, main)** – `OnlineOnly` und
   `LimitedAvailability` zählen wie `InStock`, `Discontinued` wie `SoldOut`;
   Vorbestellungen laufen wieder über den v1.3-Pfad „NUR SOFORT"; nur belegte

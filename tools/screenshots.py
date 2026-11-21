@@ -1,8 +1,9 @@
 """Erzeugt Screenshots und das Scan-GIF aus der echten Kivy-Oberflaeche.
 
-Laeuft nur unter Windows: ``Window.screenshot()`` liefert auf diesem Rechner
-schwarze Bilder, deshalb wird das Fenster ueber sein HWND gesucht und per
-``ImageGrab`` aufgenommen.
+Laeuft nur unter Windows. Mit ``multisamples=0`` liest ``Window.screenshot()``
+den Framebuffer direkt; das Fenster wird dafuer nicht verschoben. Als
+Rueckfall (PS5PRO_SHOT_METHOD=printwindow) wird es ueber sein HWND per
+``PrintWindow`` aufgenommen.
 
 Beispiele (Groessen in Pixeln; Kivy rechnet auf Windows mit Dichte 1.0, also
 entspricht 620x380 auch 620x380 dp):
@@ -10,6 +11,8 @@ entspricht 620x380 auch 620x380 dp):
     python tools/screenshots.py --scene main   --size 510x1020 --out docs/screenshots/hochformat.png
     python tools/screenshots.py --scene main   --size 620x380  --out docs/screenshots/querformat-kompakt.png
     python tools/screenshots.py --scene detail --size 510x1020 --out docs/screenshots/detail.png
+    python tools/screenshots.py --scene setup  --size 510x1020 --out docs/screenshots/setup.png
+    python tools/screenshots.py --scene erfolge --size 510x1020 --out docs/screenshots/erfolge.png
     python tools/screenshots.py --scene scan   --size 320x640  --out docs/screenshots/scan.gif
 
 Die Szenen benutzen feste Trefferdaten und ersetzen alle Netzwerk- und
@@ -18,6 +21,7 @@ Systemaufrufe; ein Lauf braucht weder Internet noch echte Shop-Antworten.
 import argparse
 import ctypes
 from ctypes import wintypes
+from datetime import datetime, timedelta
 import os
 import shutil
 import sys
@@ -25,7 +29,8 @@ import tempfile
 import time
 
 P = argparse.ArgumentParser(description=__doc__)
-P.add_argument("--scene", required=True, choices=["main", "detail", "scan"])
+P.add_argument("--scene", required=True,
+               choices=["main", "detail", "scan", "setup", "erfolge"])
 P.add_argument("--size", required=True, help="Breite x Hoehe in Pixeln, z. B. 620x380")
 P.add_argument("--out", required=True, help="Ziel-Datei (.png oder .gif)")
 P.add_argument("--frames", type=int, default=16, help="Frames fuer das Scan-GIF")
@@ -51,10 +56,15 @@ Config.set("graphics", "width", str(W))
 Config.set("graphics", "height", str(H))
 Config.set("graphics", "resizable", "0")
 Config.set("graphics", "borderless", "1")
+# Ohne MSAA liefert Window.screenshot() auf diesem Rechner ein echtes Bild;
+# mit der Standard-Mehrfachabtastung kommt nur Schwarz zurueck.
+Config.set("graphics", "multisamples", "0")
 
 from kivy.app import App  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
 from kivy.core.window import Window  # noqa: E402
+from kivy.metrics import dp  # noqa: E402
+from kivy.uix.scrollview import ScrollView  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -81,6 +91,25 @@ def ergebnis(name, preis, klass, **extra):
          "_is_new": False, "_prev": None}
     r.update(extra)
     return r
+
+
+def seed_events():
+    """Drei Fenster fuer die Aufnahme: offen, abgeschlossen, alter Stand."""
+    scan_core.reset_events()
+    ev = scan_core.events()
+    ev.clear()
+    jetzt = datetime.now()
+    ev.add({"typ": "verfuegbar", "haendler": "Amazon DE",
+            "ts": "2026-11-13T10:35:00", "start": "2026-11-13T10:35:00",
+            "dauer": None, "preis": 849.0})
+    ev.add({"typ": "ausverkauft", "haendler": "Amazon DE",
+            "ts": "2026-11-13T10:36:35", "start": "2026-11-13T10:35:00",
+            "dauer": 95, "preis": 849.0})
+    ev.add({"typ": "verfuegbar", "haendler": "Amazon DE",
+            "ts": jetzt.isoformat(timespec="seconds"), "preis": 799.0})
+    ev.add({"typ": "verfuegbar", "haendler": "Computeruniverse",
+            "ts": (jetzt - timedelta(days=2)).isoformat(timespec="seconds"),
+            "preis": 1299.0})
 
 
 def treffer():
@@ -115,17 +144,45 @@ def client_box():
 
 
 def grab(path):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    # Der Framebuffer ist exakt und ohne Fensterraender. PrintWindow bleibt
+    # als Rueckfall, weil es auch bei verdeckten Fenstern funktioniert.
+    if os.environ.get("PS5PRO_SHOT_METHOD") != "printwindow":
+        try:
+            _kivy_shot(path)
+            return
+        except Exception as e:
+            print("Kivy-Screenshot fehlgeschlagen:", e)
+    _hwnd_shot(path)
+
+
+def _kivy_shot(path):
+    from PIL import Image
+    Window.canvas.ask_update()
+    fd, tmp = tempfile.mkstemp(prefix="ps5pro-shot-", suffix=".png")
+    os.close(fd)
+    os.remove(tmp)
+    shot = Window.screenshot(name=tmp)
+    if not shot or not os.path.exists(shot):
+        raise RuntimeError("keine Aufnahme")
+    with Image.open(shot) as bild:
+        rgb = bild.convert("RGB")
+        if rgb.getbbox() is None:
+            raise RuntimeError("schwarzes Bild")
+        rgb.save(path)
+    os.remove(shot)
+    print("SHOT", path, rgb.size)
+
+
+def _hwnd_shot(path):
     from PIL import Image, ImageGrab
     hwnd, box = client_box()
-    # PrintWindow nimmt das Fenster selbst auf, auch wenn ein Browser davor
-    # liegt. ImageGrab bleibt als Fallback fuer aeltere Windows-Versionen.
     try:
         img = _print_window(hwnd)
     except Exception:
         img = ImageGrab.grab(bbox=box)
     USER32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     img.save(path)
     print("SHOT", path, img.size)
 
@@ -218,7 +275,17 @@ class ShotApp(App):
             Clock.schedule_once(lambda _d: self.fertig(), 0.6)
         elif ARGS.scene == "detail":
             self.zeige_treffer()
+            seed_events()
             Clock.schedule_once(self.oeffne_detail, 0.4)
+        elif ARGS.scene == "setup":
+            seed_events()
+            self.ui._open_setup()
+            Clock.schedule_once(self.rolle_zu_erfolge, 0.4)
+            Clock.schedule_once(lambda _d: self.fertig(), 1.0)
+        elif ARGS.scene == "erfolge":
+            seed_events()
+            self.ui._open_setup()
+            Clock.schedule_once(self.oeffne_erfolge, 0.6)
         else:
             self.start_scan()
             # Kurz Vorlauf: der erste Frame soll den bereits gezeichneten
@@ -250,6 +317,33 @@ class ShotApp(App):
               ui.results_panel.size)
         if fl is None:
             raise RuntimeError("Radarflaeche ist leer - Layout pruefen")
+
+    def erfolge_button(self):
+        offen = [w for w in Window.children if isinstance(w, main.Popup)]
+        if not offen:
+            raise RuntimeError("SETUP-Popup nicht gefunden")
+        for w in offen[-1].content.walk():
+            if isinstance(w, main.PS1Button) and str(w.text).startswith("ERFOLGE"):
+                return w
+        raise RuntimeError("ERFOLGE-Button nicht gefunden")
+
+    def rolle_zu_erfolge(self, _dt):
+        """SETUP bis zur SYSTEM-Gruppe scrollen, damit ERFOLGE im Bild ist."""
+        button = self.erfolge_button()
+        eltern = button.parent
+        while eltern is not None and not isinstance(eltern, ScrollView):
+            eltern = eltern.parent
+        if eltern is not None:
+            eltern.scroll_to(button, padding=dp(6), animate=False)
+
+    def oeffne_erfolge(self, _dt):
+        button = self.erfolge_button()
+        self.rolle_zu_erfolge(_dt)
+
+        def klick(_d):
+            button.dispatch("on_release")
+            Clock.schedule_once(lambda _d2: self.fertig(), 0.8)
+        Clock.schedule_once(klick, 0.3)
 
     def oeffne_detail(self, _dt):
         serie = [["2026-11-01T10:00:00", 849.0],

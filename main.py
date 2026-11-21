@@ -45,7 +45,9 @@ from scan_core import (
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
     bg_wachhund,
-    dauer_text, kurz_zeit, kurz_tag, zeitraum_text, event_zeile, events as verlauf_events,
+    kurz_zeit, kurz_tag, event_zeile,
+    erfolgs_fenster, erfolg_zeile, erfolg_offen_max, erfolg_letzte_scans,
+    events as verlauf_events,
     preis_deckel, deckel_wert, stumm_bis, Kaeufe, KAUF_STUMM_S,
     health_export_json,
 )
@@ -818,6 +820,12 @@ class Dot(Widget):
                                         size=(self.width+dp(2),self.height+dp(2)))
             Color(*self._c); Rectangle(pos=self.pos,size=self.size)
             Color(1,1,1,0.25); Line(points=[self.x,self.top-dp(1),self.right-dp(1),self.top-dp(1)],width=dp(1))
+
+def erfolg_farbe(f):
+    """Punktfarbe eines Erfolgsfensters: aktuell, alter Stand oder Abschluss."""
+    if f.get("offen"): return PS1_GREEN
+    return PS1_YELLOW if f.get("veraltet") else PS1_CYAN
+
 
 class PSMark(Widget):
     """Silver PS monogram badge."""
@@ -2099,6 +2107,10 @@ class MainUI(FloatLayout):
                lambda: (ref["p"] and ref["p"].dismiss(),
                         Clock.schedule_once(lambda dt:self._open_events(),0.16)),
                PS1_CYAN)
+        action("ERFOLGE",self._erfolge_count,
+               lambda: (ref["p"] and ref["p"].dismiss(),
+                        Clock.schedule_once(lambda dt:self._open_erfolge(),0.16)),
+               PS1_GREEN)
         action("TESTALARM",lambda: "SENDEN",self._send_test_alarm,PS1_CYAN)
 
         section("ALARM-KANAL")
@@ -2356,41 +2368,53 @@ class MainUI(FloatLayout):
         try: return f"{len(verlauf_events().reload().all())} EREIGNISSE"
         except Exception: return "ÖFFNEN"
 
-    def _open_events(self):
-        """Detail A: Ticker der Zustandswechsel samt Fensterdauer."""
+    def _erfolge_count(self):
+        try:
+            return f"{len(erfolgs_fenster(verlauf_events().reload().all()))} FENSTER"
+        except Exception:
+            return "ÖFFNEN"
+
+    def _erfolg_frische(self):
+        """Wie lange ein offenes Fenster nach dem eingestellten Takt gilt."""
+        return erfolg_offen_max(self.auto_interval)
+
+    def _erfolg_scans(self):
+        """Letzte erfolgreiche Verfuegbarkeits-Scans je Shop."""
+        try: return erfolg_letzte_scans(Health().all())
+        except Exception: return {}
+
+    def _listen_popup(self,titel,sub,leer_text,zeilen,leer_toast):
+        """Gemeinsames Geruest fuer VERLAUF und ERFOLGE.
+
+        ``zeilen`` ist eine Liste aus ``(Punktfarbe, Text, hervorgehoben)``.
+        Beide Ansichten teilen Kopf, Scrollbereich, LEEREN und Groesse.
+        """
         haptic(0.02)
-        ev=verlauf_events()
-        ev.reload()
-        liste=ev.letzte(30)
-        gesamt=len(ev.all())
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(8))
-        kopf=Label(text="[b]VERLAUF[/b]",markup=True,color=PS1_SILVER,
+        kopf=Label(text=f"[b]{titel}[/b]",markup=True,color=PS1_SILVER,
                    font_size=sp(12),font_name=SST_FONT,
                    size_hint_y=None,height=dp(22),
                    halign="left",valign="middle")
         kopf.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         box.add_widget(kopf)
-        sub=Label(text=f"{gesamt} EREIGNISSE · FENSTERDAUER AUS EIGENEN SCANS",
-                  color=PS1_CYAN,font_size=sp(8.5),font_name=SST_FONT,
-                  size_hint_y=None,height=dp(14),halign="left",valign="middle",
-                  shorten=True,shorten_from="right")
-        sub.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-        box.add_widget(sub)
+        sub_l=Label(text=sub,color=PS1_CYAN,font_size=sp(8.5),font_name=SST_FONT,
+                    size_hint_y=None,height=dp(14),halign="left",valign="middle",
+                    shorten=True,shorten_from="right")
+        sub_l.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        box.add_widget(sub_l)
         sv=ScrollView(bar_width=dp(4))
         inner=BoxLayout(orientation="vertical",size_hint_y=None,spacing=dp(2))
         inner.bind(minimum_height=inner.setter("height"))
-        if not liste:
-            leer=Label(text="Noch keine Zustandswechsel. Der Ticker fuellt sich, "
-                            "sobald ein Shop zwischen verfuegbar und weg wechselt.",
-                       color=PS1_GREY,font_size=sp(9),font_name=SST_FONT,
-                       halign="left",valign="top",size_hint_y=None,height=dp(44))
+        if not zeilen:
+            leer=Label(text=leer_text,color=PS1_GREY,font_size=sp(9),
+                       font_name=SST_FONT,halign="left",valign="top",
+                       size_hint_y=None,height=dp(44))
             leer.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             inner.add_widget(leer)
-        for e in liste:
-            neu=e.get("typ")=="verfuegbar"
+        for farbe,text,hell in zeilen:
             row=BoxLayout(size_hint_y=None,height=dp(24),spacing=dp(4))
-            row.add_widget(Dot(PS1_GREEN if neu else PS1_SILVER))
-            lb=Label(text=event_zeile(e),color=PS1_TEXT if neu else PS1_SILVER,
+            row.add_widget(Dot(farbe))
+            lb=Label(text=text,color=PS1_TEXT if hell else PS1_SILVER,
                      font_size=sp(9),font_name=SST_FONT,halign="left",valign="middle",
                      shorten=True,shorten_from="right")
             lb.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
@@ -2400,16 +2424,58 @@ class MainUI(FloatLayout):
         lb2=PS1Button(text="LEEREN",accent=PS1_YELLOW,font_size=sp(9))
         cb=PS1Button(text="ZU",accent=PS1_SILVER,font_size=sp(9))
         btns.add_widget(lb2); btns.add_widget(cb); box.add_widget(btns)
+        # Die Hoehe folgt dem Inhalt: Bei drei Erfolgen stand das Popup sonst
+        # fast leer da, waehrend lange Listen weiterhin bei 520 dp scrollen.
+        anzahl=max(1,len(zeilen))
+        inhalt=dp(22+14+36+16+15)+dp(26)*anzahl
         p=Popup(title="",content=box,size_hint=(None,None),
                 width=min(dp(560),Window.width*0.92),
-                height=min(dp(520),Window.height*0.82),
+                height=min(dp(520),Window.height*0.82,max(dp(220),inhalt)),
                 background_color=(0.08,0.08,0.09,1),separator_height=0)
         def leeren(*_):
-            ev.clear(); p.dismiss()
-            self._toast("VERLAUF GELEERT",color=PS1_GREY)
+            verlauf_events().clear(); p.dismiss()
+            self._toast(leer_toast,color=PS1_GREY)
         lb2.bind(on_release=leeren)
         cb.bind(on_release=lambda *_:p.dismiss())
         p.open()
+
+    def _open_erfolge(self):
+        """Erfolge: abgeschlossene und offene Verfuegbarkeitsfenster."""
+        ev=verlauf_events().reload()
+        alle=erfolgs_fenster(ev.all(), max_alter=self._erfolg_frische(),
+                             letzte_scans=self._erfolg_scans())
+        preise=[]
+        for f in alle:
+            if f.get("preis") is None: continue
+            try: preise.append(float(f["preis"]))
+            except (TypeError,ValueError): pass
+        best=format_preis(min(preise)) if preise else "—"
+        shops=len({f.get("haendler") for f in alle if f.get("haendler")})
+        zeilen=[]
+        for f in alle[:30]:
+            offen=bool(f.get("offen"))
+            zeilen.append((erfolg_farbe(f),erfolg_zeile(f),offen))
+        self._listen_popup(
+            "ERFOLGE",
+            f"{len(alle)} FENSTER · {shops} SHOP{'S' if shops != 1 else ''} · BESTER PREIS {best}",
+            "Noch keine Erfolge. Sobald ein Shop verfuegbar wird, "
+            "steht das Fenster hier - mit Preis und Dauer.",
+            zeilen,"ERFOLGE GELEERT")
+
+    def _open_events(self):
+        """Detail A: Ticker der Zustandswechsel samt Fensterdauer."""
+        ev=verlauf_events(); ev.reload()
+        zeilen=[]
+        for e in ev.letzte(30):
+            neu=e.get("typ")=="verfuegbar"
+            zeilen.append((PS1_GREEN if neu else PS1_SILVER,
+                           event_zeile(e),neu))
+        self._listen_popup(
+            "VERLAUF",
+            f"{len(ev.all())} EREIGNISSE · FENSTERDAUER AUS EIGENEN SCANS",
+            "Noch keine Zustandswechsel. Der Ticker fuellt sich, "
+            "sobald ein Shop zwischen verfuegbar und weg wechselt.",
+            zeilen,"VERLAUF GELEERT")
 
     def _shop_config_bg(self,force=False):
         try: n=aktualisiere_shop_config(force)
@@ -2474,12 +2540,14 @@ class MainUI(FloatLayout):
         zeilen.append(("ZULETZT VERFUEGBAR",
                        kurz_zeit(self.history.get_zuletzt_verfuegbar(name))
                        or "NOCH NIE"))
-        letztes=verlauf_events().reload().letztes(name)
-        if isinstance(letztes,dict) and letztes.get("dauer") is not None:
-            zeilen.append(("LETZTES FENSTER",
-                           f"{zeitraum_text(letztes.get('start'), letztes.get('ts'))} · "
-                           f"{dauer_text(letztes['dauer'])}"))
-        hzustand=Health().all().get(name) or {}
+        # Dieselbe Fensterlogik wie SETUP -> ERFOLGE, nur fuer diesen Shop:
+        # die letzten drei Fenster, inklusive aktuellem Stand und Preis.
+        halle=Health().all()
+        fenster=[f for f in erfolgs_fenster(verlauf_events().reload().all(),
+                                            max_alter=self._erfolg_frische(),
+                                            letzte_scans=erfolg_letzte_scans(halle))
+                 if f.get("haendler")==name][:3]
+        hzustand=halle.get(name) or {}
         if hzustand.get("last_ts"):
             zeilen.append(("ZULETZT GEPRUEFT", self._age_text(hzustand["last_ts"])+" alt"))
         # Kaufprotokoll: Preis und Zeitpunkt der eigenen "Gekauft"-Markierung.
@@ -2496,6 +2564,21 @@ class MainUI(FloatLayout):
                     halign="right",valign="middle",shorten=True,shorten_from="right")
             for x in (a,b): x.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             row.add_widget(a); row.add_widget(b); box.add_widget(row)
+        if fenster:
+            kopf=Label(text="LETZTE ERFOLGE",color=PS1_GREY,font_size=sp(8.5),
+                       font_name=SST_FONT,halign="left",valign="middle",
+                       size_hint_y=None,height=dp(18))
+            kopf.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            box.add_widget(kopf)
+            for f in fenster:
+                offen=bool(f.get("offen"))
+                row=BoxLayout(size_hint_y=None,height=dp(20),spacing=dp(4))
+                row.add_widget(Dot(erfolg_farbe(f)))
+                lb=Label(text=erfolg_zeile(f),color=PS1_TEXT if offen else PS1_SILVER,
+                         font_size=sp(8.5),font_name=SST_FONT,halign="left",
+                         valign="middle",shorten=True,shorten_from="right")
+                lb.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+                row.add_widget(lb); box.add_widget(row)
         if isinstance(beleg,dict) and beleg.get("excerpt"):
             bl=Label(text="BELEG: "+str(beleg["excerpt"]),color=PS1_SILVER,
                      font_size=sp(8),font_name=SST_FONT,halign="left",valign="top",
@@ -2507,6 +2590,8 @@ class MainUI(FloatLayout):
                          f"ALLZEIT-TIEF: {format_preis(allzeit) if allzeit else '—'}",
                    color=PS1_SILVER,font_size=sp(9),font_name=SST_FONT,
                    size_hint_y=None,height=dp(32),halign="left")
+        # Ohne text_size bleibt halign wirkungslos und die Zeile zentriert.
+        info.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         box.add_widget(info)
         if len(serie)>=2:
             box.add_widget(Sparkline(serie,color=CARD_STATUS.get(r.get("klass"),PS1_GREEN),

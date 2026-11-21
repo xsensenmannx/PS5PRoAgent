@@ -293,15 +293,19 @@ noch lieferte, ist der Unterschied zwischen „beobachten" und „abschreiben".
 
 **Abnahme:** `tools/kivy_smoke.py` prüft HUD-Text und Umschalten; Layout bei 620×380
 unverändert; STOP bricht eine Live-Runde ab; Hintergrunddienst unberührt. Dazu
-Selftest-Fälle für Fensterdauer-Formatierung, Ringpuffer-Deckel und „zuletzt verfügbar"
-mit und ohne Verlauf.
+Selftest-Fälle für Fensterdauer-Formatierung, Ringpuffer-Deckel, Erfolgsfenster und
+„zuletzt verfügbar" mit und ohne Verlauf.
 
 **Stand (umgesetzt):** `Events` (Ringpuffer `ps5pro_events.json`, 200 Einträge) schreibt
 `History.update()` bei jedem echten Wechsel — im App-Prozess **und** im Hintergrunddienst;
 `dauer_text`, `kurz_zeit`/`kurz_tag` und `event_zeile` formatieren die Zeilen. Sichtbar ist
-es an drei Stellen: `VERLAUF` in SETUP (Ticker, 30 Einträge, mit `LEEREN`), `ZULETZT
-VERFUEGBAR` und `LETZTES FENSTER` in der Detailansicht sowie `ZUL. TT.MM.` in der
-Trefferzeile ausverkaufter Shops. Die Shop-Health-Liste bleibt bewusst bei der
+es an vier Stellen: `VERLAUF` in SETUP (Ticker, 30 Einträge, mit `LEEREN`), `ERFOLGE`
+in SETUP (Verfügbarkeitsfenster mit Shop, Preis, Dauer und Bestpreis, 30 Einträge;
+`OFFEN` nur innerhalb des eingestellten Scan-Takts plus zwei Minuten oder mit
+frischem Erfolgs-Scan, ältere offene Fenster als `LETZTER STAND`),
+`ZULETZT VERFUEGBAR` und `LETZTE ERFOLGE` (bis zu drei Fenster mit derselben Logik wie
+SETUP → ERFOLGE) in der Detailansicht sowie `ZUL. TT.MM.` in der Trefferzeile
+ausverkaufter Shops. Die Shop-Health-Liste bleibt bewusst bei der
 Scan-Gesundheit — dort „verfügbar" mit „OK/ERROR" zu mischen, wäre irreführend.
 **Risiko:** Akku/Datenvolumen. Gegenmaßnahme: nur Vordergrund, nur bei Bedarf, WLAN-Schalter
 bleibt, Takt in SETUP sichtbar.
