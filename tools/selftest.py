@@ -800,6 +800,22 @@ def feature_tests():
         finally:
             core._try_url = echt
 
+        # 304 im force-Pfad: erst 304, dann 200. Das Flag bleibt fuer die
+        # 304-Quote erhalten, obwohl die Antwort danach frisch geladen wird.
+        aufrufe = {"n": 0}
+        def _erst_304(*args, **kwargs):
+            aufrufe["n"] += 1
+            if aufrufe["n"] == 1:
+                return None, "HTTP 304", {"not_modified": True}
+            return "<html>ok</html>", None, {"bytes": 4}
+        core._try_url = _erst_304
+        try:
+            _h, _u, _c, meta = core.fetch_mit_cache(
+                ["https://shop/304-force"], force=True)
+            check("304 force flag", meta.get("not_modified_gesehen"), True)
+        finally:
+            core._try_url = echt
+
         # Alter Eintrag ohne Serie wird migriert, gleiche Preise fluten nicht.
         with open(os.path.join(tmp, core.HISTORY_FILE), "w", encoding="utf-8") as f:
             json.dump({"Shop A": {"preis": 800.0, "zeit": "2026-01-01T10:00:00"}}, f)
@@ -2921,6 +2937,82 @@ def outbox_tests():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def watcher_log_tests():
+    """NDJSON-Logs: Tagesrotation, Deckel und Aufbewahrung."""
+    import cloud_watcher.watcher as cw
+    from datetime import datetime
+
+    tmp = tempfile.mkdtemp(prefix="ps5pro-watcher-log-")
+    tz = cw.Konfig.aus_env({}).zeitzone()
+    tag1 = datetime(2026, 11, 21, 23, 0, tzinfo=tz).timestamp()
+    tag2 = datetime(2026, 11, 22, 1, 0, tzinfo=tz).timestamp()
+    alt_max, alt_parts = cw.LOG_MAX_BYTES, cw.LOG_MAX_PARTS
+    try:
+        cw.log_datei_oeffnen(tmp, tag1, tz)
+        cw.log({"typ": "check", "ts": tag1,
+                "iso": "2026-11-21T23:00:00+01:00", "ms": 100,
+                "bytes": 1000, "frisch": True, "not_modified": False,
+                "klass": "unavail"}, jetzt=tag1)
+        cw.log({"typ": "check", "ts": tag1,
+                "iso": "2026-11-21T23:10:00+01:00", "ms": 300,
+                "bytes": 0, "frisch": False, "not_modified": True,
+                "klass": "unavail"}, jetzt=tag1)
+        cw.log({"typ": "alarm", "ts": tag1,
+                "iso": "2026-11-21T23:20:00+01:00", "aktion": "wuerde_senden",
+                "event": "restock"}, jetzt=tag1)
+        cw.log({"typ": "check", "ts": tag2,
+                "iso": "2026-11-22T01:00:00+01:00", "ms": 500,
+                "bytes": 500, "frisch": True, "not_modified": True,
+                "klass": "hit"}, jetzt=tag2)
+        cw.log_datei_schliessen()
+
+        dateien = cw.log_dateien(tmp)
+        check("log tagesrotation", len(dateien), 2)
+        zeilen = []
+        for datei in dateien:
+            with open(datei, "r", encoding="utf-8") as f:
+                zeilen.extend(json.loads(z) for z in f if z.strip())
+        check("log zeilen", len(zeilen), 4)
+        check("log json", all(isinstance(z, dict) for z in zeilen), True)
+
+        # Nach dem Schliessen darf kein weiterer Satz in die Dateien gehen.
+        cw.log({"typ": "danach"})
+        check("log nach close keine datei", len(cw.log_dateien(tmp)), 2)
+
+        # Groessendeckel: hoechstens zwei Teile, danach wird verworfen.
+        tmp_cap = os.path.join(tmp, "cap")
+        cw.LOG_MAX_BYTES = 150
+        cw.LOG_MAX_PARTS = 2
+        cw.log_datei_oeffnen(tmp_cap, tag1, tz)
+        for i in range(12):
+            cw.log({"typ": "test", "i": i, "text": "x" * 40}, jetzt=tag1)
+        cw.log_datei_schliessen()
+        cw.LOG_MAX_BYTES, cw.LOG_MAX_PARTS = alt_max, alt_parts
+        cap_dateien = cw.log_dateien(tmp_cap)
+        check("log deckel teile", len(cap_dateien), 2)
+        cap_zeilen = 0
+        for datei in cap_dateien:
+            with open(datei, "r", encoding="utf-8") as f:
+                cap_zeilen += len([z for z in f if z.strip()])
+        check("log deckel greift", cap_zeilen < 12, True)
+
+        # Aufbewahrung: aelter als 14 Tage fliegt raus, der Vortag bleibt.
+        tmp_keep = os.path.join(tmp, "keep")
+        os.makedirs(tmp_keep)
+        alt_pfad = os.path.join(tmp_keep, cw.LOG_PREFIX + "2026-01-01" + cw.LOG_SUFFIX)
+        neu_pfad = os.path.join(tmp_keep, cw.LOG_PREFIX + "2026-11-20" + cw.LOG_SUFFIX)
+        for datei in (alt_pfad, neu_pfad):
+            with open(datei, "w", encoding="utf-8") as f:
+                f.write("{}\n")
+        check("log aufraeumen zaehlt", cw.log_aufraeumen(tmp_keep, tag1, tz), 1)
+        check("log alter tag weg", os.path.exists(alt_pfad), False)
+        check("log neuer tag bleibt", os.path.exists(neu_pfad), True)
+    finally:
+        cw.log_datei_schliessen()
+        cw.LOG_MAX_BYTES, cw.LOG_MAX_PARTS = alt_max, alt_parts
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -2946,6 +3038,7 @@ if __name__ == "__main__":
         cloud_watcher_tests()
         watcher_p0_tests()
         outbox_tests()
+        watcher_log_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.
         try:

@@ -41,6 +41,12 @@ import scan_core as core  # noqa: E402  (Pfad steht erst zur Laufzeit fest)
 SCHEMA = 3
 STATE_FILE = "cloud_watch_state.json"
 STATUS_FILE = "watcher_status.json"
+# NDJSON-Tageslogs: hoechstens drei Teile je Tag, 14 Tage Aufbewahrung.
+LOG_PREFIX = "watcher-log-"
+LOG_SUFFIX = ".ndjson"
+LOG_MAX_BYTES = 4 * 1024 * 1024
+LOG_MAX_PARTS = 3
+LOG_KEEP_DAYS = 14
 # Die Statusdatei wird haeufiger geschrieben als der Healthcheck prueft.
 STATUS_TAKT = 15
 # Der Lebenszeichen-Ping laeuft unabhaengig von faelligen Shops.
@@ -66,6 +72,14 @@ OUTBOX_SENDING_STALE_S = 300
 OUTBOX_DRAIN_MAX = 5
 STOP = threading.Event()
 _LOG_LOCK = threading.Lock()
+_LOG_ZIEL = ""
+_LOG_TZ = None
+_LOG_TAG = ""
+_LOG_TEIL = 0
+_LOG_HANDLE = None
+_LOG_GROESSE = 0
+_LOG_VERWORFEN = 0
+
 
 
 @dataclass(frozen=True)
@@ -1052,9 +1066,160 @@ def settings_aus(konfig):
     }
 
 
-def log(daten):
+def _log_pfad(tag, teil=1):
+    name = LOG_PREFIX + str(tag)
+    if teil > 1:
+        name += ".%d" % int(teil)
+    return os.path.join(_LOG_ZIEL, name + LOG_SUFFIX)
+
+
+def _log_handle_schliessen():
+    global _LOG_HANDLE
+    handle = _LOG_HANDLE
+    _LOG_HANDLE = None
+    if handle is None:
+        return
+    try:
+        handle.flush()
+        os.fsync(handle.fileno())
+        handle.close()
+    except OSError:
+        pass
+
+
+def log_datei_schliessen():
+    """Senke schliessen; danach geht das Log wieder nur auf stdout."""
+    global _LOG_ZIEL
     with _LOG_LOCK:
-        print(json.dumps(daten, ensure_ascii=False, sort_keys=True), flush=True)
+        _log_handle_schliessen()
+        _LOG_ZIEL = ""
+
+
+def log_datei_oeffnen(daten_dir, jetzt=None, tz=None):
+    """NDJSON-Senke im Datenverzeichnis vorbereiten und alte Tage loeschen."""
+    global _LOG_ZIEL, _LOG_TZ, _LOG_TAG, _LOG_TEIL
+    global _LOG_GROESSE, _LOG_VERWORFEN
+    log_datei_schliessen()
+    _LOG_ZIEL = str(daten_dir or "")
+    _LOG_TZ = tz
+    _LOG_TAG = ""
+    _LOG_TEIL = 0
+    _LOG_GROESSE = 0
+    _LOG_VERWORFEN = 0
+    if not _LOG_ZIEL:
+        return
+    try:
+        os.makedirs(_LOG_ZIEL, exist_ok=True)
+        log_aufraeumen(_LOG_ZIEL, jetzt, tz)
+    except OSError:
+        _LOG_ZIEL = ""
+
+
+def _log_oeffnen(tag, teil):
+    global _LOG_HANDLE, _LOG_GROESSE, _LOG_TAG, _LOG_TEIL
+    pfad = _log_pfad(tag, teil)
+    _LOG_HANDLE = open(pfad, "ab")
+    _LOG_TAG = str(tag)
+    _LOG_TEIL = int(teil)
+    try:
+        _LOG_GROESSE = os.path.getsize(pfad)
+    except OSError:
+        _LOG_GROESSE = 0
+
+
+def _log_datei_schreiben(zeile, jetzt):
+    """Eine Zeile an die Tagesdatei anhaengen; Fehler deaktivieren die Senke."""
+    global _LOG_ZIEL, _LOG_TAG, _LOG_TEIL, _LOG_GROESSE, _LOG_VERWORFEN
+    if not _LOG_ZIEL:
+        return
+    tag = _tag_datum(jetzt, _LOG_TZ)
+    roh = (zeile + "\n").encode("utf-8")
+    try:
+        if _LOG_HANDLE is None or _LOG_TAG != tag:
+            _log_handle_schliessen()
+            _log_oeffnen(tag, 1)
+            _LOG_VERWORFEN = 0
+            log_aufraeumen(_LOG_ZIEL, jetzt, _LOG_TZ)
+        if _LOG_GROESSE + len(roh) > LOG_MAX_BYTES:
+            if _LOG_TEIL < LOG_MAX_PARTS:
+                _log_handle_schliessen()
+                _log_oeffnen(tag, _LOG_TEIL + 1)
+            else:
+                _LOG_VERWORFEN += 1
+                if _LOG_VERWORFEN == 1:
+                    print(
+                        json.dumps(
+                            {
+                                "typ": "log_verworfen",
+                                "ts": round(float(jetzt), 3),
+                                "info": "Tagesdeckel erreicht",
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                return
+        _LOG_HANDLE.write(roh)
+        _LOG_HANDLE.flush()
+        _LOG_GROESSE += len(roh)
+    except OSError as e:
+        _log_handle_schliessen()
+        _LOG_ZIEL = ""
+        print(
+            json.dumps(
+                {
+                    "typ": "log_fehler",
+                    "ts": round(float(jetzt), 3),
+                    "info": type(e).__name__,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
+
+def log_dateien(daten_dir):
+    """Sortierte NDJSON-Tagesdateien des Waechters."""
+    try:
+        namen = sorted(os.listdir(daten_dir))
+    except OSError:
+        return []
+    return [
+        os.path.join(daten_dir, name) for name in namen
+        if name.startswith(LOG_PREFIX) and name.endswith(LOG_SUFFIX)
+    ]
+
+
+def log_aufraeumen(daten_dir, jetzt=None, tz=None):
+    """Dateien ausserhalb der Aufbewahrungsfrist loeschen."""
+    if not daten_dir:
+        return 0
+    jetzt = _outbox_float(jetzt, time.time())
+    heute = datetime.strptime(_tag_datum(jetzt, tz), "%Y-%m-%d").date()
+    entfernt = 0
+    for pfad in log_dateien(daten_dir):
+        name = os.path.basename(pfad)
+        rest = name[len(LOG_PREFIX):-len(LOG_SUFFIX)]
+        try:
+            datum = datetime.strptime(rest[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if (heute - datum).days > LOG_KEEP_DAYS:
+            try:
+                os.remove(pfad)
+                entfernt += 1
+            except OSError:
+                pass
+    return entfernt
+
+
+def log(daten, jetzt=None):
+    zeile = json.dumps(daten, ensure_ascii=False, sort_keys=True)
+    with _LOG_LOCK:
+        print(zeile, flush=True)
+        _log_datei_schreiben(zeile, time.time() if jetzt is None else jetzt)
 
 
 def iso_ts(ts, tz):
@@ -1284,6 +1449,7 @@ def main():
 
     pfad = os.path.join(konfig.data_dir, STATE_FILE)
     jetzt = time.time()
+    log_datei_oeffnen(konfig.data_dir, jetzt, tz)
     preflight_ok, pruefungen = preflight(konfig, pfad)
     log(
         {
@@ -1301,6 +1467,7 @@ def main():
                     % (pruefung.get("name"), pruefung.get("info")),
                     file=sys.stderr,
                 )
+        log_datei_schliessen()
         return 2
     zustand = zustand_laden(pfad, jetzt, konfig.shadow_hours)
     nach_name = {h["name"]: h for h in core.HAENDLER}
@@ -1484,6 +1651,7 @@ def main():
                                 "bytes": r.get("bytes"),
                                 "ms": round(float(r.get("dauer") or 0) * 1000),
                                 "frisch": r.get("fresh"),
+                                "not_modified": r.get("not_modified"),
                                 "verify": r.get("verify"),
                                 "fehler": r.get("fehler"),
                                 "event": event,
@@ -1590,6 +1758,7 @@ def main():
                 "alarme_gesendet": int(zustand.get("alarme_gesendet") or 0),
             }
         )
+        log_datei_schliessen()
     return 0
 
 

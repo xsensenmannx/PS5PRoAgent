@@ -117,7 +117,7 @@ wie wichtig er wäre.
 │    ├─ Zustand: /data/watch_state.json (atomar)              │
 │    ├─ Alarm: sende_webhook_alarm() → ntfy/Telegram          │
 │    ├─ Health: /data/health.json + Tageszusammenfassung      │
-│    └─ Log: JSON-Zeilen nach stdout (Fly-Logs)               │
+│    └─ Log: JSON-Zeilen nach stdout + NDJSON in /data        │
 │                                                             │
 │  Kein offener Port. Kein HTTP-Server. Kein Token in P0.     │
 └─────────────────────────────────────────────────────────────┘
@@ -145,7 +145,7 @@ wie wichtig er wäre.
 | Taktprofil | `shop_intervall()` ist auf Akku und Vordergrund ausgelegt (30 s heiß, 4 min normal). Der Wächter hat keinen Akku, aber ein kleineres Budget und andere Shops. Er bringt eine eigene Tabelle mit. |
 | Scheduler | `faellige_haendler()` sortiert richtig, ist aber an `LIVE_*`-Konstanten gebunden. Der Wächter braucht zusätzlich Schattenmodus, Budgetanzeige und ein anderes Rundenziel. Rund 60 Zeilen, kein Eingriff in die App. |
 | Zustand | `History` und `Events` sind App-Dateien mit eigener Semantik. Der Wächter braucht nur: letzter Zustand, letzter Preis, Fehlerserie, letzte Prüfung. Eine kleine JSON-Datei reicht; keine Datenbank, keine Migration. |
-| Health-Verlauf | `health_uebersicht()` liefert die Kennzahlen, aber keinen 30-Tage-Verlauf. Der Wächter schreibt zusätzlich NDJSON-Zeilen (14 Tage, rotierend). |
+| Health-Verlauf | `health_uebersicht()` liefert die Kennzahlen, aber keinen 30-Tage-Verlauf. Der Wächter schreibt zusätzlich NDJSON-Tagesdateien (max. 3 × 4 MB/Tag, 14 Tage Aufbewahrung). |
 
 ### 4.3 Konfiguration (Environment, keine Datei im Repository)
 

@@ -69,8 +69,10 @@ $env:WATCH_DATA_DIR="./cloud_watcher/data"; $env:WATCH_SHADOW="1"
 python -m cloud_watcher.watcher
 ```
 
-Die Ausgabe ist zeilenweises JSON auf stdout. Der lokale Schattenlauf braucht
-keinen Webhook. `Strg+C` beendet sauber und schreibt den Zustand.
+Die Ausgabe ist zeilenweises JSON auf stdout; dieselben Zeilen landen als
+NDJSON-Tagesdateien im Datenverzeichnis (siehe „Logs und Zustand“). Der lokale
+Schattenlauf braucht keinen Webhook. `Strg+C` beendet sauber und schreibt den
+Zustand.
 
 ### Alarmweg einmal testen
 
@@ -185,7 +187,7 @@ der Container nicht.
 | `WATCH_PREIS_TOLERANZ` | `1` | Neupreis-Alarm erst ab dieser Senkung in Euro; Restock bleibt unberührt |
 | `WATCH_MAX_REQ_MIN` | `12` | Globales Request-Budget pro Minute; PS Direct zuerst |
 | `WATCH_TZ` | `Europe/Berlin` | Fenster und Log-Zeit |
-| `WATCH_DATA_DIR` | `/data` | Zustand, Health, HTTP-Cache |
+| `WATCH_DATA_DIR` | `/data` | Zustand, Health, HTTP-Cache, NDJSON-Logs |
 | `WATCH_WEBHOOK_URL` | leer | **Geheim.** ntfy-/Telegram-/Discord-URL |
 | `WATCH_WEBHOOK_PRESET` | automatisch | `ntfy`, `telegram`, `discord`, `generisch` |
 | `WATCH_OPS_WEBHOOK_URL` | leer | Optionaler, unabhängiger Kanal nur für den Systemalarm; geheim |
@@ -250,6 +252,14 @@ Beispiele (eine Zeile pro Ereignis):
   Folge für 60 Minuten pausiert.
 - `runde` nennt `budget_verbraucht` und `budget_max`.
 - `heartbeat` zeigt nur `ok`/`info`, nie die URL.
+
+Die Zeilen werden zusätzlich im Datenverzeichnis gespeichert:
+`watcher-log-YYYY-MM-DD.ndjson`, Tagesgrenze nach `WATCH_TZ`. Pro Tag sind
+höchstens drei Teile à 4 MB erlaubt (`…-2.ndjson`, `…-3.ndjson`); danach wird
+bis zum nächsten Tag verworfen und einmal `log_verworfen` auf stdout gemeldet.
+Dateien älter als 14 Tage löscht der Wächter beim Start und beim Tageswechsel.
+Jede Zeile wird sofort geflusht, beim Wechsel und beim Beenden zusätzlich
+fsync; ein harter Stopp kostet höchstens die letzte Zeile.
 
 Der Zustand enthält pro Shop `initialisiert`, `verfuegbar`, `preis`, `tief`,
 `status`, `fail_streak`, `challenge_bis` und den letzten Erfolg. `verfuegbar`

@@ -1302,6 +1302,7 @@ def fetch_mit_cache(urls, cancel=None, force=False, limit=None):
     ``limit`` liest nur den Seitenanfang und beendet die Verbindung danach.
     """
     last=None
+    not_modified_gesehen=False
     proxy=os.environ.get("PS5_PROXY","").strip() or None
     cache=http_cache()
     for att in range(3):
@@ -1320,6 +1321,7 @@ def fetch_mit_cache(urls, cancel=None, force=False, limit=None):
                           else _try_url(u,att,proxy))
             if _abgebrochen(cancel): raise ScanAbgebrochen
             if meta.get("not_modified"):
+                not_modified_gesehen=True
                 if force:
                     cache.drop(u); last="HTTP 304"; continue
                 eintrag=cache.get(u)
@@ -1332,6 +1334,7 @@ def fetch_mit_cache(urls, cancel=None, force=False, limit=None):
                         # Ein 304 auf einen beliebig alten Stand ist kein
                         # frischer Treffer. Einmal unbedingt neu laden.
                         cache.drop(u); last="HTTP 304 (zu alt)"; continue
+                    meta["not_modified_gesehen"]=not_modified_gesehen
                     return "",u,dict(eintrag["result"]),meta
                 # Cache-Eintrag geloescht: Validatoren verwerfen und ohne
                 # Bedingung erneut laden, statt den Haendler als Fehler zu werten.
@@ -1342,6 +1345,7 @@ def fetch_mit_cache(urls, cancel=None, force=False, limit=None):
                 # temporaere Netzstoerung: kein zweiter Versuch mit anderem UA.
                 if detect_challenge(h[:3000].lower()):
                     last="Bot-Challenge"; dauerhaft=True; break
+                meta["not_modified_gesehen"]=not_modified_gesehen
                 return h,u,None,meta
             last=e
             # Bot-Schutz schon im 4xx-Body erkannt (Kasada/Cloudflare): kein
@@ -1434,6 +1438,7 @@ def _scan_einen_json(h, cancel=None):
                  bundle=bool(s.get("bundle")),
                  marketplace=_marketplace(s.get("seller"),h["name"]))
         res["fresh"]=True
+        res["not_modified"]=bool(meta.get("not_modified_gesehen"))
         res["confidence"]=berechne_konfidenz(res)
         res["bytes"]=int(meta.get("bytes") or 0)
         res["_fast"]=True
@@ -1486,6 +1491,7 @@ def _scan_einen_html(h, cancel=None, force=False):
                      beleg=cached.get("beleg"))
             # Ein 304 ist ein gueltiger Stand, aber keine frische Antwort.
             res["fresh"]=False
+            res["not_modified"]=True
             res["confidence"]=berechne_konfidenz(res)
             res["bytes"]=int(meta.get("bytes") or 0)
             res["_cache"]=True
@@ -1568,6 +1574,7 @@ def _scan_einen_html(h, cancel=None, force=False):
                  sku=s.get("sku"),bundle=bool(s.get("bundle")),
                  marketplace=_marketplace(s.get("seller"),h["name"]))
         res["fresh"]=True
+        res["not_modified"]=bool(meta.get("not_modified_gesehen"))
         res["confidence"]=berechne_konfidenz(res)
         res["bytes"]=int(meta.get("bytes") or 0)
         # Ein Beleg entsteht nur fuer echte Treffer/Chancen, nicht fuer jede
