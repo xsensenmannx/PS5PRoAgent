@@ -35,22 +35,112 @@ def _labels():
     return branding.labels(play)
 
 
-def _status_schreiben(ergebnisse, neu, fehler=None, intervall=None):
+def _ist_wlan():
+    """Aktives Netz ist WLAN; ohne pruefbare API bleibt der Dienst an."""
+    try:
+        from jnius import autoclass
+        service = autoclass("org.kivy.android.PythonService").mService
+        if service is None:
+            return True
+        C = autoclass("android.content.Context")
+        cm = service.getSystemService(C.CONNECTIVITY_SERVICE)
+        net = cm.getActiveNetwork()
+        if net is None:
+            return False
+        caps = cm.getNetworkCapabilities(net)
+        if caps is None:
+            return False
+        NC = autoclass("android.net.NetworkCapabilities")
+        return bool(caps.hasTransport(NC.TRANSPORT_WIFI))
+    except Exception:
+        return True
+
+
+def _ist_laden():
+    """Geraet haengt am Ladegeraet; ohne pruefbare API bleibt der Dienst an."""
+    try:
+        from jnius import autoclass
+        service = autoclass("org.kivy.android.PythonService").mService
+        if service is None:
+            return True
+        C = autoclass("android.content.Context")
+        bm = service.getSystemService(C.BATTERY_SERVICE)
+        if bm is not None and autoclass("android.os.Build$VERSION").SDK_INT >= 23:
+            return bool(bm.isCharging())
+        Intent = autoclass("android.content.Intent")
+        IntentFilter = autoclass("android.content.IntentFilter")
+        BatteryManager = autoclass("android.os.BatteryManager")
+        status = service.registerReceiver(
+            None, IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        ).getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        return status in (BatteryManager.BATTERY_STATUS_CHARGING,
+                          BatteryManager.BATTERY_STATUS_FULL)
+    except Exception:
+        return True
+
+
+def _pausiert(settings):
+    """Grund, warum der Hintergrund gerade nicht scannen soll - oder ''."""
+    try:
+        if bool(settings.get("bg_wlan_only", False)) and not _ist_wlan():
+            return "KEIN WLAN"
+        if bool(settings.get("bg_laden_only", False)) and not _ist_laden():
+            return "NICHT AM LADEN"
+    except Exception:
+        pass
+    return ""
+
+
+def _status_lesen():
+    """Letzten Status lesen; ein kaputter Stand darf den Dienst nicht stoppen."""
+    try:
+        with open(os.path.join(core.data_dir(), STATUS_DATEI), "r",
+                  encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _status_schreiben(ergebnisse, neu, fehler=None, intervall=None, hot=False,
+                      pausiert=None):
+    """Status fortschreiben - volle Runde und Hot-Runde teilen sich die Datei.
+
+    ``ts`` bleibt der letzte volle Lauf, eine Hot-Runde schreibt ``hot_ts``.
+    ``wach_ts`` ist der Wachhund-Stempel und wird auch beim Pausieren gesetzt,
+    damit die App eine bewusste Pause von einem toten Dienst unterscheiden kann.
+    """
     jetzt = time.time()
-    daten = {
-        "ts": jetzt,
-        "zeit": datetime.now().strftime("%H:%M"),
-        "geprueft": len(ergebnisse),
-        "treffer": len(core.treffer_aus(ergebnisse)),
-        "neu": len(neu),
-        "results": ergebnisse,
-    }
+    daten = _status_lesen()
+    daten["wach_ts"] = jetzt
+    daten["wach_status"] = "pausiert" if pausiert else ("fehler" if fehler else "ok")
+    if pausiert:
+        daten["pausiert"] = str(pausiert)[:60]
+    else:
+        daten.pop("pausiert", None)
     if intervall:
         # Heartbeat: die App erkennt daran, ob der Dienst noch planmaessig laeuft.
         daten["intervall"] = int(intervall)
-        daten["next_ts"] = jetzt + int(intervall)
-    if fehler:
-        daten["fehler"] = str(fehler)[:200]
+    if hot:
+        daten["hot_ts"] = jetzt
+        daten["hot_zeit"] = datetime.now().strftime("%H:%M")
+        daten["hot_geprueft"] = len(ergebnisse)
+        daten["hot_treffer"] = len(core.treffer_aus(ergebnisse))
+        daten["hot_neu"] = len(neu)
+        daten["hot_results"] = ergebnisse
+        daten["hot_intervall"] = int(core.BG_HOT_TAKT)
+        if fehler: daten["hot_fehler"] = str(fehler)[:200]
+        else: daten.pop("hot_fehler", None)
+    elif not pausiert:
+        daten["ts"] = jetzt
+        daten["zeit"] = datetime.now().strftime("%H:%M")
+        daten["geprueft"] = len(ergebnisse)
+        daten["treffer"] = len(core.treffer_aus(ergebnisse))
+        daten["neu"] = len(neu)
+        daten["results"] = ergebnisse
+        if intervall: daten["next_ts"] = jetzt + int(intervall)
+        if fehler: daten["fehler"] = str(fehler)[:200]
+        else: daten.pop("fehler", None)
     pfad = os.path.join(core.data_dir(), STATUS_DATEI)
     try:
         tmp = pfad + ".tmp"
@@ -174,16 +264,82 @@ def _benachrichtige_summary(neu):
         return False
 
 
-def _warten(sekunden):
-    """In 30-s-Schritten schlafen, damit ein Abschalten schnell greift."""
-    ende = time.time() + sekunden
-    while time.time() < ende:
-        time.sleep(min(30, max(1, ende - time.time())))
+def _warten(bis, max_schritt=60):
+    """Bis zu einem Zeitstempel warten; AUTO aus oder Pause greift schnell."""
+    while True:
+        rest = bis - time.time()
+        if rest <= 0:
+            return
+        time.sleep(max(1, min(rest, max_schritt)))
         try:
-            if not core.Settings().get("auto_scan", False):
+            settings = core.Settings()
+            if not settings.get("auto_scan", False):
+                return
+            if _pausiert(settings):
                 return
         except Exception:
             pass
+
+
+def _runde(haendler, settings):
+    """Eine Scanrunde: pruefen, verifizieren, Verlauf und Meldungen.
+
+    Rueckgabe (ergebnisse, neu, fehler). Der Aufrufer schreibt den Status,
+    damit volle Runde und Hot-Runde getrennte Zeitstempel bekommen.
+    """
+    # Deckel je Land: AT darf einen eigenen Wert haben, sonst erbt es DE.
+    try:
+        ergebnisse = core.scan_alle(haendler, core.preis_deckel_aus(settings))
+    except Exception as e:
+        print("[BG] Scan:", e)
+        return [], [], e
+    if not ergebnisse:
+        return [], [], None
+    # Auch im Hintergrund wird ein Treffer gegengeprueft. Ohne diesen
+    # zweiten Abruf waere "NUR BESTAETIGTE" dort wirkungslos.
+    nach_name = {h["name"]: h for h in haendler}
+    for r in list(ergebnisse):
+        if r.get("klass") == "hit" and not core.ist_gebraucht(r.get("condition")):
+            try:
+                core.verify_treffer(nach_name.get(r.get("haendler")), r)
+            except Exception as e:
+                print("[BG] verify:", e)
+    hist = core.History()
+    neu = []
+    for r in core.treffer_aus(ergebnisse):
+        # Flags mitgeben: die App zeigt daraus "NEU" und den Preisunterschied.
+        letzter = hist.get_last(r["haendler"])
+        tief = hist.get_tief(r["haendler"])
+        vorher_av = hist.get_verfuegbar(r["haendler"])
+        ereignis = core.alarm_ereignis(r, letzter, vorher_av)
+        r["_prev"] = letzter
+        r["_is_new"] = ereignis == "new"
+        r["_restock"] = ereignis == "restock"
+        # Ein neuer Treffer ist nicht automatisch ein guter Alarm:
+        # Quiet Hours, stummgeschaltete Shops, Vorbestellungen und
+        # Gebrauchtware filtert die gemeinsame Regel.
+        if ereignis and core.alarm_erlaubt(r, tief, settings):
+            neu.append(r)
+    hist.update(ergebnisse)
+    if settings.get("notify", True):
+        # Bei einem Ausverkauf koennen viele Shops gleichzeitig melden -
+        # fuenf Meldungen reichen, der Rest steht in der App.
+        for r in neu[:5]:
+            titel = ("PS5 Pro 2 TB: wieder verfuegbar"
+                     if r.get("_restock") else
+                     "PS5 Pro 2 TB: " + core.format_preis(r["preis"]))
+            text = (r["haendler"] + " - wieder verfuegbar"
+                    if r.get("_restock") else
+                    r["haendler"] + " - jetzt verfuegbar")
+            _benachrichtige(titel, text, r.get("url"))
+            try:
+                core.sende_webhook_alarm(r, settings, titel, text)
+            except Exception as e:
+                print("[BG] webhook:", e)
+        _benachrichtige_summary(neu[:5])
+    print("[BG] %s geprueft, %s Treffer, %s neu"
+          % (len(ergebnisse), len(core.treffer_aus(ergebnisse)), len(neu)))
+    return ergebnisse, neu, None
 
 
 def main():
@@ -201,8 +357,11 @@ def main():
         intervall = core.bg_intervall(arg.get("interval"), MIN_INTERVALL)
     except Exception:
         intervall = MIN_INTERVALL
-    print("[BG] Start, Intervall %ss, Daten %s" % (intervall, core.data_dir()))
+    print("[BG] Start, Intervall %ss, Hot %ss, Daten %s"
+          % (intervall, core.BG_HOT_TAKT, core.data_dir()))
 
+    naechste_voll = 0.0
+    naechste_hot = 0.0
     while True:
         settings = core.Settings()
         if not settings.get("auto_scan", False):
@@ -214,67 +373,50 @@ def main():
             core.aktualisiere_shop_config()
         except Exception:
             pass
+        jetzt = time.time()
         intervall = core.bg_intervall(settings.get("auto_interval"), MIN_INTERVALL)
+        pausiert = _pausiert(settings)
+        if pausiert:
+            # Wachhund-Stempel trotzdem schreiben: die App soll "pausiert"
+            # von "Dienst tot" unterscheiden koennen. Nicht jede Minute auf
+            # die Karte schreiben - alle fuenf Minuten reicht fuer den Wachhund.
+            alt = _status_lesen()
+            try: wach_alt = float(alt.get("wach_ts") or 0)
+            except (TypeError, ValueError): wach_alt = 0.0
+            if alt.get("pausiert") != pausiert or jetzt - wach_alt >= 300:
+                _status_schreiben([], [], intervall=intervall, pausiert=pausiert)
+                print("[BG] pausiert:", pausiert)
+            _warten(jetzt + 60)
+            continue
         namen = set(settings.get("active_haendler") or [])
         haendler = [h for h in core.HAENDLER if not namen or h["name"] in namen]
-        # Deckel je Land: AT darf einen eigenen Wert haben, sonst erbt es DE.
-        max_preis = core.preis_deckel_aus(settings)
-        try:
-            ergebnisse = core.scan_alle(haendler, max_preis)
-        except Exception as e:
-            print("[BG] Scan:", e)
-            _status_schreiben([], [], fehler=e, intervall=intervall)
-            ergebnisse = []
-
-        if ergebnisse:
-            # Auch im Hintergrund wird ein Treffer gegengeprueft. Ohne diesen
-            # zweiten Abruf waere "NUR BESTAETIGTE" dort wirkungslos.
-            nach_name = {h["name"]: h for h in haendler}
-            for r in list(ergebnisse):
-                if r.get("klass") == "hit" and not core.ist_gebraucht(r.get("condition")):
-                    try:
-                        core.verify_treffer(nach_name.get(r.get("haendler")), r)
-                    except Exception as e:
-                        print("[BG] verify:", e)
-            hist = core.History()
-            neu = []
-            for r in core.treffer_aus(ergebnisse):
-                # Flags mitgeben: die App zeigt daraus "NEU" und den Preisunterschied.
-                letzter = hist.get_last(r["haendler"])
-                tief = hist.get_tief(r["haendler"])
-                vorher_av = hist.get_verfuegbar(r["haendler"])
-                ereignis = core.alarm_ereignis(r, letzter, vorher_av)
-                r["_prev"] = letzter
-                r["_is_new"] = ereignis == "new"
-                r["_restock"] = ereignis == "restock"
-                # Ein neuer Treffer ist nicht automatisch ein guter Alarm:
-                # Quiet Hours, stummgeschaltete Shops, Vorbestellungen und
-                # Gebrauchtware filtert die gemeinsame Regel.
-                if ereignis and core.alarm_erlaubt(r, tief, settings):
-                    neu.append(r)
-            hist.update(ergebnisse)
-            _status_schreiben(ergebnisse, neu, intervall=intervall)
-            if settings.get("notify", True):
-                # Bei einem Ausverkauf koennen viele Shops gleichzeitig melden -
-                # fuenf Meldungen reichen, der Rest steht in der App.
-                for r in neu[:5]:
-                    titel = ("PS5 Pro 2 TB: wieder verfuegbar"
-                             if r.get("_restock") else
-                             "PS5 Pro 2 TB: " + core.format_preis(r["preis"]))
-                    text = (r["haendler"] + " - wieder verfuegbar"
-                            if r.get("_restock") else
-                            r["haendler"] + " - jetzt verfuegbar")
-                    _benachrichtige(titel, text, r.get("url"))
-                    try:
-                        core.sende_webhook_alarm(r, settings, titel, text)
-                    except Exception as e:
-                        print("[BG] webhook:", e)
-                _benachrichtige_summary(neu[:5])
-            print("[BG] %s geprueft, %s Treffer, %s neu"
-                  % (len(ergebnisse), len(core.treffer_aus(ergebnisse)), len(neu)))
-        else:
-            _status_schreiben([], [], fehler="keine Ergebnisse", intervall=intervall)
-        _warten(intervall)
+        if jetzt >= naechste_voll:
+            ergebnisse, neu, fehler = _runde(haendler, settings)
+            if not ergebnisse and not fehler:
+                fehler = "keine Ergebnisse"
+            _status_schreiben(ergebnisse, neu, fehler=fehler, intervall=intervall)
+            naechste_voll = jetzt + intervall
+            # Ausserhalb des Fensters nicht alle 45 s aufwachen: die volle
+            # Runde hat PS Direct gerade mitgeprueft, der naechste Hot-Lauf
+            # ist erst zum naechsten Fensterbeginn faellig.
+            naechste_hot = (jetzt + core.BG_HOT_TAKT
+                            if any(core.im_drop_fenster(h.get("name"), jetzt)
+                                   for h in haendler)
+                            else core.naechste_fenster_ts(jetzt))
+        elif jetzt >= naechste_hot:
+            hot = core.bg_hot_shops(haendler, namen, core.health().all(), jetzt)
+            if hot:
+                ergebnisse, neu, fehler = _runde(hot, settings)
+                _status_schreiben(ergebnisse, neu, fehler=fehler, hot=True,
+                                  intervall=intervall)
+                naechste_hot = jetzt + core.BG_HOT_TAKT
+            elif any(core.im_drop_fenster(h.get("name"), jetzt) for h in haendler):
+                # Fenster offen, aber beide Shops gesperrt: kein Anklopfen.
+                # Die volle Runde prueft sie weiter im 15-Minuten-Takt.
+                naechste_hot = jetzt + core.BG_HOT_TAKT
+            else:
+                naechste_hot = core.naechste_fenster_ts(jetzt)
+        _warten(min(naechste_voll, naechste_hot))
 
 
 # p4a fuehrt die Datei als Service-Entrypoint aus (dann ist ANDROID_PRIVATE

@@ -122,7 +122,7 @@ icon.adaptive_background.filename = %(source.dir)s/assets/icon_bg.png
 
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions.html for all the supported syntaxes and properties)
-android.permissions = INTERNET, VIBRATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE, RECEIVE_BOOT_COMPLETED
+android.permissions = INTERNET, ACCESS_NETWORK_STATE, VIBRATE, POST_NOTIFICATIONS, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE, RECEIVE_BOOT_COMPLETED
 
 # Hintergrund-Scan: eigener Prozess, damit Treffer auch bei geschlossener App
 # gemeldet werden. :foreground = Pflicht-Notification, :sticky = Android startet

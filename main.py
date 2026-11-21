@@ -44,6 +44,7 @@ from scan_core import (
     webhook_status_lesen, webhook_status_merken,
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
+    bg_wachhund,
     dauer_text, kurz_zeit, kurz_tag, zeitraum_text, event_zeile, events as verlauf_events,
     preis_deckel, deckel_wert, stumm_bis, Kaeufe, KAUF_STUMM_S,
     health_export_json,
@@ -1360,12 +1361,18 @@ class MainUI(FloatLayout):
         self.webhook_status=""
         self.schnellscan=bool(self.settings.get("schnellscan",False))
         self.schnellscan_wlan=bool(self.settings.get("schnellscan_wlan",True))
+        # Hintergrund nur auf WLAN bzw. nur am Ladegeraet - Standard aus,
+        # damit sich am bisherigen Verhalten nichts aendert.
+        self.bg_wlan_only=bool(self.settings.get("bg_wlan_only",False))
+        self.bg_laden_only=bool(self.settings.get("bg_laden_only",False))
         self._fast_event=None; self._fast_next=0.0
+        self._fast_auto=False; self._fenster_im=False
         try: self.font_scale=float(self.settings.get("font_scale",1.0))
         except (TypeError,ValueError): self.font_scale=1.0
         if self.font_scale not in FONT_SCALES: self.font_scale=1.0
         self._known_hits=set(); self.queue=queue.Queue()
-        self._bg_seen_ts=0.0; self._insets=(0.0,0.0,0.0,0.0)
+        self._bg_seen_ts=0.0; self._bg_seen_hot_ts=0.0
+        self._insets=(0.0,0.0,0.0,0.0)
         self._wide=False; self._results_mode_set=False
         self._scan_token=0; self._scan_cancel_event=None
         self.history=History(); self._scan_t0=0.0; self._scan_done=0
@@ -1387,6 +1394,10 @@ class MainUI(FloatLayout):
             Clock.schedule_once(self._show_onboarding,1.0)
         if self.auto_scan: Clock.schedule_once(lambda dt:self._auto_start(),1.5)
         if self.schnellscan: Clock.schedule_once(lambda dt:self._fast_start(),2.0)
+        # Fenster-Automatik: 09:00-18:00 an, am Fensterende wieder aus. Der
+        # Takt ausserhalb bleibt unveraendert, weil nur der eigene Start endet.
+        Clock.schedule_once(lambda dt:self._fenster_pruefen(erster=True),2.5)
+        Clock.schedule_interval(self._fenster_pruefen,30)
 
     # ── Aufbau ──────────────────────────────────────────────────────
     def _build_ui(self):
@@ -1774,12 +1785,24 @@ class MainUI(FloatLayout):
                                  budget=live_runden_max(takt),aktiv=self.active_haendler)
     def _toggle_schnellscan(self):
         self.schnellscan=not self.schnellscan
+        # Handeingriff: Die Fenster-Automatik endet damit fuer dieses Fenster.
+        self._fast_auto=False
         self.settings.set("schnellscan",self.schnellscan)
         if self.schnellscan:
             self._fast_start(); self._toast("SCHNELLSCAN AN",color=CARD_STATUS["hit"])
         else:
             self._fast_stop(); self._toast("SCHNELLSCAN AUS",color=PS1_YELLOW)
         self._update_radar_hud()
+    def _toggle_bg_wlan(self):
+        self.bg_wlan_only=not self.bg_wlan_only
+        self.settings.set("bg_wlan_only",self.bg_wlan_only)
+        self._toast("HINTERGRUND NUR WLAN" if self.bg_wlan_only
+                    else "HINTERGRUND AUCH MOBIL",color=PS1_BLUE)
+    def _toggle_bg_laden(self):
+        self.bg_laden_only=not self.bg_laden_only
+        self.settings.set("bg_laden_only",self.bg_laden_only)
+        self._toast("HINTERGRUND NUR AM LADEN" if self.bg_laden_only
+                    else "HINTERGRUND AUCH IM AKKU",color=PS1_BLUE)
     def _fast_start(self):
         if not self.schnellscan: return
         self._fast_next=time.time()+live_takt(HAENDLER,self.active_haendler)
@@ -1790,6 +1813,25 @@ class MainUI(FloatLayout):
         if self._fast_event is not None:
             Clock.unschedule(self._fast_event); self._fast_event=None
         self._fast_next=0.0
+    def _fenster_pruefen(self,dt=0,erster=False):
+        """09:00-18:00: Schnellscan automatisch an, am Fensterende wieder aus.
+
+        Beendet wird nur der eigene Start; ein manuell eingeschalteter
+        Schnellscan laeuft weiter. Der Schalter wird nicht gespeichert -
+        sonst startete die App ausserhalb des Fensters im kurzen Takt.
+        """
+        im_fenster=any(im_drop_fenster(name) for name in self.active_haendler)
+        if im_fenster and (erster or not self._fenster_im) and not self.schnellscan:
+            self.schnellscan=True; self._fast_auto=True
+            self._fast_start()
+            self._toast("FENSTER · SCHNELLSCAN AUTO",color=CARD_STATUS["hit"])
+        elif not im_fenster and self._fenster_im and self._fast_auto:
+            self.schnellscan=False; self._fast_auto=False
+            self._fast_stop()
+            self._toast("FENSTER ZU · SCHNELLSCAN AUS",color=PS1_YELLOW)
+        self._fenster_im=im_fenster
+        self._update_radar_hud()
+        return True
     def _fast_tick(self,dt):
         if not self.schnellscan: return False
         if self.scanning: return True
@@ -2024,6 +2066,10 @@ class MainUI(FloatLayout):
         action("AUTO-SCAN",lambda: "AN" if self.auto_scan else "AUS",
                self._toggle_auto,PS1_GREEN)
         action("INTERVALL",self._interval_text,self._cycle_interval,PS1_PINK)
+        action("BG NUR WLAN",lambda: "AN" if self.bg_wlan_only else "AUS",
+               self._toggle_bg_wlan,PS1_BLUE)
+        action("BG NUR LADEN",lambda: "AN" if self.bg_laden_only else "AUS",
+               self._toggle_bg_laden,PS1_BLUE)
         action("ALARM",lambda: "AN" if self.notify_enabled else "AUS",
                self._toggle_notify,PS1_PINK)
 
@@ -2548,37 +2594,50 @@ class MainUI(FloatLayout):
         if not isinstance(d,dict): return
         try: ts=float(d.get("ts") or 0)
         except (TypeError,ValueError): ts=0.0
-        if ts<=self._bg_seen_ts: return
-        self._bg_seen_ts=ts
+        try: hot_ts=float(d.get("hot_ts") or 0)
+        except (TypeError,ValueError): hot_ts=0.0
+        voll=ts>self._bg_seen_ts
+        neu_hot=hot_ts>self._bg_seen_hot_ts
+        if not voll and not neu_hot: return
         self._bg_text_at=0.0
         # Der Service hat die Health-Datei fortgeschrieben; Singleton neu laden,
         # damit der naechste Speichervorgang die Hintergrunddaten nicht ueberschreibt.
         try: reset_health()
         except Exception: pass
-        for r in d.get("results") or []:
-            if not isinstance(r,dict) or not r.get("haendler"): continue
-            try:
-                if r.get("klass") not in ("error","challenge","unavail","parser"):
-                    r["klass"]=classify(True,r.get("preis"),self._deckel(r.get("land")))
-                self.scanned[r["haendler"]]=r
-            except Exception: continue
-        # Der Service hat die History bereits fortgeschrieben - neu einlesen,
-        # damit die Sparkline den Stand des Hintergrund-Scans zeigt.
-        try: self.history=History()
-        except Exception: pass
+        def uebernehmen(liste):
+            for r in liste or []:
+                if not isinstance(r,dict) or not r.get("haendler"): continue
+                try:
+                    if r.get("klass") not in ("error","challenge","unavail","parser"):
+                        r["klass"]=classify(True,r.get("preis"),self._deckel(r.get("land")))
+                    self.scanned[r["haendler"]]=r
+                except Exception: continue
+        if voll:
+            self._bg_seen_ts=ts
+            uebernehmen(d.get("results"))
+            # Der Service hat die History bereits fortgeschrieben - neu einlesen,
+            # damit die Sparkline den Stand des Hintergrund-Scans zeigt.
+            try: self.history=History()
+            except Exception: pass
+            # Der Service hat gerade gescannt - nicht sofort erneut loslegen.
+            if ts>self.next_scan_at: self.next_scan_at=ts+self.auto_interval
+        if neu_hot:
+            self._bg_seen_hot_ts=hot_ts
+            uebernehmen(d.get("hot_results"))
+            try: self.history=History()
+            except Exception: pass
         if self.scanned: self._rerender()
-        # Der Service hat gerade gescannt - nicht sofort erneut loslegen.
-        if ts>self.next_scan_at: self.next_scan_at=ts+self.auto_interval
-        try: n=int(d.get("treffer") or 0); neu=int(d.get("neu") or 0)
-        except (TypeError,ValueError): n=neu=0
         # Alte Meldungen nach einem Neustart nicht erneut als Neuigkeit zeigen.
-        frisch=(time.time()-ts)<=max(7200,self.auto_interval*2)
-        alter=self._bg_alter_text(ts)
-        if n and frisch:
-            self._toast("HINTERGRUND (%s): %d TREFFER%s"%(alter,n,(" \u00b7 %d NEU"%neu) if neu else ""),
-                        color=PS1_YELLOW)
-        elif d.get("geprueft"):
-            self._toast("HINTERGRUND (%s): KEINE TREFFER"%alter,color=PS1_GREY)
+        if voll:
+            try: n=int(d.get("treffer") or 0); neu=int(d.get("neu") or 0)
+            except (TypeError,ValueError): n=neu=0
+            frisch=(time.time()-ts)<=max(7200,self.auto_interval*2)
+            alter=self._bg_alter_text(ts)
+            if n and frisch:
+                self._toast("HINTERGRUND (%s): %d TREFFER%s"%(alter,n,(" \u00b7 %d NEU"%neu) if neu else ""),
+                            color=PS1_YELLOW)
+            elif d.get("geprueft"):
+                self._toast("HINTERGRUND (%s): KEINE TREFFER"%alter,color=PS1_GREY)
 
     def _bg_alter_text(self,ts):
         try: s=max(0,int(time.time()-float(ts)))
@@ -2598,22 +2657,26 @@ class MainUI(FloatLayout):
         return self._bg_text
 
     def _warn_if_bg_stale(self):
-        """Ein toter Hintergrund-Service soll nicht still bleiben."""
+        """Wachhund: toter Dienst warnt, bewusste Pause nicht."""
         if not self.auto_scan: return
         try:
             with open(os.path.join(data_dir(),BG_STATUS_FILE),"r",encoding="utf-8") as f:
                 d=json.load(f)
-            ts=float(d.get("ts") or 0)
         except Exception: return
-        if ts<=0: return
-        alter=time.time()-ts
-        grenze=max(1800,int(self.auto_interval)*2+600)
-        if alter<=grenze or time.time()<self._bg_warn_until: return
+        wach=bg_wachhund(d,time.time(),self.auto_interval)
+        zustand=wach.get("zustand"); alter=wach.get("alter")
+        if zustand=="pausiert":
+            if time.time()<self._bg_warn_until: return
+            self._bg_warn_until=time.time()+3600
+            self._toast(f"HINTERGRUND PAUSIERT \u00b7 {wach.get('grund','')}",color=PS1_GREY)
+            return
+        if zustand!="tot" or alter is None: return
+        if time.time()<self._bg_warn_until: return
         self._bg_warn_until=time.time()+6*3600
-        txt=self._bg_alter_text(ts)
+        txt=self._bg_alter_text(time.time()-alter)
         self._toast(f"HINTERGRUND SEIT {txt} AUS",color=PS1_YELLOW)
         box=BoxLayout(orientation="vertical",spacing=dp(8),padding=dp(12))
-        t=Label(text="[b]HINTERGRUND-SCAN PAUSIERT[/b]",markup=True,
+        t=Label(text="[b]HINTERGRUND-SCAN AUS[/b]",markup=True,
                 color=PS1_SILVER,font_size=sp(12),font_name=SST_FONT,
                 halign="center",valign="middle",size_hint_y=None,height=dp(28))
         t.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); box.add_widget(t)
@@ -2972,6 +3035,9 @@ class PS5ProApp(App):
             ui._refresh_insets()
             ui._bg_merge()
             ui._warn_if_bg_stale()
+            # Im Hintergrund kann das Fenster zugegangen sein: erst die
+            # Automatik pruefen, damit keine kurze Runde mehr startet.
+            ui._fenster_pruefen()
             Clock.schedule_once(self._open_deep_link,0.3)
             if ui.auto_scan and not ui.scanning:
                 if time.time()>=ui.next_scan_at: ui._scan_start()
