@@ -190,7 +190,7 @@ der Container nicht.
 | `WATCH_DATA_DIR` | `/data` | Zustand, Health, HTTP-Cache, NDJSON-Logs |
 | `WATCH_WEBHOOK_URL` | leer | **Geheim.** ntfy-/Telegram-/Discord-URL |
 | `WATCH_WEBHOOK_PRESET` | automatisch | `ntfy`, `telegram`, `discord`, `generisch` |
-| `WATCH_OPS_WEBHOOK_URL` | leer | Optionaler, unabhängiger Kanal nur für den Systemalarm; geheim |
+| `WATCH_OPS_WEBHOOK_URL` | leer | Optionaler Kanal nur für den Systemalarm; nur HTTPS, sonst Produkt-Webhook; geheim |
 | `WATCH_HEARTBEAT_URL` | leer | Optionaler Lebenszeichen-Ping alle 60 s, geheim |
 
 `WATCH_MAX_REQ_MIN` zählt echte Abrufe im gleitenden 60-Sekunden-Fenster; ist
@@ -289,7 +289,10 @@ Ist zusätzlich `WATCH_OPS_WEBHOOK_URL` gesetzt, geht **nur** dieser
 Systemalarm an den Ops-Kanal. Ein endgültig fehlgeschlagener Produkt-Webhook
 blockiert die Warnung dann nicht; der Produkt-Webhook selbst bleibt
 unverändert. Ohne Ops-Kanal nutzt der Systemalarm weiterhin den
-Produkt-Webhook. Auch die Ops-URL wird nie geloggt.
+Produkt-Webhook. Eine Ops-URL ohne vollständiges HTTPS gilt als nicht gesetzt,
+dann greift der Produkt-Webhook. Schlägt der Systemalarm fehl, wird er bis zu
+dreimal versucht (nach 2 und 10 Minuten) und erst danach endgültig als
+fehlgeschlagen markiert. Auch die Ops-URL wird nie geloggt.
 
 ### Schattenlauf auswerten
 

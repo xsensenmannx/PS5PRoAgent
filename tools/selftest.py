@@ -2672,7 +2672,8 @@ def watcher_p0_tests():
         # 8. Alte Zustaende bleiben ohne Datenverlust migrierbar.
         with open(pfad, "w", encoding="utf-8") as f:
             json.dump({"schema": 2, "angelegt": 1.0, "schatten_bis": 1.0,
-                       "shops": {}, "runden": 0, "alarme_schatten": 0,
+                       "shops": {},
+                       "runden": 0, "alarme_schatten": 0,
                        "alarme_gesendet": 0, "letzte_runde": 0.0,
                        "outbox": {"items": [], "gesamt": 0,
                                   "letzte_id": ""}}, f)
@@ -2788,9 +2789,14 @@ def outbox_tests():
         check("outbox 4xx terminal", item.get("status"), "failed")
         check("outbox 4xx ein versuch", item.get("attempts"), 1)
         check("outbox 4xx grund", item.get("failed_grund"), "http_4xx")
-        calls_vorher = len(calls)
+        # Der Produktalarm bleibt endgueltig; nur der Systemalarm darf
+        # spaeter erneut versucht werden.
+        def _produktalarme():
+            return [c for c in calls
+                    if not str(c["titel"]).startswith("Waechter:")]
+        vorher = len(_produktalarme())
         cw.outbox_drain(z, k, settings, None, jetzt=5000.0, pfad=pfad)
-        check("outbox 4xx kein retry", len(calls), calls_vorher)
+        check("outbox 4xx kein retry", len(_produktalarme()), vorher)
 
         # 4. Ein haengender "sending"-Eintrag wird nach Karenz erneut versucht.
         z = _neu(4000.0)
@@ -2856,6 +2862,29 @@ def outbox_tests():
         cw.outbox_drain(z, k, settings, None, jetzt=9600.0, pfad=pfad)
         check("outbox systemalarm nicht doppelt", len(calls), 1)
 
+        # 8a. Ungueltige Ops-URL: Der Systemalarm faellt auf den Produkt-
+        #     Webhook zurueck, statt ins Leere zu senden.
+        k_ops_http = cw.Konfig.aus_env({
+            "WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-outbox",
+            "WATCH_OPS_WEBHOOK_URL": "http://ntfy.sh/secret-ops"})
+        settings_ops_http = cw.settings_aus(k_ops_http)
+        check("outbox ops ungueltig fallback",
+              cw._ops_ziel(settings_ops_http)[1], "produkt")
+        z = _neu(9650.0)
+        cw.outbox_enqueue(r, "restock", z, 9650.0, "T", "X")
+        cw.zustand_speichern(pfad, z)
+        calls.clear()
+        antwort.update(ok=False, info="HTTP 401")
+        cw.outbox_drain(z, k_ops_http, settings_ops_http, None,
+                        jetzt=9650.0, pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox ops ungueltig produktalarm",
+              calls[0].get("url"), settings_ops_http.get("webhook_url"))
+        check("outbox ops ungueltig systemalarm",
+              calls[-1].get("url"), settings_ops_http.get("webhook_url"))
+        check("outbox ops ungueltig kanal",
+              item.get("system_alarm_kanal"), "produkt")
+
         # 8b. Optionaler Ops-Kanal: Der Produkt-Webhook scheitert endgueltig,
         #     der Systemalarm geht trotzdem an die unabhaengige Ops-URL.
         k_ops = cw.Konfig.aus_env({
@@ -2902,6 +2931,71 @@ def outbox_tests():
               and "secret-outbox" not in gesaeubert, True)
         check("outbox ops url nie geloggt",
               "secret-ops" not in json.dumps(logs, ensure_ascii=False), True)
+
+        # 8c. Ein fehlgeschlagener Systemalarm wird nach Backoff erneut
+        #     versucht und erst nach Erfolg oder Cap beendet.
+        z = _neu(9800.0)
+        cw.outbox_enqueue(r, "restock", z, 9800.0, "T", "X")
+        cw.zustand_speichern(pfad, z)
+        calls.clear()
+        antwort.update(ok=False, info="HTTP 401")
+        cw.outbox_drain(z, k, settings, None, jetzt=9800.0, pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox systemalarm retry versuch",
+              item.get("system_alarm_attempts"), 1)
+        check("outbox systemalarm retry offen",
+              item.get("system_alarm_ok"), False)
+        check("outbox systemalarm retry wartet",
+              item.get("system_alarm_next_ts"),
+              9800.0 + cw.OUTBOX_SYSTEM_ALARM_BACKOFF_S[0])
+        calls_vorher = len(calls)
+        cw.outbox_drain(
+            z, k, settings, None,
+            jetzt=9800.0 + cw.OUTBOX_SYSTEM_ALARM_BACKOFF_S[0] - 1,
+            pfad=pfad)
+        check("outbox systemalarm retry nicht zu frueh",
+              len(calls), calls_vorher)
+        antwort.update(ok=True, info="HTTP 200")
+        cw.outbox_drain(
+            z, k, settings, None,
+            jetzt=9800.0 + cw.OUTBOX_SYSTEM_ALARM_BACKOFF_S[0], pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox systemalarm retry erfolg",
+              item.get("system_alarm_ok"), True)
+        check("outbox systemalarm retry versuche",
+              item.get("system_alarm_attempts"), 2)
+        check("outbox systemalarm retry ende",
+              item.get("system_alarm_next_ts"), None)
+        calls_ende = len(calls)
+        cw.outbox_drain(z, k, settings, None, jetzt=13000.0, pfad=pfad)
+        check("outbox systemalarm kein dauerretry", len(calls), calls_ende)
+
+        # 8d. Nach drei Fehlversuchen ist Schluss; kein Endlos-Retry.
+        z = _neu(10400.0)
+        cw.outbox_enqueue(r, "restock", z, 10400.0, "T", "X")
+        cw.zustand_speichern(pfad, z)
+        calls.clear()
+        antwort.update(ok=False, info="HTTP 401")
+        cw.outbox_drain(z, k, settings, None, jetzt=10400.0, pfad=pfad)
+        versuche = [10400.0]
+        versuche.append(versuche[-1] + cw.OUTBOX_SYSTEM_ALARM_BACKOFF_S[0])
+        versuche.append(versuche[-1] + cw.OUTBOX_SYSTEM_ALARM_BACKOFF_S[1])
+        for zeit in versuche[1:]:
+            cw.outbox_drain(z, k, settings, None, jetzt=zeit, pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox systemalarm cap versuche",
+              item.get("system_alarm_attempts"), cw.OUTBOX_SYSTEM_ALARM_MAX)
+        check("outbox systemalarm cap offen",
+              item.get("system_alarm_ok"), False)
+        check("outbox systemalarm cap ende",
+              item.get("system_alarm_next_ts"), None)
+        check("outbox systemalarm cap calls",
+              sum(1 for c in calls
+                  if str(c["titel"]).startswith("Waechter:")), 3)
+        cw.outbox_drain(z, k, settings, None, jetzt=20000.0, pfad=pfad)
+        check("outbox systemalarm cap kein weiter",
+              sum(1 for c in calls
+                  if str(c["titel"]).startswith("Waechter:")), 3)
 
         # 9. Fehlertexte duerfen die Webhook-URL nicht in Zustand oder Log
         #    weitertragen, auch wenn der Transport sie enthaelt.

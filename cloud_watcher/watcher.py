@@ -30,6 +30,7 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,6 +71,9 @@ OUTBOX_SENT_KEEP_S = 7 * 86400
 OUTBOX_FAILED_KEEP_S = 30 * 86400
 OUTBOX_SENDING_STALE_S = 300
 OUTBOX_DRAIN_MAX = 5
+# Ein fehlgeschlagener Systemalarm wird nicht sofort aufgegeben.
+OUTBOX_SYSTEM_ALARM_MAX = 3
+OUTBOX_SYSTEM_ALARM_BACKOFF_S = (120, 600)
 STOP = threading.Event()
 _LOG_LOCK = threading.Lock()
 _LOG_ZIEL = ""
@@ -299,6 +303,8 @@ def outbox_sicherstellen(daten):
             item.setdefault("system_alarm_ts", None)
             item.setdefault("system_alarm_ok", None)
             item.setdefault("system_alarm_kanal", None)
+            item.setdefault("system_alarm_attempts", 0)
+            item.setdefault("system_alarm_next_ts", None)
             item.setdefault("system_alarm_info", None)
             items.append(item)
     box["items"] = items
@@ -383,6 +389,8 @@ def outbox_enqueue(r, event, zustand, jetzt, titel, text):
         "system_alarm_ts": None,
         "system_alarm_ok": None,
         "system_alarm_kanal": None,
+        "system_alarm_attempts": 0,
+        "system_alarm_next_ts": None,
         "system_alarm_info": None,
     }
     box["items"].append(item)
@@ -452,11 +460,20 @@ def _outbox_log(item, aktion, jetzt, ok=None, info="", versuch=None):
     log(daten)
 
 
+def _https_ziel(url):
+    """Nur eine vollstaendige HTTPS-URL ist ein brauchbares Ziel."""
+    try:
+        ziel = urlparse(str(url or "").strip())
+    except Exception:
+        return False
+    return ziel.scheme == "https" and bool(ziel.hostname)
+
+
 def _ops_ziel(settings):
-    """Ziel fuer den Systemalarm: eigener Ops-Kanal, sonst der Produkt-Webhook."""
+    """Ziel fuer den Systemalarm: gueltiger Ops-Kanal, sonst Produkt-Webhook."""
     settings = settings if isinstance(settings, dict) else {}
     url = str(settings.get("ops_url") or "").strip()
-    if not url:
+    if not _https_ziel(url):
         return settings, "produkt"
     preset = str(settings.get("ops_preset") or "")
     if preset not in core.WEBHOOK_PRESETS:
@@ -471,9 +488,10 @@ def outbox_systemalarm(item, zustand, settings, jetzt, pfad):
     Ein ausgefallener Produkt-Webhook blockiert die Warnung dann nicht; ohne
     Ops-Kanal bleibt der bisherige Weg ueber den Produkt-Webhook.
     """
-    if not isinstance(item, dict) or item.get("system_alarm_ts"):
+    if not isinstance(item, dict) or item.get("system_alarm_ok"):
         return False
     jetzt = _outbox_float(jetzt, time.time())
+    versuch = _outbox_int(item.get("system_alarm_attempts"), 0) + 1
     settings = settings if isinstance(settings, dict) else {}
     titel = "Waechter: Alarm nicht zugestellt"
     try:
@@ -516,6 +534,14 @@ def outbox_systemalarm(item, zustand, settings, jetzt, pfad):
     item["system_alarm_ts"] = jetzt
     item["system_alarm_ok"] = bool(ok)
     item["system_alarm_kanal"] = kanal
+    item["system_alarm_attempts"] = versuch
+    if ok or versuch >= OUTBOX_SYSTEM_ALARM_MAX:
+        item["system_alarm_next_ts"] = None
+    else:
+        index = min(versuch - 1, len(OUTBOX_SYSTEM_ALARM_BACKOFF_S) - 1)
+        item["system_alarm_next_ts"] = (
+            jetzt + OUTBOX_SYSTEM_ALARM_BACKOFF_S[index]
+        )
     info = _outbox_safe_info(info, settings)
     item["system_alarm_info"] = info
     _outbox_state_save(pfad, zustand, "systemalarm", item)
@@ -527,11 +553,25 @@ def outbox_systemalarm(item, zustand, settings, jetzt, pfad):
             "shop": item.get("shop"),
             "event": item.get("event"),
             "kanal": kanal,
+            "versuch": versuch,
+            "next_ts": item.get("system_alarm_next_ts"),
             "ok": bool(ok),
             "info": info,
         }
     )
     return bool(ok)
+
+
+def systemalarm_faellig(item, jetzt):
+    """True, wenn fuer den Eintrag ein Systemalarm erneut faellig ist."""
+    if not isinstance(item, dict) or item.get("system_alarm_ok"):
+        return False
+    if not item.get("system_alarm_ts"):
+        return True
+    next_ts = item.get("system_alarm_next_ts")
+    if next_ts is None:
+        return False
+    return _outbox_float(next_ts, 0.0) <= _outbox_float(jetzt, time.time())
 
 
 def _outbox_send_one(item, zustand, settings, jetzt, pfad):
@@ -622,7 +662,7 @@ def outbox_drain(zustand, konfig, settings, tz, jetzt=None, pfad=None, schatten=
     # Fehlgeschlagene Eintraege ohne Systemalarm (z. B. nach Neustart) holen
     # ihre einmalige Warnung nach.
     for item in list(box["items"]):
-        if item.get("status") == "failed" and not item.get("system_alarm_ts"):
+        if item.get("status") == "failed" and systemalarm_faellig(item, jetzt):
             outbox_systemalarm(item, zustand, settings, jetzt, pfad)
             geaendert = True
 
