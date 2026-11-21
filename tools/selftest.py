@@ -2536,6 +2536,39 @@ def watcher_p0_tests():
               cw.ereignis(e_unavail, dict(treffer, preis=900.0), 5.0),
               "restock")
 
+        # Drei kleine Schritte unter der Toleranz summieren sich: Der zweite
+        # Schritt liegt 1,80 EUR unter dem letzten Alarmpreis und meldet.
+        drip = {"initialisiert": True, "verfuegbar": True,
+                "preis": 799.0, "alarm_preis": 799.0}
+        for preis, erwartet in ((798.1, None), (797.2, "new"), (796.3, None)):
+            ereignis_wert = cw.alarm_entscheidung(
+                drip, dict(treffer, preis=preis), 1.0)
+            check("p0 drip %.1f" % preis, ereignis_wert, erwartet)
+            cw.aktualisiere(drip, dict(treffer, preis=preis), 2000.0, None)
+        check("p0 drip referenz", drip.get("alarm_preis"), 797.2)
+
+        # Ein einzelner grosser Schritt meldet sofort und zieht die Referenz
+        # auf den gemeldeten Preis nach.
+        gross = {"initialisiert": True, "verfuegbar": True,
+                 "preis": 799.0, "alarm_preis": 799.0}
+        check("p0 grosser schritt sofort",
+              cw.alarm_entscheidung(gross, dict(treffer, preis=790.0), 1.0),
+              "new")
+        check("p0 referenz nach alarm", gross.get("alarm_preis"), 790.0)
+        # Ohne alarm_preis (alter Zustand) zaehlt der letzte bekannte Preis.
+        alt_treffer = {"initialisiert": True, "verfuegbar": True,
+                       "preis": 799.0}
+        check("p0 referenz fallback",
+              cw.alarm_entscheidung(alt_treffer, dict(treffer, preis=797.0),
+                                    1.0), "new")
+        restock_ref = {"initialisiert": True, "verfuegbar": False,
+                       "preis": 900.0, "alarm_preis": 899.0}
+        check("p0 restock referenz",
+              cw.alarm_entscheidung(restock_ref, dict(treffer, preis=950.0),
+                                    1.0), "restock")
+        check("p0 restock referenz gesetzt",
+              restock_ref.get("alarm_preis"), 950.0)
+
         # 4. Drei Challenges in Folge: 60 Minuten statt 15.
         eintrag = {"initialisiert": True, "preis": 799.0, "verfuegbar": False}
         heraus = {"haendler": "Amazon DE", "klass": "challenge",
@@ -2672,7 +2705,7 @@ def watcher_p0_tests():
         # 8. Alte Zustaende bleiben ohne Datenverlust migrierbar.
         with open(pfad, "w", encoding="utf-8") as f:
             json.dump({"schema": 2, "angelegt": 1.0, "schatten_bis": 1.0,
-                       "shops": {},
+                       "shops": {"Amazon DE": {"preis": 799.0}},
                        "runden": 0, "alarme_schatten": 0,
                        "alarme_gesendet": 0, "letzte_runde": 0.0,
                        "outbox": {"items": [], "gesamt": 0,
@@ -2680,6 +2713,8 @@ def watcher_p0_tests():
         geladen = cw.zustand_laden(pfad, 2000.0, 48)
         check("p0 migration schema", geladen.get("schema"), 3)
         check("p0 migration tag", isinstance(geladen.get("tag"), dict), True)
+        check("p0 migration alarmpreis",
+              geladen["shops"]["Amazon DE"].get("alarm_preis"), 799.0)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

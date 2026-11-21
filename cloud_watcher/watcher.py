@@ -218,6 +218,12 @@ def zustand_laden(pfad, jetzt, shadow_hours):
         daten["schatten_bis"] = float(jetzt) + max(0.0, float(shadow_hours)) * 3600.0
     if not isinstance(daten.get("shops"), dict):
         daten["shops"] = {}
+    # Alte Zustaende kennen noch keinen Alarmpreis; der letzte bekannte Preis
+    # ist der beste Startpunkt, damit die Toleranz nicht bei null beginnt.
+    for eintrag in daten["shops"].values():
+        if (isinstance(eintrag, dict) and eintrag.get("alarm_preis") is None
+                and eintrag.get("preis") is not None):
+            eintrag["alarm_preis"] = eintrag.get("preis")
     for key in ("runden", "alarme_schatten", "alarme_gesendet"):
         try:
             daten[key] = int(daten.get(key) or 0)
@@ -713,6 +719,19 @@ def ist_sofort_treffer(r):
     )
 
 
+def alarm_preis(eintrag):
+    """Referenzpreis der Toleranz: Preis beim letzten Alarm, sonst letzter Stand."""
+    if not isinstance(eintrag, dict):
+        return None
+    wert = eintrag.get("alarm_preis")
+    if wert is None:
+        wert = eintrag.get("preis")
+    try:
+        return float(wert)
+    except (TypeError, ValueError):
+        return None
+
+
 def preis_signifikant(neu, letzter, toleranz=0.0):
     """True, wenn der neue Preis deutlich unter dem letzten liegt.
 
@@ -747,9 +766,22 @@ def ereignis(eintrag, r, toleranz=0.0):
         return None
     if eintrag.get("verfuegbar") is False:
         return "restock"
-    if preis_signifikant(r.get("preis"), eintrag.get("preis"), toleranz):
+    if preis_signifikant(r.get("preis"), alarm_preis(eintrag), toleranz):
         return "new"
     return None
+
+
+def alarm_entscheidung(eintrag, r, toleranz=0.0):
+    """Ereignis bestimmen und bei Alarm den Referenzpreis nachziehen.
+
+    Nur ein tatsaechlich gemeldeter Alarm verschiebt die Referenz. Ein Check
+    unterhalb der Toleranz laesst sie stehen, damit sich kleine Senkungen
+    summieren und nicht dauerhaft stumm bleiben.
+    """
+    event = ereignis(eintrag, r, toleranz)
+    if event and isinstance(eintrag, dict) and r.get("preis") is not None:
+        eintrag["alarm_preis"] = r["preis"]
+    return event
 
 
 def aktualisiere(eintrag, r, jetzt, tz=None):
@@ -810,6 +842,10 @@ def aktualisiere(eintrag, r, jetzt, tz=None):
         except (TypeError, ValueError):
             preis = None
     if preis is not None:
+        # Beim ersten gueltigen Abruf ist der Preis die Alarm-Referenz. Danach
+        # verschiebt nur noch ein tatsaechlicher Alarm sie (alarm_entscheidung).
+        if eintrag.get("alarm_preis") is None:
+            eintrag["alarm_preis"] = preis
         eintrag["preis"] = preis
         tief = eintrag.get("tief")
         try:
@@ -1644,7 +1680,8 @@ def main():
                             # Der zweite Abruf zaehlt ebenfalls als Request.
                             request_verlauf.append(time.time())
                         eintrag = zustand["shops"].setdefault(name, {})
-                        event = ereignis(eintrag, r, konfig.preis_toleranz)
+                        event = alarm_entscheidung(eintrag, r,
+                                                   konfig.preis_toleranz)
                         aktualisiere(eintrag, r, time.time(), tz)
                         tag_buchen(zustand, r, time.time(), tz)
                         if r.get("klass") == "challenge":

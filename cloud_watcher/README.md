@@ -184,7 +184,7 @@ der Container nicht.
 | `WATCH_SHADOW` | `1` | `0` erst nach dem Schattenlauf |
 | `WATCH_SHADOW_HOURS` | `48` | Frist beim ersten Start; wird nie verkürzt |
 | `WATCH_MAX_PREIS` | `900` | Preisdeckel in Euro; AT erbt DE |
-| `WATCH_PREIS_TOLERANZ` | `1` | Neupreis-Alarm erst ab dieser Senkung in Euro; Restock bleibt unberührt |
+| `WATCH_PREIS_TOLERANZ` | `1` | Neupreis-Alarm erst ab dieser Senkung in Euro gegenüber dem letzten Alarm; Restock bleibt unberührt |
 | `WATCH_MAX_REQ_MIN` | `12` | Globales Request-Budget pro Minute; PS Direct zuerst |
 | `WATCH_TZ` | `Europe/Berlin` | Fenster und Log-Zeit |
 | `WATCH_DATA_DIR` | `/data` | Zustand, Health, HTTP-Cache, NDJSON-Logs |
@@ -196,7 +196,8 @@ der Container nicht.
 `WATCH_MAX_REQ_MIN` zählt echte Abrufe im gleitenden 60-Sekunden-Fenster; ist
 es erschöpft, wartet der Wächter kurz, statt heiß zu drehen, und bedient bei
 knappem Budget zuerst PS Direct DE/AT. `WATCH_PREIS_TOLERANZ` gilt nur für
-neue Preise: Ein Restock meldet immer.
+neue Preise und misst gegen den Preis des letzten Alarms: Mehrere kleine
+Senkungen summieren sich, ein Restock meldet immer.
 
 ### ntfy
 
@@ -261,8 +262,9 @@ Dateien älter als 14 Tage löscht der Wächter beim Start und beim Tageswechsel
 Jede Zeile wird sofort geflusht, beim Wechsel und beim Beenden zusätzlich
 fsync; ein harter Stopp kostet höchstens die letzte Zeile.
 
-Der Zustand enthält pro Shop `initialisiert`, `verfuegbar`, `preis`, `tief`,
-`status`, `fail_streak`, `challenge_bis` und den letzten Erfolg. `verfuegbar`
+Der Zustand enthält pro Shop `initialisiert`, `verfuegbar`, `preis`,
+`alarm_preis` (Referenz der Preistoleranz), `tief`, `status`, `fail_streak`,
+`challenge_bis` und den letzten Erfolg. `verfuegbar`
 wird nur bei einem bestätigten, sofort kaufbaren, nicht gebrauchten Treffer
 `true`; unbestätigte Treffer, Vorbestellungen und Gebrauchtware bleiben
 `false`, damit der spätere echte Restock nicht verdeckt wird. Die Datei wird
