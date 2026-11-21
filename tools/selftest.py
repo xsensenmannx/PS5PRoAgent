@@ -2790,26 +2790,43 @@ def outbox_tests():
             "WATCH_OPS_WEBHOOK_URL": "https://ntfy.sh/secret-ops"})
         settings_ops = cw.settings_aus(k_ops)
         check("outbox ops preset", k_ops.ops_preset, "ntfy")
+        ziel, kanal = cw._ops_ziel(settings_ops)
+        check("outbox ops ziel",
+              (kanal, ziel.get("webhook_preset")), ("ops", "ntfy"))
+        ziel, kanal = cw._ops_ziel({"ops_url": "https://ntfy.sh/x",
+                                    "ops_preset": "unsinn"})
+        check("outbox ops preset neu",
+              (kanal, ziel.get("webhook_preset")), ("ops", "ntfy"))
+        check("outbox ops produkt-fallback",
+              cw._ops_ziel(settings)[1], "produkt")
         z = _neu(9700.0)
-        item = cw.outbox_enqueue(r, "restock", z, 9700.0, "T", "X")
-        item["status"] = "failed"
-        item["failed_ts"] = 9700.0
-        item["failed_grund"] = "max_attempts"
-        item["last_error"] = "HTTP 500"
-        item["attempts"] = 6
-        item["system_alarm_ts"] = None
+        cw.outbox_enqueue(r, "restock", z, 9700.0, "T", "X")
         cw.zustand_speichern(pfad, z)
         calls.clear()
-        antwort.update(ok=False, info="HTTP 500")
+        # Der Produkt-Webhook antwortet endgueltig mit 401, der Ops-Kanal
+        # bleibt erreichbar. Beide Wege muessen getrennt bleiben.
+        antwort.update(ok=False, info="HTTP 401")
         cw.outbox_drain(z, k_ops, settings_ops, None, jetzt=9750.0, pfad=pfad)
         item = z["outbox"]["items"][0]
-        check("outbox ops systemalarm ziel",
-              [c["url"] for c in calls], ["https://ntfy.sh/secret-ops"])
+        check("outbox ops produktalarm", [c["url"] for c in calls],
+              ["https://ntfy.sh/secret-outbox", "https://ntfy.sh/secret-ops"])
+        check("outbox ops produktalarm titel",
+              str(calls[0]["titel"]).startswith("Waechter:"), False)
+        check("outbox ops systemalarm titel",
+              str(calls[1]["titel"]).startswith("Waechter:"), True)
+        check("outbox ops alarm failed", item.get("status"), "failed")
         check("outbox ops systemalarm ok", item.get("system_alarm_ok"), True)
         check("outbox ops kanal", item.get("system_alarm_kanal"), "ops")
         check("outbox ops log kanal",
               any(d.get("typ") == "systemalarm" and d.get("kanal") == "ops"
                   for d in logs), True)
+        # Ein Fehlertext mit beiden URLs darf weder Zustand noch Log erreichen.
+        gesaeubert = cw._outbox_safe_info(
+            "HTTP 401 https://ntfy.sh/secret-ops / https://ntfy.sh/secret-outbox",
+            settings_ops)
+        check("outbox ops redaktion",
+              "secret-ops" not in gesaeubert
+              and "secret-outbox" not in gesaeubert, True)
         check("outbox ops url nie geloggt",
               "secret-ops" not in json.dumps(logs, ensure_ascii=False), True)
 

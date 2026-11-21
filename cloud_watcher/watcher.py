@@ -406,13 +406,11 @@ def _outbox_retrybar(info):
 
 
 def _outbox_safe_info(info, settings=None):
-    """Fehlertext fuer Log/Zustand; die Webhook-URL darf nie auftauchen."""
+    """Fehlertext fuer Log/Zustand; keine Webhook-URL darf auftauchen."""
     text = str(info or "")
+    settings = settings if isinstance(settings, dict) else {}
     for key in ("webhook_url", "ops_url"):
-        try:
-            url = str((settings or {}).get(key) or "").strip()
-        except AttributeError:
-            url = ""
+        url = str(settings.get(key) or "").strip()
         if url:
             text = text.replace(url, core.redact_url(url))
     return text[:120]
@@ -439,10 +437,7 @@ def _outbox_log(item, aktion, jetzt, ok=None, info="", versuch=None):
 def _ops_ziel(settings):
     """Ziel fuer den Systemalarm: eigener Ops-Kanal, sonst der Produkt-Webhook."""
     settings = settings if isinstance(settings, dict) else {}
-    try:
-        url = str(settings.get("ops_url") or "").strip()
-    except AttributeError:
-        url = ""
+    url = str(settings.get("ops_url") or "").strip()
     if not url:
         return settings, "produkt"
     preset = str(settings.get("ops_preset") or "")
