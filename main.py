@@ -46,6 +46,7 @@ from scan_core import (
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
     dauer_text, kurz_zeit, kurz_tag, zeitraum_text, event_zeile, events as verlauf_events,
     preis_deckel, deckel_wert, stumm_bis, Kaeufe, KAUF_STUMM_S,
+    health_export_json,
 )
 
 # Nur fuer die Oberflaeche: Preislimit-Auswahl, Sortierung, Auto-Intervalle.
@@ -195,7 +196,7 @@ def haptic(d=0.05):
         if v.hasVibrator(): v.vibrate(int(max(1,d*1000)))
     except Exception: pass
 
-def share_text(text):
+def share_text(text,titel="Fehlerbericht teilen"):
     """Text (z. B. Crash-Log) ueber den Android-Teilen-Dialog ausgeben."""
     if platform=="android":
         try:
@@ -204,7 +205,7 @@ def share_text(text):
             Intent=autoclass("android.content.Intent")
             i=Intent(Intent.ACTION_SEND); i.setType("text/plain")
             i.putExtra(Intent.EXTRA_TEXT,str(text))
-            PA.mActivity.startActivity(Intent.createChooser(i,"Fehlerbericht teilen"))
+            PA.mActivity.startActivity(Intent.createChooser(i,str(titel)))
             return True
         except Exception: pass
     try: print(text); return True
@@ -2266,8 +2267,13 @@ class MainUI(FloatLayout):
             st.bind(size=lambda w,*_:setattr(w,"text_size",w.size)); row.add_widget(st)
             inner.add_widget(row)
         sv.add_widget(inner); box.add_widget(sv)
+        # Zwei Reihen statt vier Buttons in einer: Bei 320 dp bleibt so der
+        # Text von "FEHLER PRUEFEN" vollstaendig lesbar.
         btns=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
         rb=PS1Button(text="FEHLER PRUEFEN",accent=PS1_YELLOW,font_size=sp(9))
+        eb=PS1Button(text="JSON TEILEN",accent=PS1_CYAN,font_size=sp(9))
+        btns.add_widget(rb); btns.add_widget(eb)
+        btns2=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
         lb=PS1Button(text="LOG TEILEN",accent=PS1_BLUE,font_size=sp(9))
         cb=PS1Button(text="ZU",accent=PS1_SILVER,font_size=sp(9))
         p=Popup(title="",content=box,size_hint=(None,None),
@@ -2282,10 +2288,16 @@ class MainUI(FloatLayout):
             txt=read_crash_log()
             if not txt: self._toast("KEIN CRASH-LOG VORHANDEN",color=PS1_GREY); return
             share_text(txt)
-        rb.bind(on_release=retry); lb.bind(on_release=log)
-        cb.bind(on_release=lambda *_:p.dismiss())
-        btns.add_widget(rb); btns.add_widget(lb); btns.add_widget(cb)
-        box.add_widget(btns)
+        def export(*_):
+            try: txt=health_export_json()
+            except Exception:
+                self._toast("EXPORT FEHLGESCHLAGEN",color=PS1_YELLOW); return
+            if not share_text(txt,"Health-Export teilen"):
+                self._toast("TEILEN NICHT VERFUEGBAR",color=PS1_YELLOW)
+        rb.bind(on_release=retry); eb.bind(on_release=export)
+        lb.bind(on_release=log); cb.bind(on_release=lambda *_:p.dismiss())
+        btns2.add_widget(lb); btns2.add_widget(cb)
+        box.add_widget(btns); box.add_widget(btns2)
         cfg=PS1Button(text="REMOTE-CONFIG AKTUALISIEREN",accent=PS1_PINK,
                       font_size=sp(9),size_hint_y=None,height=dp(32))
         def load_cfg(*_):

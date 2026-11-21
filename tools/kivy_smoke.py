@@ -15,6 +15,7 @@ Auf Linux ohne Display:
 Exit-Code 0 = alle Pruefungen bestanden. Fehlt Kivy oder ein Fenster-Provider,
 endet der Test mit dem entsprechenden Kivy-Fehler; die CI installiert beides.
 """
+import json
 import os
 import shutil
 import sys
@@ -358,6 +359,22 @@ class SmokeApp(App):
         parser_zeile = next(w for w in p.content.walk()
                             if isinstance(w, main.Label) and "PARSER-SERIE" in str(w.text))
         check("Health: Parser-Serie passt", fits(parser_zeile), True)
+
+        # JSON TEILEN reicht Health, Events und BG-Status an den Teilen-Dialog.
+        geteilt = []
+        echt_share = main.share_text
+        main.share_text = lambda text, *a, **k: geteilt.append(text) or True
+        try:
+            self.button(p, "JSON TEILEN").dispatch("on_release")
+            self.pump()
+        finally:
+            main.share_text = echt_share
+        check("Health: JSON geteilt", len(geteilt), 1)
+        export = json.loads(geteilt[0]) if geteilt else {}
+        check("Health: Export enthaelt Health", "health" in export, True)
+        check("Health: Export enthaelt Events", isinstance(export.get("events"), list), True)
+        check("Health: Export nennt BG-Status", "bg" in export, True)
+        check("Health: Export bleibt im Popup", len(self.popups()), 1)
 
         # Der Retry darf keinen Scan starten (sonst waere der Smoke-Test online).
         calls = []

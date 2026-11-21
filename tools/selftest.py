@@ -1420,6 +1420,8 @@ def v13_tests():
     check("App verifiziert Treffer", "verify_treffer(futs[f]" in main_q, True)
     check("App zeigt Verifikation", "VERIFIKATION" in main_q, True)
     check("App hat Schnellscan", "SCHNELLSCAN" in main_q, True)
+    check("App teilt Health-Export", "health_export_json" in main_q, True)
+    check("Health-Export Knopf", "JSON TEILEN" in main_q, True)
     check("Dienst sendet Webhook", "sende_webhook_alarm" in svc_q, True)
     check("Dienst verifiziert Treffer", "verify_treffer" in svc_q, True)
 
@@ -1664,6 +1666,33 @@ def live_tests():
     check("Health-Status", ueb["Sperre DE"]["status"], "challenge")
     check("Health-Alter", ueb["Heiss DE"]["alter"], 40)
     check("Health kennt nur Gesehenes", "Nirgends DE" in ueb, False)
+
+    # Export fuer den Abgleich mit bestell.bar: Health, Ereignisse und
+    # BG-Status in einem JSON, rein lesend und ohne Scan.
+    export_ts = time.mktime((2026, 11, 16, 9, 2, 0, 0, 0, -1))
+    export_daten = core.health_export(
+        health_daten=daten,
+        event_liste=[{"typ": "verfuegbar", "haendler": "Heiss DE",
+                      "ts": "2026-11-16T09:02:00"}],
+        bg_status={"ts": export_ts, "zeit": "09:02", "geprueft": 42,
+                   "results": []},
+        jetzt=export_ts)
+    check("Export Schema", export_daten["schema"], 1)
+    check("Export Health", export_daten["health"]["Heiss DE"]["last_status"],
+          "hit")
+    check("Export Events", len(export_daten["events"]), 1)
+    check("Export BG", export_daten["bg"]["geprueft"], 42)
+    check("Export BG Zeit lesbar", export_daten["bg"].get("ts_iso"),
+          "2026-11-16T09:02:00")
+    check("Export Zeitstempel", export_daten["exportiert"],
+          "2026-11-16T09:02:00")
+    check("Export Quellen", export_daten["dateien"]["bg"], core.BG_STATUS_FILE)
+    roh = core.health_export_json(health_daten=daten, event_liste=[],
+                                  bg_status={}, jetzt=export_ts)
+    geparst = json.loads(roh)
+    check("Export JSON parsebar", geparst["schema"], 1)
+    check("Export JSON Zeitzone", bool(geparst["zeitzone"]), True)
+    check("Export JSON BG ohne Zeit", geparst["bg"].get("ts_iso"), None)
 
     # ── Drop-Fenster ────────────────────────────────────────────────
     # Belegt ist nur ein breites Tagesfenster fuer PS Direct (09:00-18:00);

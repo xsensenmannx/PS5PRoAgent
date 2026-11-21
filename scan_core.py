@@ -2509,6 +2509,48 @@ def reset_health():
     with _HEALTH_LOCK: _HEALTH=None
 
 
+def _lies_bg_status():
+    """Letzten BG-Status lesen; fehlt die Datei, ist das kein Fehler."""
+    try:
+        with open(os.path.join(_data_dir(),BG_STATUS_FILE),"r",encoding="utf-8") as f:
+            d=json.load(f)
+        return d if isinstance(d,dict) else None
+    except Exception: return None
+
+
+def health_export(health_daten=None, event_liste=None, bg_status=None, jetzt=None):
+    """Health, Ereignisse und BG-Status als ein JSON-Objekt.
+
+    Reine Leseansicht: Die Dateien werden nicht veraendert. Zeitstempel bleiben
+    roh, damit sie sich mit externen Stempeln (bestell.bar) vergleichen lassen;
+    ``exportiert`` und ``zeitzone`` liefern den Bezugspunkt.
+    """
+    jetzt=time.time() if jetzt is None else float(jetzt)
+    if health_daten is None: health_daten=Health().all()
+    if event_liste is None: event_liste=events().reload().all()
+    if bg_status is None: bg_status=_lies_bg_status()
+    if isinstance(bg_status,dict):
+        bg_status=dict(bg_status)
+        try:
+            bg_status["ts_iso"]=datetime.fromtimestamp(
+                float(bg_status.get("ts"))).isoformat(timespec="seconds")
+        except (TypeError,ValueError): pass
+    return {"schema":1,
+            "exportiert":datetime.fromtimestamp(jetzt).isoformat(timespec="seconds"),
+            "exportiert_ts":round(jetzt,3),
+            "zeitzone":time.strftime("%z"),
+            "dateien":{"health":HEALTH_FILE,"events":EVENTS_FILE,
+                       "bg":BG_STATUS_FILE},
+            "health":health_daten if isinstance(health_daten,dict) else {},
+            "events":event_liste if isinstance(event_liste,list) else [],
+            "bg":bg_status if isinstance(bg_status,dict) else None}
+
+
+def health_export_json(**kwargs):
+    """Export als Text fuer den Android-Teilen-Dialog."""
+    return json.dumps(health_export(**kwargs),ensure_ascii=False,indent=1)
+
+
 def _crash_schreiben(context,text):
     try:
         p=os.path.join(_data_dir(),CRASH_FILE)
