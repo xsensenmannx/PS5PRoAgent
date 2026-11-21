@@ -81,7 +81,6 @@ _LOG_GROESSE = 0
 _LOG_VERWORFEN = 0
 
 
-
 @dataclass(frozen=True)
 class Konfig:
     """Vollstaendige Laufzeitkonfiguration, ausschliesslich aus der Umgebung."""
@@ -1717,7 +1716,6 @@ def main():
                         "budget_max": konfig.max_req_min,
                     }
                 )
-                heartbeat(konfig)
 
             if STOP.is_set():
                 break
