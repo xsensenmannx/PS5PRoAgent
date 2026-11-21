@@ -1,0 +1,25 @@
+services:
+  watcher:
+    build:
+      context: ..
+      dockerfile: Dockerfile.watcher
+    image: ps5pro-watcher:local
+    restart: unless-stopped
+    # Genug Zeit, damit der Waechter den Zustand nach SIGTERM atomar speichert.
+    stop_grace_period: 30s
+    env_file:
+      - .env
+    environment:
+      WATCH_DATA_DIR: /data
+    volumes:
+      - watcher_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  watcher_data:

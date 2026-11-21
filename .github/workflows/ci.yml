@@ -1,6 +1,7 @@
-# Prueft jeden Push und Pull Request: Shop-Konfiguration, Logiktests und den
-# Kivy-Smoke-Test in mehreren Fenstergroessen (Hoch- und Querformat), damit
-# Layout-Fehler vor dem Release auffallen.
+# Prueft jeden Push und Pull Request: Shop-Konfiguration, Logiktests, den
+# Kivy-Smoke-Test in mehreren Fenstergroessen (Hoch- und Querformat) und den
+# Waechter-Container (Build plus Import), damit Layout- und Containerfehler
+# vor dem Release auffallen.
 # Der Release-Workflow (.github/workflows/release.yml) wiederholt die Gates
 # zusaetzlich vor dem APK-Build.
 name: CI
@@ -62,6 +63,24 @@ jobs:
           set -euo pipefail
           python tools/check_hilfe_specs.py
           python -m unittest discover -s support_app/tests -v
+
+  watcher-container:
+    name: Cloud-Waechter Container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # Baut das Image ohne Secrets. Der Schattenmodus ist Standard; der
+      # Import im Container laeuft ohne Netz und ohne Webhook.
+      - name: Image bauen
+        run: docker build -f Dockerfile.watcher -t ps5pro-watcher:ci .
+
+      - name: Import und Laufzeitbenutzer im Container
+        run: |
+          set -euo pipefail
+          docker run --network none --rm ps5pro-watcher:ci python -c \
+            'import os; import cloud_watcher.watcher as watcher; konfig = watcher.Konfig.aus_env({}); assert os.getuid() == 10001, os.getuid(); assert "WATCH_WEBHOOK_URL" not in os.environ; assert konfig.shops == ("PS Direct DE", "PS Direct AT"), konfig.shops; assert konfig.shadow is True, konfig.shadow; assert 30 <= konfig.window_takt <= 60, konfig.window_takt; assert konfig.webhook_url == "", konfig.webhook_url; print("watcher import ok:", konfig.shops, konfig.window_takt)'
 
   layout:
     name: Kivy-Smoke ${{ matrix.name }}

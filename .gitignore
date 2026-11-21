@@ -12,6 +12,10 @@ ps5pro_settings.json
 ps5pro_history.json
 fonts/
 
+# Cloud-Waechter: lokale Daten und Secrets
+cloud_watcher/data/
+cloud_watcher/.env
+
 # Lokale Arbeitsordner: Release-Schluessel (.freebuff/keys), Artefakte, Design-Quellen
 .freebuff/
 artifacts/

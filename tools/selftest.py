@@ -549,6 +549,79 @@ def service_tests():
     check("bg intervall ungueltig", core.bg_intervall("x"), 900)
     check("bg intervall leer", core.bg_intervall(None), 900)
 
+    # Hot-Runde: nur PS Direct DE/AT, nur im Fenster, nie gegen eine Sperre.
+    def bg_ts(h, m):
+        return time.mktime((2026, 11, 16, h, m, 0, 0, 0, -1))
+    check("bg hot takt im band", 30 <= core.BG_HOT_TAKT <= 60, True)
+    bg_shops = [{"name": "PS Direct DE"}, {"name": "PS Direct AT"},
+                {"name": "Amazon DE"}]
+    check("bg hot im fenster",
+          [h["name"] for h in core.bg_hot_shops(bg_shops, jetzt=bg_ts(10, 0))],
+          ["PS Direct DE", "PS Direct AT"])
+    check("bg hot ausserhalb",
+          core.bg_hot_shops(bg_shops, jetzt=bg_ts(19, 0)), [])
+    check("bg hot respektiert auswahl",
+          [h["name"] for h in core.bg_hot_shops(
+              bg_shops, aktiv={"PS Direct AT"}, jetzt=bg_ts(10, 0))],
+          ["PS Direct AT"])
+    check("bg hot sperre",
+          [h["name"] for h in core.bg_hot_shops(
+              bg_shops,
+              health_daten={"PS Direct DE": {"last_status": "challenge"}},
+              jetzt=bg_ts(10, 0))],
+          ["PS Direct AT"])
+    check("bg naechstes fenster heute",
+          int(core.naechste_fenster_ts(bg_ts(8, 0))), int(bg_ts(9, 0)))
+    check("bg naechstes fenster morgen",
+          int(core.naechste_fenster_ts(bg_ts(10, 0))),
+          int(time.mktime((2026, 11, 17, 9, 0, 0, 0, 0, -1))))
+
+    # Wachhund: frische Pause ist kein toter Dienst.
+    check("Wachhund frisch", core.bg_wachhund(
+        {"ts": bg_ts(10, 0) - 60, "wach_ts": bg_ts(10, 0) - 60},
+        bg_ts(10, 0), 900), {"zustand": "ok", "alter": 60, "grund": ""})
+    check("Wachhund tot", core.bg_wachhund(
+        {"ts": bg_ts(10, 0) - 4000, "wach_ts": bg_ts(10, 0) - 4000},
+        bg_ts(10, 0), 900)["zustand"], "tot")
+    check("Wachhund pausiert", core.bg_wachhund(
+        {"ts": bg_ts(10, 0) - 4000, "wach_ts": bg_ts(10, 0) - 30,
+         "wach_status": "pausiert", "pausiert": "KEIN WLAN"},
+        bg_ts(10, 0), 900),
+        {"zustand": "pausiert", "alter": 30, "grund": "KEIN WLAN"})
+    check("Wachhund leer",
+          core.bg_wachhund({}, bg_ts(10, 0), 900)["zustand"], "unbekannt")
+
+    # Statusdatei: Hot-Runde und volle Runde duerfen sich nicht ueberschreiben.
+    if not os.environ.get("ANDROID_PRIVATE"):
+        import service as svc
+        alt_dir = core._data_dir()
+        tmp_bg = tempfile.mkdtemp(prefix="ps5pro-bgstatus-")
+        try:
+            core.set_data_dir(tmp_bg)
+            pfad = os.path.join(tmp_bg, svc.STATUS_DATEI)
+            svc._status_schreiben([{"haendler": "A", "klass": "unavail"}], [],
+                                  intervall=900)
+            with open(pfad, encoding="utf-8") as f:
+                d = json.load(f)
+            check("BG Status volle Runde", d.get("geprueft"), 1)
+            check("BG Status Wachhund ok", d.get("wach_status"), "ok")
+            svc._status_schreiben([{"haendler": "PS Direct DE",
+                                    "klass": "hit", "preis": 899.0}], [],
+                                  hot=True)
+            with open(pfad, encoding="utf-8") as f:
+                d = json.load(f)
+            check("BG Status Hot getrennt", d.get("hot_geprueft"), 1)
+            check("BG Status volle Runde bleibt", d.get("geprueft"), 1)
+            check("BG Status Hot-Stempel", bool(d.get("hot_ts")), True)
+            svc._status_schreiben([], [], intervall=900, pausiert="KEIN WLAN")
+            with open(pfad, encoding="utf-8") as f:
+                d = json.load(f)
+            check("BG Status Pause", d.get("pausiert"), "KEIN WLAN")
+            check("BG Status Pause behaelt Hot", d.get("hot_geprueft"), 1)
+        finally:
+            core.set_data_dir(alt_dir)
+            shutil.rmtree(tmp_bg, ignore_errors=True)
+
     check("neuer treffer ohne vorgabe", core.ist_neuer_treffer(799.0, None), True)
     check("gleicher preis ist nicht neu", core.ist_neuer_treffer(799.0, 799.0), False)
     check("guenstiger ist neu", core.ist_neuer_treffer(750.0, 799.0), True)
@@ -636,6 +709,9 @@ def spec_tests():
     perms = c.get("app", "android.permissions")
     check("spec foreground-recht", "FOREGROUND_SERVICE" in perms, True)
     check("spec specialUse-recht", "FOREGROUND_SERVICE_SPECIAL_USE" in perms, True)
+    # Ohne dieses normale Recht liefert ConnectivityManager keine Antwort und
+    # die WLAN-Option wuerde still nichts tun.
+    check("spec netzstatus-recht", "ACCESS_NETWORK_STATE" in perms, True)
     check("spec notify-icon",
           "drawable/notify_icon.png" in c.get("app", "android.add_resources"), True)
     # specialUse braucht den Subtyp im Manifest; der p4a-Hook traegt ihn ein.
@@ -1052,6 +1128,10 @@ def feature_tests():
 
         service_q = open(os.path.join(ROOT, "service.py"), encoding="utf-8").read()
         check("Heartbeat next_ts", '"next_ts"' in service_q, True)
+        check("Dienst prueft Hot-Shops", "bg_hot_shops" in service_q, True)
+        check("Dienst respektiert WLAN-Option", "bg_wlan_only" in service_q, True)
+        check("Dienst respektiert Lade-Option", "bg_laden_only" in service_q, True)
+        check("Dienst schreibt Wachhund", '"wach_ts"' in service_q, True)
         check("Notification Deep-Link", 'ps5pro_url' in service_q, True)
         check("Notification Gruppe", "setGroupSummary" in service_q, True)
         main_q = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
@@ -1751,8 +1831,43 @@ def live_tests():
     check("Fensterbudget haelt 40 pro Minute",
           core.LIVE_RUNDE_FENSTER * (60 // core.LIVE_TAKT_FENSTER) <= core.LIVE_BUDGET,
           True)
-    check("Normalbudget haelt 40 pro Minute",
-          core.LIVE_RUNDE_MAX * (60 // core.LIVE_TAKT) <= core.LIVE_BUDGET, True)
+    check("Normalbudget haelt 40 pro Minute", core.LIVE_RUNDE_MAX * (60 // core.LIVE_TAKT) <= core.LIVE_BUDGET, True)
+
+    # Im Fenster sind PS Direct DE/AT in jeder kurzen Runde dabei - auch dann,
+    # wenn sie gerade eben geprueft wurden und andere Shops ueberfaellig sind.
+    # Das Budget bleibt bei LIVE_RUNDE_FENSTER.
+    runde_shops = ([{"name": "PS Direct DE"}, {"name": "PS Direct AT"}] +
+                   [{"name": "Shop %02d" % i} for i in range(10)])
+    runde_daten = {h["name"]: {"last_status": "unavail", "last_ts": ts(10, 0) - 500}
+                   for h in runde_shops}
+    for name in ("PS Direct DE", "PS Direct AT"):
+        runde_daten[name] = {"last_status": "unavail", "last_ts": ts(10, 0)}
+    runde = [h["name"] for h in core.faellige_haendler(
+        runde_shops, runde_daten, ts(10, 0), budget=core.LIVE_RUNDE_FENSTER)]
+    check("Fenster: PS Direct DE in jeder Runde", "PS Direct DE" in runde, True)
+    check("Fenster: PS Direct AT in jeder Runde", "PS Direct AT" in runde, True)
+    check("Fenster: Rundengroesse bleibt", len(runde), core.LIVE_RUNDE_FENSTER)
+    check("Fenster: Vorrang zuerst", runde[:2], ["PS Direct AT", "PS Direct DE"])
+    # Eine Sperre hebt den Vorrang auf: kein 10-s-Anklopfen gegen Bot-Schutz.
+    block_daten = dict(runde_daten)
+    block_daten["PS Direct DE"] = {"last_status": "challenge",
+                                   "last_ts": ts(10, 0)}
+    block = [h["name"] for h in core.faellige_haendler(
+        runde_shops, block_daten, ts(10, 0), budget=core.LIVE_RUNDE_FENSTER)]
+    check("Fenster: Sperre schlaegt Vorrang", "PS Direct DE" in block, False)
+    # Ausserhalb des Fensters bleibt die Reihenfolge rein nach Ueberfaelligkeit.
+    aussen_daten = {h["name"]: {"last_status": "unavail",
+                                "last_ts": ts(19, 0) - 500}
+                    for h in runde_shops}
+    for name in ("PS Direct DE", "PS Direct AT"):
+        aussen_daten[name] = {"last_status": "unavail", "last_ts": ts(19, 0)}
+    aussen = [h["name"] for h in core.faellige_haendler(
+        runde_shops, aussen_daten, ts(19, 0), budget=core.LIVE_RUNDE_FENSTER)]
+    check("Ausserhalb: kein Vorrang", "PS Direct DE" in aussen, False)
+    check("Ausserhalb: Runde bleibt gefuellt", len(aussen),
+          core.LIVE_RUNDE_FENSTER)
+    check("Ausserhalb: nur ueberfaellige Shops",
+          all(name.startswith("Shop ") for name in aussen), True)
 
     # ── Sofortmeldung bei belegtem Treffer ──────────────────────────
     belegt = {"klass": "hit", "preis": 899.99, "avail_state": "in_stock",
@@ -1780,6 +1895,11 @@ def live_tests():
     check("App zeigt faellige Shops", "F\u00c4LLIG" in main_q, True)
     check("App meldet belegte Treffer sofort", "meldebereit" in main_q, True)
     check("App kennt Drop-Fenster", "live_takt" in main_q, True)
+    check("App startet Schnellscan im Fenster", "_fenster_pruefen" in main_q, True)
+    check("App beendet nur die Automatik", "_fast_auto" in main_q, True)
+    check("App kennt Wachhund", "bg_wachhund" in main_q, True)
+    check("App bietet WLAN-Option", "BG NUR WLAN" in main_q, True)
+    check("App bietet Lade-Option", "BG NUR LADEN" in main_q, True)
     check("App zaehlt Nachtrag nicht doppelt", "self._process(r,nach)" in main_q, True)
 
 
@@ -2025,10 +2145,24 @@ def fastpath_tests():
         core.beleg_speichern = _alt_beleg
 
     # Die echte PS-Direct-Fixture (Captured 20.11.2026) muss auch durch den
-    # Teilabruf-Pfad gehen, nicht nur durch extract_structured.
+    # Teilabruf-Pfad gehen, nicht nur durch extract_structured. PS Direct
+    # liest nur 64 KB; der JSON-LD-Block muss vollstaendig darin liegen.
     with open(os.path.join(ROOT, "tools", "fixtures", "shop-ps-direct-de.json"),
               encoding="utf-8") as f:
         ps = json.load(f)
+    roh = ps["html"].encode("utf-8")
+    check("fastpath ps direct grenze", core.fast_json_limit("PS Direct DE"),
+          core.FAST_JSON_BYTES_PSDIRECT)
+    check("fastpath ps direct at grenze", core.fast_json_limit("PS Direct AT"),
+          core.FAST_JSON_BYTES_PSDIRECT)
+    check("fastpath andere shops 192 kb", core.fast_json_limit("MediaMarkt DE"),
+          core.FAST_JSON_BYTES)
+    check("fastpath 64 kb ist kleiner",
+          core.FAST_JSON_BYTES_PSDIRECT < core.FAST_JSON_BYTES, True)
+    check("fastpath ps direct jsonld in 64 kb",
+          roh.find(b"application/ld+json") < core.FAST_JSON_BYTES_PSDIRECT, True)
+    teil = roh[:core.FAST_JSON_BYTES_PSDIRECT]
+    check("fastpath ps direct outofstock in 64 kb", b"OutOfStock" in teil, True)
     _alt_fetch = core.fetch_mit_cache
     try:
         core.fetch_mit_cache = lambda *a, **k: (
@@ -2040,6 +2174,20 @@ def fastpath_tests():
         check("fastpath ps direct klasse", pd["klass"], "unavail")
         check("fastpath ps direct url", pd["url"], ps["url"])
         check("fastpath ps direct signal", pd["signal"], "jsonld")
+        # Der Teilabruf muss fuer PS Direct wirklich 64 KB anfordern.
+        anfrage = {}
+        def _mit_grenze(urls, cancel=None, force=False, limit=None):
+            anfrage["limit"] = limit
+            return (teil.decode("utf-8", "ignore"), ps["url"], None,
+                    {"bytes": len(teil)})
+        core.fetch_mit_cache = _mit_grenze
+        pd64 = core._scan_einen_json({"name": "PS Direct AT", "land": "AT",
+                                      "urls": [ps["url"]]})
+        check("fastpath ps direct anfrage 64 kb", anfrage.get("limit"),
+              core.FAST_JSON_BYTES_PSDIRECT)
+        check("fastpath ps direct 64 kb preis", pd64["preis"], 899.99)
+        check("fastpath ps direct 64 kb zustand", pd64["avail_state"], "sold_out")
+        check("fastpath ps direct 64 kb bytes", pd64["bytes"], len(teil))
     finally:
         core.fetch_mit_cache = _alt_fetch
 
@@ -2047,6 +2195,656 @@ def fastpath_tests():
           "https://www.playstation.com/de-de/ps5/ps5-pro/buy-now/")
     check("ps direct at ziel", core.HAENDLER_BASIS["PS Direct AT"][0],
           "https://www.playstation.com/de-at/ps5/ps5-pro/buy-now/")
+
+
+def cloud_watcher_tests():
+    """Cloud-Waechter: Konfiguration, Takt, Schattenfrist, Baseline, Zustand."""
+    import cloud_watcher.watcher as cw
+
+    k = cw.Konfig.aus_env({})
+    check("cloud shops standard", list(k.shops),
+          ["PS Direct DE", "PS Direct AT"])
+    check("cloud fenstertakt standard", 30 <= k.window_takt <= 60, True)
+    check("cloud takt aussen standard", k.aussen_takt >= 60, True)
+    check("cloud schatten standard", k.shadow, True)
+    check("cloud schattenstunden", k.shadow_hours, 48.0)
+
+    k2 = cw.Konfig.aus_env({"WATCH_SHADOW": "0", "WATCH_WINDOW_TAKT": "5",
+                            "WATCH_TAKT_AUSSEN": "10",
+                            "WATCH_SHOPS": " PS Direct DE "})
+    check("cloud fenstertakt geklemmt", k2.window_takt, 30)
+    check("cloud takt aussen geklemmt", k2.aussen_takt, 60)
+    check("cloud scharf", k2.shadow, False)
+    check("cloud shop getrimmt", list(k2.shops), ["PS Direct DE"])
+    unbekannt = False
+    try:
+        cw.Konfig.aus_env({"WATCH_SHOPS": "Nirgends DE"})
+    except ValueError:
+        unbekannt = True
+    check("cloud unbekannter shop", unbekannt, True)
+
+    z = cw.neuer_zustand(1000.0, 48)
+    check("cloud schattenfrist", z["schatten_bis"], 1000.0 + 48 * 3600)
+    check("cloud schatten aktiv",
+          cw.schatten_aktiv(z, 1000.0 + 47 * 3600, False), True)
+    check("cloud schatten vorbei",
+          cw.schatten_aktiv(z, 1000.0 + 49 * 3600, False), False)
+    check("cloud schatten erzwungen",
+          cw.schatten_aktiv(z, 1000.0 + 49 * 3600, True), True)
+
+    dt_fenster = core._als_datetime(
+        time.mktime((2026, 11, 16, 10, 0, 0, 0, 0, -1)))
+    dt_aussen = core._als_datetime(
+        time.mktime((2026, 11, 16, 19, 0, 0, 0, 0, -1)))
+    ruhig = {"status": "unavail", "fail_streak": 0}
+    check("cloud takt im fenster",
+          30 <= cw.takt_sekunden("PS Direct DE", ruhig, dt_fenster, k) <= 60,
+          True)
+    check("cloud takt ausserhalb",
+          cw.takt_sekunden("PS Direct DE", ruhig, dt_aussen, k) >= 150, True)
+    check("cloud takt sperre",
+          cw.takt_sekunden("PS Direct DE",
+                           {"status": "challenge", "fail_streak": 1},
+                           dt_fenster, k), cw.CHALLENGE_TAKT)
+    check("cloud takt fehler",
+          cw.takt_sekunden("PS Direct DE",
+                           {"status": "parser", "fail_streak": 2},
+                           dt_fenster, k), cw.FEHLER_TAKT)
+
+    tmp = tempfile.mkdtemp(prefix="ps5pro-cloud-")
+    alt_dir = core.data_dir()
+    alt_scan = core.scan_einen
+    alt_verify = core.verify_treffer
+    try:
+        pfad = os.path.join(tmp, cw.STATE_FILE)
+        neu = cw.zustand_laden(pfad, 1000.0, 48)
+        check("cloud zustand neu", neu["schatten_bis"], 1000.0 + 48 * 3600)
+        cw.zustand_speichern(pfad, neu)
+        wieder = cw.zustand_laden(pfad, 5000.0, 48)
+        check("cloud zustand bleibt", wieder["schatten_bis"],
+              neu["schatten_bis"])
+        check("cloud zustand datei", os.path.isfile(pfad), True)
+        check("cloud zustand atomar", os.path.exists(pfad + ".tmp"), False)
+
+        eintrag = {}
+        unavail = {"haendler": "PS Direct DE", "land": "DE",
+                   "klass": "unavail", "preis": 899.99,
+                   "verfuegbar": False, "dauer": 0.1}
+        check("cloud baseline kein alarm", cw.ereignis(eintrag, unavail), None)
+        cw.aktualisiere(eintrag, unavail, 1000.0, None)
+        check("cloud baseline gesetzt", eintrag.get("initialisiert"), True)
+        check("cloud baseline preis", eintrag.get("preis"), 899.99)
+        hit = dict(unavail, klass="hit", verfuegbar=True,
+                   verify="bestaetigt", sofort=True)
+        check("cloud restock erkannt", cw.ereignis(eintrag, hit), "restock")
+        cw.aktualisiere(eintrag, hit, 1060.0, None)
+        check("cloud bestand", eintrag.get("verfuegbar"), True)
+        check("cloud kein doppelalarm", cw.ereignis(eintrag, hit), None)
+        check("cloud neuer preis",
+              cw.ereignis(eintrag, dict(hit, preis=849.0)), "new")
+        ohne_flag = dict(hit)
+        ohne_flag.pop("verfuegbar")
+        cw.aktualisiere(eintrag, ohne_flag, 1240.0, None)
+        check("cloud treffer ohne flag", eintrag.get("verfuegbar"), True)
+
+        # Unbestaetigt, Vorbestellung und Gebrauchtware duerfen den Bestand
+        # nicht setzen; der spaetere bestaetigte Treffer muss Restock sein.
+        bestaetigt = {"haendler": "PS Direct DE", "land": "DE",
+                      "klass": "hit", "preis": 899.0, "sofort": True,
+                      "verify": "bestaetigt", "condition": "neu",
+                      "verfuegbar": True}
+        unbestaetigt = dict(bestaetigt, verify="unbestaetigt")
+        e_unb = {"initialisiert": True, "verfuegbar": False,
+                 "preis": 899.99}
+        check("cloud unbestaetigt kein alarm",
+              cw.ereignis(e_unb, unbestaetigt), None)
+        cw.aktualisiere(e_unb, unbestaetigt, 1300.0, None)
+        check("cloud unbestaetigt nicht verfuegbar",
+              e_unb.get("verfuegbar"), False)
+        check("cloud unbestaetigt dann restock",
+              cw.ereignis(e_unb, bestaetigt), "restock")
+        cw.aktualisiere(e_unb, bestaetigt, 1360.0, None)
+        check("cloud bestaetigt verfuegbar", e_unb.get("verfuegbar"), True)
+
+        e_pre = {"initialisiert": True, "verfuegbar": False,
+                 "preis": 899.99}
+        vorbestellung = dict(bestaetigt, sofort=False)
+        check("cloud vorbestellung kein alarm",
+              cw.ereignis(e_pre, vorbestellung), None)
+        cw.aktualisiere(e_pre, vorbestellung, 1300.0, None)
+        check("cloud vorbestellung nicht verfuegbar",
+              e_pre.get("verfuegbar"), False)
+        check("cloud vorbestellung dann restock",
+              cw.ereignis(e_pre, bestaetigt), "restock")
+        cw.aktualisiere(e_pre, bestaetigt, 1360.0, None)
+        check("cloud vorbestellung dann verfuegbar",
+              e_pre.get("verfuegbar"), True)
+
+        e_used = {"initialisiert": True, "verfuegbar": False,
+                  "preis": 899.99}
+        gebraucht = dict(bestaetigt, condition="used")
+        check("cloud gebraucht kein alarm",
+              cw.ereignis(e_used, gebraucht), None)
+        cw.aktualisiere(e_used, gebraucht, 1300.0, None)
+        check("cloud gebraucht nicht verfuegbar",
+              e_used.get("verfuegbar"), False)
+        check("cloud gebraucht dann restock",
+              cw.ereignis(e_used, bestaetigt), "restock")
+
+        challenge = dict(unavail, klass="challenge", verfuegbar=None,
+                         fehler="HTTP 403")
+        cw.aktualisiere(eintrag, challenge, 1120.0, None)
+        check("cloud fehlerserie", eintrag.get("fail_streak"), 1)
+        check("cloud sperre bis", eintrag.get("challenge_bis"), 2020.0)
+        cw.aktualisiere(eintrag, hit, 1180.0, None)
+        check("cloud fehlerserie zurueck", eintrag.get("fail_streak"), 0)
+
+        core.set_data_dir(tmp)
+        core.reset_health()
+        shop = {"name": "PS Direct DE", "land": "DE",
+                "urls": ["https://example.invalid/ps5"]}
+        deckel = core.preis_deckel_aus({"max_preis": 900})
+        core.scan_einen = lambda h, cancel=None, force=False: {
+            "haendler": h["name"], "land": h["land"], "preis": 1500.0,
+            "klass": "hit", "verfuegbar": True, "dauer": 0.01,
+            "url": "https://example.invalid/ps5", "condition": "neu"}
+        r = cw.pruefe_shop(shop, deckel, None)
+        check("cloud preisdeckel", r.get("klass"), "expensive")
+        check("cloud preisdeckel nicht verfuegbar",
+              r.get("verfuegbar"), False)
+
+        core.scan_einen = lambda h, cancel=None, force=False: {
+            "haendler": h["name"], "land": h["land"], "preis": 899.0,
+            "klass": "unavail", "verfuegbar": False, "dauer": 0.01,
+            "url": "https://example.invalid/ps5"}
+        r = cw.pruefe_shop(shop, deckel, None)
+        check("cloud unavail nicht verfuegbar", r.get("verfuegbar"), False)
+
+        gesehen = []
+        core.scan_einen = lambda h, cancel=None, force=False: {
+            "haendler": h["name"], "land": h["land"], "preis": 899.0,
+            "klass": "hit", "verfuegbar": True, "sofort": True,
+            "dauer": 0.01, "url": "https://example.invalid/ps5",
+            "condition": "neu"}
+        def _bestaetigen(h, r, cancel=None):
+            gesehen.append(1)
+            r["verify"] = "bestaetigt"
+            return r
+        core.verify_treffer = _bestaetigen
+        r = cw.pruefe_shop(shop, deckel, None)
+        check("cloud treffer geprueft", len(gesehen), 1)
+        check("cloud treffer bleibt", r.get("klass"), "hit")
+        check("cloud treffer verfuegbar", r.get("verfuegbar"), True)
+    finally:
+        core.scan_einen = alt_scan
+        core.verify_treffer = alt_verify
+        core.set_data_dir(alt_dir)
+        core.reset_health()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # Der Schattenalarm darf niemals den Webhook aufrufen und nie die
+    # Webhook-URL ins Log schreiben. Live ruft er ihn genau einmal.
+    k3 = cw.Konfig.aus_env({
+        "WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-topic"})
+    assert k3.webhook_preset == "ntfy"
+    zustand = {"alarme_schatten": 0, "alarme_gesendet": 0}
+    alarm = {"haendler": "PS Direct DE", "klass": "hit", "preis": 899.0,
+             "verfuegbar": True, "verify": "bestaetigt",
+             "url": "https://example.invalid/ps5"}
+    logs = []
+    aufrufe = []
+    alt_log = cw.log
+    alt_send = core.sende_webhook_alarm
+    alt_dedupe = core.webhook_dedupe
+    tmp_outbox = tempfile.mkdtemp(prefix="ps5pro-outbox-")
+    pfad_outbox = os.path.join(tmp_outbox, cw.STATE_FILE)
+    try:
+        cw.log = lambda d: logs.append(d)
+        core.webhook_dedupe = lambda *a, **k: True
+        core.sende_webhook_alarm = lambda *a, **k: (
+            aufrufe.append(1) or (True, "HTTP 200"))
+        cw.melde(alarm, "restock", k3, zustand, True,
+                 cw.settings_aus(k3), None)
+        check("cloud schatten kein versand", aufrufe, [])
+        check("cloud schatten aktion", logs[-1].get("aktion"),
+              "wuerde_senden")
+        check("cloud schatten gezaehlt",
+              zustand.get("alarme_schatten"), 1)
+        check("cloud schatten ohne webhook-url",
+              "secret-topic" not in json.dumps(logs, ensure_ascii=False), True)
+        cw.melde(alarm, "restock", k3, zustand, False,
+                 cw.settings_aus(k3), None, pfad_outbox)
+        check("cloud live vorgemerkt", logs[-1].get("aktion"), "eingereiht")
+        cw.outbox_drain(zustand, k3, cw.settings_aus(k3), None,
+                        jetzt=time.time(), pfad=pfad_outbox)
+        check("cloud live versand", len(aufrufe), 1)
+        check("cloud live gezaehlt", zustand.get("alarme_gesendet"), 1)
+        check("cloud live aktion", logs[-1].get("aktion"), "gesendet")
+    finally:
+        cw.log = alt_log
+        core.sende_webhook_alarm = alt_send
+        core.webhook_dedupe = alt_dedupe
+        shutil.rmtree(tmp_outbox, ignore_errors=True)
+
+    for datei in ("Dockerfile.watcher", "fly.toml",
+                  "cloud_watcher/docker-compose.yml",
+                  "cloud_watcher/README.md",
+                  "cloud_watcher/.env.example"):
+        check("cloud datei " + datei,
+              os.path.isfile(os.path.join(ROOT, datei)), True)
+    with open(os.path.join(ROOT, "fly.toml"), encoding="utf-8") as f:
+        fly = f.read()
+    check("cloud fly zwei shops", "PS Direct DE,PS Direct AT" in fly, True)
+    check("cloud fly schatten", 'WATCH_SHADOW = "1"' in fly, True)
+    check("cloud fly neustart", 'policy = "always"' in fly, True)
+    with open(os.path.join(ROOT, ".dockerignore"), encoding="utf-8") as f:
+        ignore = f.read()
+    check("cloud docker ohne env", "cloud_watcher/.env" in ignore, True)
+
+
+def watcher_p0_tests():
+    """Cloud-Waechter P0: Preflight, Tageszeile, Preistoleranz, Budget, Challenges."""
+    import cloud_watcher.watcher as cw
+
+    tmp = tempfile.mkdtemp(prefix="ps5pro-watcher-p0-")
+    pfad = os.path.join(tmp, cw.STATE_FILE)
+    try:
+        # 1. Preflight: Schatten ohne Kanal ist in Ordnung, live nicht.
+        k_schatten = cw.Konfig.aus_env({"WATCH_DATA_DIR": tmp})
+        ok, checks = cw.preflight(k_schatten, pfad)
+        check("p0 preflight schatten ok", ok, True)
+        check("p0 preflight schatten webhook",
+              [c["ok"] for c in checks if c["name"] == "webhook"], [True])
+        k_live = cw.Konfig.aus_env({"WATCH_SHADOW": "0",
+                                    "WATCH_DATA_DIR": tmp})
+        ok, _ = cw.preflight(k_live, pfad)
+        check("p0 preflight live ohne kanal", ok, False)
+        k_http = cw.Konfig.aus_env({"WATCH_SHADOW": "0",
+                                    "WATCH_WEBHOOK_URL": "http://ntfy.sh/x",
+                                    "WATCH_DATA_DIR": tmp})
+        ok, _ = cw.preflight(k_http, pfad)
+        check("p0 preflight live http", ok, False)
+        k_https = cw.Konfig.aus_env({
+            "WATCH_SHADOW": "0",
+            "WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-p0",
+            "WATCH_DATA_DIR": tmp})
+        ok, checks = cw.preflight(k_https, pfad)
+        check("p0 preflight live https", ok, True)
+        check("p0 preflight ohne url-leak",
+              "secret-p0" not in json.dumps(checks, ensure_ascii=False), True)
+        k_ops_http = cw.Konfig.aus_env({
+            "WATCH_SHADOW": "0",
+            "WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-p0",
+            "WATCH_OPS_WEBHOOK_URL": "http://ntfy.sh/ops",
+            "WATCH_DATA_DIR": tmp})
+        ok, checks = cw.preflight(k_ops_http, pfad)
+        check("p0 preflight ops warnung", ok, True)
+        check("p0 preflight ops nicht ok",
+              [c["ok"] for c in checks if c["name"] == "ops"], [False])
+
+        # 2. Minutenbudget: gleitendes Fenster, harte Obergrenze, Vorrang.
+        jetzt = 5000.0
+        verlauf = []
+        check("p0 budget leer", cw.budget_rest(verlauf, jetzt, 12), 12)
+        verlauf = [jetzt - 1] * 12
+        check("p0 budget voll", cw.budget_rest(verlauf, jetzt, 12), 0)
+        verlauf = [jetzt - 61] * 3 + [jetzt - 10] * 2
+        check("p0 budget alt verworfen", cw.budget_rest(verlauf, jetzt, 12), 10)
+        check("p0 budget alt entfernt", len(verlauf), 2)
+        check("p0 budget minimum", cw.budget_rest([], jetzt, 0), 1)
+        check("p0 shop vorrang", (cw.shop_vorrang("PS Direct AT"),
+                                  cw.shop_vorrang("Amazon DE")), (0, 1))
+
+        # 3. Preistoleranz: kleine Ausschlaege schweigen, grosse melden.
+        check("p0 preis toleranz klein",
+              cw.preis_signifikant(798.5, 799.0, 1.0), False)
+        check("p0 preis toleranz gross",
+              cw.preis_signifikant(797.5, 799.0, 1.0), True)
+        check("p0 preis toleranz null",
+              cw.preis_signifikant(798.98, 799.0, 0.0), True)
+        check("p0 preis toleranz cent",
+              cw.preis_signifikant(798.995, 799.0, 0.0), False)
+        check("p0 preis erster",
+              cw.preis_signifikant(799.0, None, 1.0), True)
+        treffer = {"haendler": "PS Direct DE", "klass": "hit", "preis": 798.5,
+                   "verfuegbar": True, "sofort": True,
+                   "verify": "bestaetigt", "condition": "neu"}
+        eintrag = {"initialisiert": True, "verfuegbar": True, "preis": 799.0}
+        check("p0 ereignis toleranz unterdrueckt",
+              cw.ereignis(eintrag, treffer, 1.0), None)
+        check("p0 ereignis toleranz meldet",
+              cw.ereignis(eintrag, dict(treffer, preis=797.0), 1.0), "new")
+        e_unavail = {"initialisiert": True, "verfuegbar": False,
+                     "preis": 900.0}
+        check("p0 ereignis restock trotz toleranz",
+              cw.ereignis(e_unavail, dict(treffer, preis=900.0), 5.0),
+              "restock")
+
+        # 4. Drei Challenges in Folge: 60 Minuten statt 15.
+        eintrag = {"initialisiert": True, "preis": 799.0, "verfuegbar": False}
+        heraus = {"haendler": "Amazon DE", "klass": "challenge",
+                  "preis": None, "verfuegbar": None, "fehler": "HTTP 403"}
+        now = 10000.0
+        for i in range(1, 4):
+            cw.aktualisiere(eintrag, heraus, now + i * 10, None)
+            check("p0 challenge serie %d" % i,
+                  eintrag.get("challenge_serie"), i)
+        check("p0 challenge kurz", cw.CHALLENGE_TAKT, 900)
+        check("p0 challenge lang", cw.challenge_takt(eintrag),
+              cw.CHALLENGE_LANG)
+        check("p0 challenge lang 60 min",
+              eintrag.get("challenge_bis"), now + 30 + cw.CHALLENGE_LANG)
+        check("p0 challenge takt lang",
+              cw.takt_sekunden("Amazon DE", eintrag,
+                               core._als_datetime(now + 100),
+                               cw.Konfig.aus_env({})), cw.CHALLENGE_LANG)
+        cw.aktualisiere(eintrag, dict(heraus, klass="unavail", preis=799.0,
+                                      verfuegbar=False), now + 5000, None)
+        check("p0 challenge serie zurueck",
+              eintrag.get("challenge_serie"), 0)
+
+        # 5. Tageszeile: Kennzahlen, Perzentile, Outbox-Stand, Reset.
+        z = cw.neuer_zustand(1000.0, 48)
+        check("p0 tag neu", cw.tag_sicherstellen(z).get("checks"), 0)
+        r_hit = {"klass": "hit", "dauer": 0.2, "bytes": 1200,
+                 "verify": "bestaetigt"}
+        cw.tag_buchen(z, r_hit, 1000.0, None)
+        cw.tag_buchen(z, {"klass": "challenge", "dauer": 0.4, "bytes": 800},
+                      1001.0, None)
+        cw.tag_buchen(z, {"klass": "parser", "dauer": 0.6, "bytes": 400},
+                      1002.0, None)
+        tag = z["tag"]
+        check("p0 tag checks", tag.get("checks"), 3)
+        check("p0 tag treffer", tag.get("treffer"), 1)
+        check("p0 tag challenge", tag.get("challenge"), 1)
+        check("p0 tag fehler", tag.get("fehler"), 1)
+        check("p0 tag parser", tag.get("parser"), 1)
+        check("p0 tag requests", tag.get("requests"), 4)
+        check("p0 tag bytes", tag.get("bytes"), 2400)
+        cw.tag_sicherstellen(z)["alarme"] = 2
+        cw.tag_sicherstellen(z)["schatten"] = 1
+        box = cw.outbox_sicherstellen(z)
+        box["items"] = [
+            {"id": "a", "status": "pending"},
+            {"id": "b", "status": "failed"},
+            {"id": "c", "status": "sent"},
+        ]
+        zusammen = cw.tag_zusammenfassung(tag, box)
+        check("p0 tag quote", zusammen.get("quote"), 33.3)
+        check("p0 tag p50", zusammen.get("ms_p50"), 400)
+        check("p0 tag p95", zusammen.get("ms_p95"), 600)
+        check("p0 tag alarme", zusammen.get("alarme"), 2)
+        check("p0 tag outbox offen", zusammen.get("outbox_offen"), 1)
+        check("p0 tag outbox failed", zusammen.get("outbox_failed"), 1)
+
+        tz = cw.Konfig.aus_env({}).zeitzone()
+        from datetime import datetime as _dt
+        spaet = _dt(2026, 11, 21, 23, 30, tzinfo=tz).timestamp()
+        frueh = _dt(2026, 11, 22, 0, 30, tzinfo=tz).timestamp()
+        z = cw.neuer_zustand(spaet, 0)
+        z["schatten_bis"] = 0.0
+        cw.tag_sicherstellen(z)["datum"] = cw._tag_datum(spaet, tz)
+        cw.tag_buchen(z, r_hit, spaet, tz)
+        check("p0 tagwechsel vorher", cw.tageswechsel(z, spaet, tz), None)
+        zeile = cw.tageswechsel(z, frueh, tz)
+        check("p0 tagwechsel zeile", (zeile or {}).get("datum"), "2026-11-21")
+        check("p0 tagwechsel checks", (zeile or {}).get("checks"), 1)
+        check("p0 tagwechsel reset", z["tag"].get("checks"), 0)
+        check("p0 tagwechsel neu", z["tag"].get("datum"), "2026-11-22")
+        check("p0 tagwechsel einmal", cw.tageswechsel(z, frueh, tz), None)
+        cw.zustand_speichern(pfad, z)
+        geladen = cw.zustand_laden(pfad, frueh, 48)
+        check("p0 tag persistiert", geladen["tag"].get("datum"), "2026-11-22")
+
+        # 6. Alte Zustaende bleiben ohne Datenverlust migrierbar.
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump({"schema": 2, "angelegt": 1.0, "schatten_bis": 1.0,
+                       "shops": {}, "runden": 0, "alarme_schatten": 0,
+                       "alarme_gesendet": 0, "letzte_runde": 0.0,
+                       "outbox": {"items": [], "gesamt": 0,
+                                  "letzte_id": ""}}, f)
+        geladen = cw.zustand_laden(pfad, 2000.0, 48)
+        check("p0 migration schema", geladen.get("schema"), 3)
+        check("p0 migration tag", isinstance(geladen.get("tag"), dict), True)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def outbox_tests():
+    """Alarm-Outbox: Persist-first, Backoff, Cap, Systemalarm, Ops-Kanal, Migration."""
+    import cloud_watcher.watcher as cw
+
+    tmp = tempfile.mkdtemp(prefix="ps5pro-outbox-tests-")
+    pfad = os.path.join(tmp, cw.STATE_FILE)
+    alt_log = cw.log
+    alt_send = core.sende_webhook_alarm
+    alt_dir = core.data_dir()
+    logs = []
+    calls = []
+    seen_status = []
+    antwort = {"ok": True, "info": "HTTP 200"}
+    k = cw.Konfig.aus_env({"WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-outbox"})
+    settings = cw.settings_aus(k)
+    r = {"haendler": "Amazon DE", "preis": 899.99, "url": "https://example.invalid/p",
+         "condition": "neu", "sofort": True}
+
+    def _fake_send(_r, _settings, titel, text, dedupe=True, **kwargs):
+        url = str((_settings or {}).get("webhook_url") or "")
+        calls.append({"titel": titel, "dedupe": dedupe, "url": url})
+        try:
+            with open(pfad, encoding="utf-8") as f:
+                daten = json.load(f)
+            items = daten.get("outbox", {}).get("items", [])
+            if items:
+                seen_status.append(items[-1].get("status"))
+        except Exception:
+            seen_status.append("nicht_lesbar")
+        # Der Ops-Kanal ist erreichbar; der Produkt-Webhook folgt der
+        # jeweiligen Testantwort.
+        if str(titel).startswith("Waechter:") and "secret-ops" in url:
+            return True, "HTTP 200"
+        return antwort["ok"], antwort["info"]
+
+    def _neu(zeit=1000.0):
+        z = cw.neuer_zustand(zeit, 0)
+        z["schatten_bis"] = 0.0
+        cw.zustand_speichern(pfad, z)
+        calls.clear()
+        seen_status.clear()
+        return z
+
+    try:
+        core.set_data_dir(tmp)
+        cw.log = lambda d: logs.append(d)
+        core.sende_webhook_alarm = _fake_send
+
+        # 1. Ereignis wird vor dem Versand persistiert; der Versand sieht
+        #    bereits den Status "sending" in der Datei.
+        t0 = time.time()
+        z = _neu(t0)
+        cw.melde(r, "restock", k, z, False, settings, None, pfad)
+        with open(pfad, encoding="utf-8") as f:
+            gespeichert = json.load(f)
+        check("outbox vormerken",
+              gespeichert["outbox"]["items"][0]["status"], "pending")
+        check("outbox alarm eingereiht",
+              logs[-1].get("aktion"), "eingereiht")
+        cw.outbox_drain(z, k, settings, None, jetzt=time.time(), pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox sending vor send", seen_status, ["sending"])
+        check("outbox gesendet", item.get("status"), "sent")
+        check("outbox zaehler", z.get("alarme_gesendet"), 1)
+        check("outbox dedupe aus", calls[0].get("dedupe"), False)
+        with open(pfad, encoding="utf-8") as f:
+            gespeichert = json.load(f)
+        check("outbox sent persistiert",
+              gespeichert["outbox"]["items"][0]["status"], "sent")
+
+        # 2. Retry-Backoff 30 s, 2 min, 10 min, 30 min, 2 h; nach sechs
+        #    Versuchen failed plus einmaliger Systemalarm.
+        z = _neu(2000.0)
+        cw.outbox_enqueue(r, "restock", z, 2000.0, "Titel", "Text")
+        cw.zustand_speichern(pfad, z)
+        antwort.update(ok=False, info="HTTP 500")
+        erwartet = [(2000.0, 1, 2030.0), (2030.0, 2, 2150.0),
+                    (2150.0, 3, 2750.0), (2750.0, 4, 4550.0),
+                    (4550.0, 5, 11750.0)]
+        for zeit, versuch, naechste in erwartet:
+            cw.outbox_drain(z, k, settings, None, jetzt=zeit, pfad=pfad)
+            item = z["outbox"]["items"][0]
+            check("outbox versuch %d" % versuch, item.get("attempts"), versuch)
+            check("outbox backoff %d" % versuch, item.get("next_ts"), naechste)
+            check("outbox pending %d" % versuch, item.get("status"), "pending")
+        cw.outbox_drain(z, k, settings, None, jetzt=11750.0, pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox cap versuche", item.get("attempts"), 6)
+        check("outbox cap status", item.get("status"), "failed")
+        check("outbox cap grund", item.get("failed_grund"), "max_attempts")
+        check("outbox systemalarm gesetzt", item.get("system_alarm_ts") is not None, True)
+        check("outbox systemalarm einmal",
+              sum(1 for c in calls if str(c["titel"]).startswith("Waechter:")), 1)
+        check("outbox kein erfolgszaehler", z.get("alarme_gesendet"), 0)
+
+        # 3. 4xx ist endgueltig: kein sechsfacher Backoff.
+        z = _neu(3000.0)
+        cw.outbox_enqueue(r, "new", z, 3000.0, "Titel", "Text")
+        cw.zustand_speichern(pfad, z)
+        antwort.update(ok=False, info="HTTP 401")
+        cw.outbox_drain(z, k, settings, None, jetzt=3000.0, pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox 4xx terminal", item.get("status"), "failed")
+        check("outbox 4xx ein versuch", item.get("attempts"), 1)
+        check("outbox 4xx grund", item.get("failed_grund"), "http_4xx")
+        calls_vorher = len(calls)
+        cw.outbox_drain(z, k, settings, None, jetzt=5000.0, pfad=pfad)
+        check("outbox 4xx kein retry", len(calls), calls_vorher)
+
+        # 4. Ein haengender "sending"-Eintrag wird nach Karenz erneut versucht.
+        z = _neu(4000.0)
+        item = cw.outbox_enqueue(r, "restock", z, 4000.0, "Titel", "Text")
+        item["status"] = "sending"
+        item["attempts"] = 1
+        item["last_attempt_ts"] = 4000.0
+        item["next_ts"] = 4000.0
+        cw.zustand_speichern(pfad, z)
+        antwort.update(ok=True, info="HTTP 200")
+        cw.outbox_drain(z, k, settings, None, jetzt=4301.0, pfad=pfad)
+        check("outbox sending recovery",
+              z["outbox"]["items"][0].get("status"), "sent")
+
+        # 5. Shadow legt nichts in die Outbox.
+        z = _neu(6000.0)
+        cw.melde(r, "restock", k, z, True, settings, None, pfad)
+        check("outbox shadow leer", len(z["outbox"]["items"]), 0)
+        check("outbox shadow kein versand", len(calls), 0)
+
+        # 6. Migration eines alten Zustands.
+        alt = {"schema": 1, "angelegt": 1.0, "schatten_bis": 0.0,
+               "shops": {}, "runden": 0, "alarme_schatten": 0,
+               "alarme_gesendet": 0, "letzte_runde": 0.0}
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump(alt, f)
+        geladen = cw.zustand_laden(pfad, 7000.0, 48)
+        check("outbox migration schema", geladen.get("schema"), 3)
+        check("outbox migration leer", geladen.get("outbox", {}).get("items"), [])
+
+        # 7. Outbox-Obergrenze active=20.
+        z = _neu(8000.0)
+        box = cw.outbox_sicherstellen(z)
+        for i in range(cw.OUTBOX_MAX_ACTIVE):
+            box["items"].append({"id": "x%d" % i, "status": "pending",
+                                 "attempts": 0, "created": 8000.0})
+        calls.clear()
+        check("outbox voll",
+              cw.outbox_enqueue(r, "restock", z, 8000.0, "T", "X"), None)
+        cw.melde(r, "restock", k, z, False, settings, None, pfad)
+        check("outbox overflow systemalarm",
+              any(str(c["titel"]).startswith("Waechter:") for c in calls), True)
+
+        # 8. Systemalarm wird nach einem Neustart genau einmal nachgeholt.
+        z = _neu(9000.0)
+        item = cw.outbox_enqueue(r, "restock", z, 9000.0, "T", "X")
+        item["status"] = "failed"
+        item["failed_ts"] = 9000.0
+        item["failed_grund"] = "max_attempts"
+        item["last_error"] = "HTTP 500"
+        item["attempts"] = 6
+        item["system_alarm_ts"] = None
+        cw.zustand_speichern(pfad, z)
+        calls.clear()
+        cw.outbox_drain(z, k, settings, None, jetzt=9500.0, pfad=pfad)
+        check("outbox systemalarm nachholen", len(calls), 1)
+        # outbox_drain liest die Box neu ein; der Eintrag ist eine Kopie.
+        item = z["outbox"]["items"][0]
+        check("outbox systemalarm produktkanal", calls[0].get("url"),
+              settings.get("webhook_url"))
+        check("outbox systemalarm kanal",
+              item.get("system_alarm_kanal"), "produkt")
+        cw.outbox_drain(z, k, settings, None, jetzt=9600.0, pfad=pfad)
+        check("outbox systemalarm nicht doppelt", len(calls), 1)
+
+        # 8b. Optionaler Ops-Kanal: Der Produkt-Webhook scheitert endgueltig,
+        #     der Systemalarm geht trotzdem an die unabhaengige Ops-URL.
+        k_ops = cw.Konfig.aus_env({
+            "WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-outbox",
+            "WATCH_OPS_WEBHOOK_URL": "https://ntfy.sh/secret-ops"})
+        settings_ops = cw.settings_aus(k_ops)
+        check("outbox ops preset", k_ops.ops_preset, "ntfy")
+        z = _neu(9700.0)
+        item = cw.outbox_enqueue(r, "restock", z, 9700.0, "T", "X")
+        item["status"] = "failed"
+        item["failed_ts"] = 9700.0
+        item["failed_grund"] = "max_attempts"
+        item["last_error"] = "HTTP 500"
+        item["attempts"] = 6
+        item["system_alarm_ts"] = None
+        cw.zustand_speichern(pfad, z)
+        calls.clear()
+        antwort.update(ok=False, info="HTTP 500")
+        cw.outbox_drain(z, k_ops, settings_ops, None, jetzt=9750.0, pfad=pfad)
+        item = z["outbox"]["items"][0]
+        check("outbox ops systemalarm ziel",
+              [c["url"] for c in calls], ["https://ntfy.sh/secret-ops"])
+        check("outbox ops systemalarm ok", item.get("system_alarm_ok"), True)
+        check("outbox ops kanal", item.get("system_alarm_kanal"), "ops")
+        check("outbox ops log kanal",
+              any(d.get("typ") == "systemalarm" and d.get("kanal") == "ops"
+                  for d in logs), True)
+        check("outbox ops url nie geloggt",
+              "secret-ops" not in json.dumps(logs, ensure_ascii=False), True)
+
+        # 9. Fehlertexte duerfen die Webhook-URL nicht in Zustand oder Log
+        #    weitertragen, auch wenn der Transport sie enthaelt.
+        z = _neu(10000.0)
+        cw.outbox_enqueue(r, "restock", z, 10000.0, "T", "X")
+        cw.zustand_speichern(pfad, z)
+        antwort.update(ok=False,
+                       info="HTTP 401 " + settings.get("webhook_url", ""))
+        cw.outbox_drain(z, k, settings, None, jetzt=10000.0, pfad=pfad)
+        check("outbox fehler-url redigiert",
+              "secret-outbox" not in json.dumps(z, ensure_ascii=False), True)
+
+        # 10. Wenn das Persistieren scheitert, wird der Alarm nicht gesendet.
+        z = _neu(11000.0)
+        alt_save = cw.zustand_speichern
+        def _save_fehler(*args, **kwargs):
+            raise OSError("voll")
+        cw.zustand_speichern = _save_fehler
+        try:
+            cw.melde(r, "restock", k, z, False, settings, None, pfad)
+        finally:
+            cw.zustand_speichern = alt_save
+        check("outbox save-fehler kein versand", len(calls), 0)
+        check("outbox save-fehler bleibt pending",
+              z["outbox"]["items"][0].get("status"), "pending")
+
+        check("outbox keine webhook-url im log",
+              "secret-outbox" not in json.dumps(logs, ensure_ascii=False), True)
+    finally:
+        cw.log = alt_log
+        core.sende_webhook_alarm = alt_send
+        core.set_data_dir(alt_dir)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":
@@ -2071,6 +2869,9 @@ if __name__ == "__main__":
         fastpath_tests()
         spec_tests()
         play_rebrand_tests()
+        cloud_watcher_tests()
+        watcher_p0_tests()
+        outbox_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.
         try:

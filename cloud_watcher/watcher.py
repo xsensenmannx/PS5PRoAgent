@@ -1,0 +1,1494 @@
+"""Cloud-Waechter fuer PS Direct DE/AT.
+
+Ein outbound-only Prozess fuer Fly.io oder einen Hetzner-Docker-Host. Er nutzt
+die vorhandene Scan- und Alarmlogik aus ``scan_core`` und schreibt seinen
+Zustand als JSON in ``WATCH_DATA_DIR`` (im Container ``/data``).
+
+Sicherheitsregeln:
+
+* Standard ist Schattenbetrieb: Es wird geprueft und protokolliert, aber nichts
+  gesendet. ``WATCH_SHADOW=0`` schaltet erst nach Ablauf der beim ersten Start
+  gesetzten Schattenfrist (Standard 48 h) scharf.
+* Der erste gueltige Abruf eines Shops ist nur Baseline und loest keinen Alarm
+  aus. Erst ein spaeterer Wechsel auf verfuegbar meldet.
+* Webhook-URLs werden nie geloggt. ``redact_url`` zeigt hoechstens Schema und
+  Host.
+* Kein Captcha, keine Proxy-Rotation, kein Warenkorb, kein Retry gegen eine
+  Sperre. Bei 403/429 wird der Shop 15 Minuten ausgesetzt.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import sys
+import threading
+import time
+import uuid
+import zlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+import scan_core as core  # noqa: E402  (Pfad steht erst zur Laufzeit fest)
+
+SCHEMA = 3
+STATE_FILE = "cloud_watch_state.json"
+CHALLENGE_TAKT = 900
+# Nach drei Challenges in Folge bleibt der Shop eine Stunde aus.
+CHALLENGE_LANG = 3600
+CHALLENGE_LANG_NACH = 3
+FEHLER_TAKT = 720
+# PS Direct wird bei knappem Minutenbudget zuerst bedient.
+PRIORITY_SHOPS = ("PS Direct DE", "PS Direct AT")
+# Die Tageszeile braucht nur die letzten Pruefungen fuer p50/p95.
+TAG_MS_MAX = 500
+# Outbox: Ereignisse werden vor dem ersten Versand im Zustand abgelegt.
+# Der Backoff beginnt kurz und endet nach sechs Versuchen.
+OUTBOX_MAX_ACTIVE = 20
+OUTBOX_MAX_ITEMS = 50
+OUTBOX_MAX_ATTEMPTS = 6
+OUTBOX_BACKOFF_S = (30, 120, 600, 1800, 7200)
+OUTBOX_SENT_KEEP_S = 7 * 86400
+OUTBOX_FAILED_KEEP_S = 30 * 86400
+OUTBOX_SENDING_STALE_S = 300
+OUTBOX_DRAIN_MAX = 5
+STOP = threading.Event()
+_LOG_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class Konfig:
+    """Vollstaendige Laufzeitkonfiguration, ausschliesslich aus der Umgebung."""
+
+    shops: tuple
+    data_dir: str
+    tz_name: str
+    shadow: bool
+    shadow_hours: float
+    window_takt: int
+    aussen_takt: int
+    max_preis: float
+    webhook_url: str
+    webhook_preset: str
+    ops_url: str
+    ops_preset: str
+    heartbeat_url: str
+    max_req_min: int
+    preis_toleranz: float
+
+    def zeitzone(self):
+        try:
+            return ZoneInfo(self.tz_name)
+        except Exception:
+            # Ohne Zeitzonendaten laeuft der Container in seiner lokalen Zeit.
+            return datetime.now().astimezone().tzinfo
+
+    @classmethod
+    def aus_env(cls, env=None):
+        env = os.environ if env is None else env
+
+        roh = str(env.get("WATCH_SHOPS", "PS Direct DE,PS Direct AT") or "")
+        shops = tuple(x.strip() for x in roh.split(",") if x.strip())
+        if not shops:
+            raise ValueError("WATCH_SHOPS ist leer")
+        bekannt = {h["name"] for h in core.HAENDLER}
+        unbekannt = [n for n in shops if n not in bekannt]
+        if unbekannt:
+            raise ValueError("unbekannte Shops: " + ", ".join(unbekannt))
+
+        url = str(env.get("WATCH_WEBHOOK_URL", "") or "").strip()
+        preset = str(env.get("WATCH_WEBHOOK_PRESET", "") or "").strip()
+        if preset not in core.WEBHOOK_PRESETS:
+            preset = core.webhook_preset(url) if url else "generisch"
+
+        # Optionaler, unabhaengiger Ops-Kanal nur fuer den Systemalarm.
+        ops_url = str(env.get("WATCH_OPS_WEBHOOK_URL", "") or "").strip()
+        ops_preset = core.webhook_preset(ops_url) if ops_url else "generisch"
+
+        return cls(
+            shops=shops,
+            data_dir=str(env.get("WATCH_DATA_DIR", "/data") or "/data"),
+            tz_name=str(env.get("WATCH_TZ", "Europe/Berlin") or "Europe/Berlin"),
+            shadow=_wahr(env.get("WATCH_SHADOW"), True),
+            shadow_hours=_zahl(env, "WATCH_SHADOW_HOURS", 48.0, 0.0, 720.0),
+            # Im Fenster strikt 30-60 s. Ausserhalb mindestens 60 s.
+            window_takt=_ganz(env, "WATCH_WINDOW_TAKT", 45, 30, 60),
+            aussen_takt=_ganz(env, "WATCH_TAKT_AUSSEN", 180, 60, 3600),
+            max_preis=_zahl(env, "WATCH_MAX_PREIS", 900.0, 100.0, 1500.0),
+            webhook_url=url,
+            webhook_preset=preset,
+            ops_url=ops_url,
+            ops_preset=ops_preset,
+            heartbeat_url=str(env.get("WATCH_HEARTBEAT_URL", "") or "").strip(),
+            max_req_min=_ganz(env, "WATCH_MAX_REQ_MIN", 12, 1, 60),
+            preis_toleranz=_zahl(env, "WATCH_PREIS_TOLERANZ", 1.0, 0.0, 50.0),
+        )
+
+
+def _wahr(wert, standard=True):
+    if wert is None or str(wert).strip() == "":
+        return bool(standard)
+    return str(wert).strip().lower() not in ("0", "false", "nein", "no", "off", "aus")
+
+
+def _zahl(env, name, standard, minimum, maximum):
+    try:
+        wert = float(str(env.get(name, standard)).replace(",", "."))
+    except (TypeError, ValueError):
+        wert = float(standard)
+    return max(float(minimum), min(float(maximum), wert))
+
+
+def _ganz(env, name, standard, minimum, maximum):
+    return int(round(_zahl(env, name, standard, minimum, maximum)))
+
+
+def neuer_zustand(jetzt, shadow_hours):
+    jetzt = float(jetzt)
+    return {
+        "schema": SCHEMA,
+        "angelegt": jetzt,
+        "schatten_bis": jetzt + max(0.0, float(shadow_hours)) * 3600.0,
+        "shops": {},
+        "runden": 0,
+        "alarme_schatten": 0,
+        "alarme_gesendet": 0,
+        "letzte_runde": 0.0,
+        "outbox": _outbox_leer(),
+        "tag": _tag_leer(),
+    }
+
+
+def zustand_laden(pfad, jetzt, shadow_hours):
+    """Zustand lesen; eine kaputte Datei startet sicher neu.
+
+    Eine vorhandene Schattenfrist wird nie verkuerzt. Wer schneller scharf
+    schalten will, muss die Datei bewusst loeschen - das ist Absicht.
+    """
+    daten = None
+    try:
+        with open(pfad, "r", encoding="utf-8") as f:
+            daten = json.load(f)
+    except Exception:
+        daten = None
+    if not isinstance(daten, dict):
+        daten = neuer_zustand(jetzt, shadow_hours)
+
+    try:
+        schema = int(daten.get("schema") or 1)
+    except (TypeError, ValueError):
+        schema = 1
+    if schema < SCHEMA:
+        daten["schema"] = SCHEMA
+    daten.setdefault("angelegt", float(jetzt))
+    try:
+        bis = float(daten.get("schatten_bis") or 0)
+    except (TypeError, ValueError):
+        bis = 0.0
+    if bis <= 0:
+        daten["schatten_bis"] = float(jetzt) + max(0.0, float(shadow_hours)) * 3600.0
+    if not isinstance(daten.get("shops"), dict):
+        daten["shops"] = {}
+    for key in ("runden", "alarme_schatten", "alarme_gesendet"):
+        try:
+            daten[key] = int(daten.get(key) or 0)
+        except (TypeError, ValueError):
+            daten[key] = 0
+    try:
+        daten["letzte_runde"] = float(daten.get("letzte_runde") or 0)
+    except (TypeError, ValueError):
+        daten["letzte_runde"] = 0.0
+    outbox_sicherstellen(daten)
+    tag_sicherstellen(daten)
+    return daten
+
+
+def zustand_speichern(pfad, daten):
+    """Atomar schreiben: ein Absturz hinterlaesst nie halbes JSON."""
+    ordner = os.path.dirname(os.path.abspath(pfad)) or "."
+    os.makedirs(ordner, exist_ok=True)
+    tmp = pfad + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(daten, f, ensure_ascii=False, indent=1, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, pfad)
+
+
+def _outbox_leer():
+    return {"items": [], "gesamt": 0, "letzte_id": ""}
+
+
+def _outbox_id(jetzt):
+    try:
+        stempel = datetime.fromtimestamp(float(jetzt)).strftime("%Y%m%dT%H%M%S")
+    except Exception:
+        stempel = "00000000T000000"
+    return "ob_%s_%s" % (stempel, uuid.uuid4().hex[:8])
+
+
+def _outbox_int(wert, standard=0):
+    try:
+        return int(wert)
+    except (TypeError, ValueError):
+        return int(standard)
+
+
+def _outbox_float(wert, standard=0.0):
+    try:
+        return float(wert)
+    except (TypeError, ValueError):
+        return float(standard)
+
+
+def outbox_sicherstellen(daten):
+    """Outbox-Feld laden und einzelne defekte Eintraege tolerieren."""
+    if not isinstance(daten, dict):
+        return _outbox_leer()
+    box = daten.get("outbox")
+    if not isinstance(box, dict):
+        box = _outbox_leer()
+        daten["outbox"] = box
+    roh = box.get("items")
+    items = []
+    if isinstance(roh, list):
+        for eintrag in roh:
+            if not isinstance(eintrag, dict):
+                continue
+            item = dict(eintrag)
+            item["id"] = str(item.get("id") or _outbox_id(item.get("created") or 0))
+            item["status"] = str(item.get("status") or "pending")
+            if item["status"] not in ("pending", "sending", "sent", "failed"):
+                item["status"] = "pending"
+            item["created"] = _outbox_float(item.get("created"), 0.0)
+            item["next_ts"] = _outbox_float(item.get("next_ts"), item["created"])
+            item["attempts"] = max(0, _outbox_int(item.get("attempts"), 0))
+            item["shop"] = str(item.get("shop") or "?")
+            item["event"] = str(item.get("event") or "new")
+            item["restock"] = bool(item.get("restock")) or item["event"] == "restock"
+            item.setdefault("last_error", None)
+            item.setdefault("last_attempt_ts", None)
+            item.setdefault("sent_ts", None)
+            item.setdefault("failed_ts", None)
+            item.setdefault("failed_grund", None)
+            item.setdefault("system_alarm_ts", None)
+            item.setdefault("system_alarm_ok", None)
+            item.setdefault("system_alarm_kanal", None)
+            item.setdefault("system_alarm_info", None)
+            items.append(item)
+    box["items"] = items
+    box["gesamt"] = max(_outbox_int(box.get("gesamt"), 0), len(items))
+    box["letzte_id"] = str(box.get("letzte_id") or (items[-1]["id"] if items else ""))
+    return box
+
+
+def outbox_prune(box, jetzt):
+    """Alte Zustellungen begrenzen; pending/sending nie still verwerfen."""
+    if not isinstance(box, dict):
+        return
+    jetzt = _outbox_float(jetzt, time.time())
+    behalten = []
+    for item in box.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        status = item.get("status")
+        if status == "sent":
+            try:
+                if jetzt - float(item.get("sent_ts") or item.get("created") or 0) > OUTBOX_SENT_KEEP_S:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        elif status == "failed":
+            try:
+                if jetzt - float(item.get("failed_ts") or item.get("created") or 0) > OUTBOX_FAILED_KEEP_S:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        behalten.append(item)
+
+    # Gesamtobergrenze: zuerst alte Zustellungen, dann alte Fehler entfernen.
+    while len(behalten) > OUTBOX_MAX_ITEMS:
+        entfernt = False
+        for status in ("sent", "failed"):
+            for index, item in enumerate(behalten):
+                if item.get("status") == status:
+                    behalten.pop(index)
+                    entfernt = True
+                    break
+            if entfernt:
+                break
+        if not entfernt:
+            break
+    box["items"] = behalten
+
+
+def outbox_enqueue(r, event, zustand, jetzt, titel, text):
+    """Neuen Alarm atomar vormerken. None = Outbox ist voll."""
+    if not isinstance(zustand, dict) or not isinstance(r, dict):
+        return None
+    box = outbox_sicherstellen(zustand)
+    jetzt = _outbox_float(jetzt, time.time())
+    outbox_prune(box, jetzt)
+    aktiv = sum(
+        1 for item in box["items"] if item.get("status") in ("pending", "sending")
+    )
+    if aktiv >= OUTBOX_MAX_ACTIVE or len(box["items"]) >= OUTBOX_MAX_ITEMS:
+        return None
+
+    item = {
+        "id": _outbox_id(jetzt),
+        "created": jetzt,
+        "next_ts": jetzt,
+        "attempts": 0,
+        "status": "pending",
+        "shop": str(r.get("haendler") or "?"),
+        "event": str(event or "new"),
+        "price": r.get("preis"),
+        "condition": r.get("condition"),
+        "sofort": r.get("sofort"),
+        "title": str(titel or "")[:240],
+        "text": str(text or "")[:1000],
+        "url": r.get("url"),
+        "restock": bool(event == "restock"),
+        "last_error": None,
+        "last_attempt_ts": None,
+        "sent_ts": None,
+        "failed_ts": None,
+        "failed_grund": None,
+        "system_alarm_ts": None,
+        "system_alarm_ok": None,
+        "system_alarm_kanal": None,
+        "system_alarm_info": None,
+    }
+    box["items"].append(item)
+    box["gesamt"] = _outbox_int(box.get("gesamt"), 0) + 1
+    box["letzte_id"] = item["id"]
+    return item
+
+
+def _outbox_state_save(pfad, zustand, aktion, item=None):
+    """Persistieren ist Voraussetzung fuer den ersten Sendeversuch."""
+    if not pfad:
+        return False
+    try:
+        zustand_speichern(pfad, zustand)
+        return True
+    except Exception as e:
+        log(
+            {
+                "typ": "outbox_fehler",
+                "ts": round(time.time(), 3),
+                "aktion": aktion,
+                "id": (item or {}).get("id"),
+                "info": type(e).__name__,
+            }
+        )
+        return False
+
+
+def _outbox_retrybar(info):
+    """4xx ausser 408/425/429 ist endgueltig; 5xx/Timeout ist retrybar."""
+    text = str(info or "")
+    if text.startswith("HTTP "):
+        try:
+            code = int(text.split()[1])
+        except (IndexError, ValueError):
+            return True
+        return not (400 <= code < 500 and code not in (408, 425, 429))
+    return text not in ("nur HTTPS", "URL ungueltig", "kein Kanal")
+
+
+def _outbox_safe_info(info, settings=None):
+    """Fehlertext fuer Log/Zustand; die Webhook-URL darf nie auftauchen."""
+    text = str(info or "")
+    for key in ("webhook_url", "ops_url"):
+        try:
+            url = str((settings or {}).get(key) or "").strip()
+        except AttributeError:
+            url = ""
+        if url:
+            text = text.replace(url, core.redact_url(url))
+    return text[:120]
+
+
+def _outbox_log(item, aktion, jetzt, ok=None, info="", versuch=None):
+    daten = {
+        "typ": "outbox",
+        "ts": round(float(jetzt), 3),
+        "id": item.get("id"),
+        "shop": item.get("shop"),
+        "event": item.get("event"),
+        "aktion": aktion,
+        "versuch": item.get("attempts") if versuch is None else versuch,
+        "status": item.get("status"),
+        "ok": ok,
+        "info": str(info or "")[:120],
+    }
+    if item.get("next_ts"):
+        daten["next_ts"] = round(float(item["next_ts"]), 3)
+    log(daten)
+
+
+def _ops_ziel(settings):
+    """Ziel fuer den Systemalarm: eigener Ops-Kanal, sonst der Produkt-Webhook."""
+    settings = settings if isinstance(settings, dict) else {}
+    try:
+        url = str(settings.get("ops_url") or "").strip()
+    except AttributeError:
+        url = ""
+    if not url:
+        return settings, "produkt"
+    preset = str(settings.get("ops_preset") or "")
+    if preset not in core.WEBHOOK_PRESETS:
+        preset = core.webhook_preset(url)
+    return {"webhook_url": url, "webhook_preset": preset}, "ops"
+
+
+def outbox_systemalarm(item, zustand, settings, jetzt, pfad):
+    """Einmalige Warnung, wenn ein Produktalarm endgueltig scheitert.
+
+    Ist ``WATCH_OPS_WEBHOOK_URL`` gesetzt, geht nur der Systemalarm dorthin.
+    Ein ausgefallener Produkt-Webhook blockiert die Warnung dann nicht; ohne
+    Ops-Kanal bleibt der bisherige Weg ueber den Produkt-Webhook.
+    """
+    if not isinstance(item, dict) or item.get("system_alarm_ts"):
+        return False
+    jetzt = _outbox_float(jetzt, time.time())
+    settings = settings if isinstance(settings, dict) else {}
+    titel = "Waechter: Alarm nicht zugestellt"
+    try:
+        preis = core.format_preis(item.get("price"))
+    except Exception:
+        preis = str(item.get("price"))
+    text = "%s: %s (%s), %d Versuche, %s" % (
+        item.get("shop") or "?",
+        item.get("event") or "?",
+        preis,
+        _outbox_int(item.get("attempts"), 0),
+        _outbox_safe_info(
+            item.get("last_error") or item.get("failed_grund") or "unbekannt",
+            settings,
+        )[:100],
+    )
+    ziel, kanal = _ops_ziel(settings)
+    if not str(ziel.get("webhook_url") or "").strip():
+        ok, info = False, "kein Kanal"
+    else:
+        try:
+            erg = core.sende_webhook_alarm(
+                {
+                    "haendler": item.get("shop"),
+                    "preis": item.get("price"),
+                    "url": item.get("url"),
+                    "_restock": bool(item.get("restock")),
+                },
+                ziel,
+                titel,
+                text,
+                dedupe=False,
+            )
+            if erg is None:
+                ok, info = False, "kein Kanal"
+            else:
+                ok, info = bool(erg[0]), str(erg[1] or "")
+        except Exception as e:
+            ok, info = False, type(e).__name__
+    item["system_alarm_ts"] = jetzt
+    item["system_alarm_ok"] = bool(ok)
+    item["system_alarm_kanal"] = kanal
+    info = _outbox_safe_info(info, settings)
+    item["system_alarm_info"] = info
+    _outbox_state_save(pfad, zustand, "systemalarm", item)
+    log(
+        {
+            "typ": "systemalarm",
+            "ts": round(jetzt, 3),
+            "id": item.get("id"),
+            "shop": item.get("shop"),
+            "event": item.get("event"),
+            "kanal": kanal,
+            "ok": bool(ok),
+            "info": info,
+        }
+    )
+    return bool(ok)
+
+
+def _outbox_send_one(item, zustand, settings, jetzt, pfad):
+    """Erst ``sending`` persistieren, dann senden, dann Ergebnis speichern."""
+    item["attempts"] = _outbox_int(item.get("attempts"), 0) + 1
+    item["status"] = "sending"
+    item["last_attempt_ts"] = jetzt
+    item["next_ts"] = jetzt
+    if not _outbox_state_save(pfad, zustand, "sending", item):
+        item["status"] = "pending"
+        item["attempts"] = max(0, item["attempts"] - 1)
+        return False
+
+    r = {
+        "haendler": item.get("shop"),
+        "preis": item.get("price"),
+        "url": item.get("url"),
+        "_restock": bool(item.get("restock")),
+    }
+    try:
+        erg = core.sende_webhook_alarm(
+            r,
+            settings,
+            item.get("title") or "",
+            item.get("text") or "",
+            dedupe=False,
+        )
+    except Exception as e:
+        erg = (False, type(e).__name__)
+    if erg is None:
+        ok, info = False, "kein Kanal"
+    else:
+        ok, info = bool(erg[0]), str(erg[1] or "")
+
+    if ok:
+        item["status"] = "sent"
+        item["sent_ts"] = jetzt
+        item["last_error"] = None
+        item["failed_grund"] = None
+        zustand["alarme_gesendet"] = _outbox_int(zustand.get("alarme_gesendet"), 0) + 1
+        _outbox_state_save(pfad, zustand, "sent", item)
+        _outbox_log(item, "gesendet", jetzt, True, info)
+        return True
+
+    info = _outbox_safe_info(info, settings)
+    item["last_error"] = info
+    retrybar = _outbox_retrybar(info)
+    if not retrybar or item["attempts"] >= OUTBOX_MAX_ATTEMPTS:
+        item["status"] = "failed"
+        item["failed_ts"] = jetzt
+        item["failed_grund"] = (
+            "max_attempts" if retrybar else "config" if info == "kein Kanal"
+            else "http_4xx"
+        )
+        _outbox_state_save(pfad, zustand, "failed", item)
+        _outbox_log(item, "fehlgeschlagen", jetzt, False, info)
+        outbox_systemalarm(item, zustand, settings, jetzt, pfad)
+        return False
+
+    item["status"] = "pending"
+    index = min(max(0, item["attempts"] - 1), len(OUTBOX_BACKOFF_S) - 1)
+    item["next_ts"] = jetzt + OUTBOX_BACKOFF_S[index]
+    _outbox_state_save(pfad, zustand, "retry", item)
+    _outbox_log(item, "retry", jetzt, False, info)
+    return False
+
+
+def outbox_drain(zustand, konfig, settings, tz, jetzt=None, pfad=None, schatten=False,
+                 max_items=OUTBOX_DRAIN_MAX):
+    """Faellige Outbox-Eintraege persistent und begrenzt zustellen."""
+    if schatten or not isinstance(zustand, dict):
+        return 0
+    box = outbox_sicherstellen(zustand)
+    jetzt = _outbox_float(jetzt, time.time())
+    outbox_prune(box, jetzt)
+    geaendert = False
+
+    # Ein Absturz zwischen ``sending`` und Ergebnis wird nach einer Karenz
+    # erneut versucht; Duplikate sind bei at-least-once moeglich.
+    for item in box["items"]:
+        if item.get("status") == "sending":
+            letzter = _outbox_float(item.get("last_attempt_ts"), 0.0)
+            if jetzt - letzter > OUTBOX_SENDING_STALE_S:
+                item["status"] = "pending"
+                item["next_ts"] = jetzt
+                geaendert = True
+
+    # Fehlgeschlagene Eintraege ohne Systemalarm (z. B. nach Neustart) holen
+    # ihre einmalige Warnung nach.
+    for item in list(box["items"]):
+        if item.get("status") == "failed" and not item.get("system_alarm_ts"):
+            outbox_systemalarm(item, zustand, settings, jetzt, pfad)
+            geaendert = True
+
+    faellig = [
+        item for item in box["items"]
+        if item.get("status") == "pending"
+        and _outbox_float(item.get("next_ts"), 0.0) <= jetzt
+    ]
+    faellig.sort(key=lambda item: (_outbox_float(item.get("next_ts"), 0.0),
+                                  _outbox_float(item.get("created"), 0.0)))
+    anzahl = 0
+    for item in faellig[:max(0, int(max_items))]:
+        _outbox_send_one(item, zustand, settings, jetzt, pfad)
+        anzahl += 1
+
+    outbox_prune(box, jetzt)
+    if geaendert and not anzahl:
+        _outbox_state_save(pfad, zustand, "recovery")
+    return anzahl
+
+
+def schatten_aktiv(zustand, jetzt, erzwingen):
+    """True, solange nichts gesendet werden darf."""
+    if erzwingen:
+        return True
+    try:
+        bis = float((zustand or {}).get("schatten_bis") or 0)
+    except (TypeError, ValueError):
+        bis = 0.0
+    return float(jetzt) < bis
+
+
+def ist_sofort_treffer(r):
+    """Nur ein bestaetigter, sofort kaufbarer, nicht gebrauchter Treffer.
+
+    Ein unbestaetigter Treffer, eine Vorbestellung oder Gebrauchtware darf
+    nicht als "schon verfuegbar" im Zustand landen: sonst wuerde der spaetere
+    echte Restock als gewoehnlicher Preisvergleich verpuffen. Eine
+    Vorbestellung setzt in ``scan_core`` bereits ``sofort=False``.
+    """
+    return bool(
+        isinstance(r, dict)
+        and r.get("klass") == "hit"
+        and r.get("preis") is not None
+        and r.get("verify") == "bestaetigt"
+        and r.get("sofort") is not False
+        and not core.ist_gebraucht(r.get("condition"))
+    )
+
+
+def preis_signifikant(neu, letzter, toleranz=0.0):
+    """True, wenn der neue Preis deutlich unter dem letzten liegt.
+
+    ``toleranz`` daempft Cent-Rauschen und kurze Preisausschlaege. Ein
+    Restock bleibt davon unberuehrt; die Toleranz gilt nur fuer ``new``.
+    """
+    try:
+        neu = float(neu)
+    except (TypeError, ValueError):
+        return False
+    if letzter is None:
+        return True
+    try:
+        letzter = float(letzter)
+        grenze = max(0.01, float(toleranz or 0.0))
+    except (TypeError, ValueError):
+        return False
+    return neu < letzter - grenze
+
+
+def ereignis(eintrag, r, toleranz=0.0):
+    """Alarm-Ereignis oder None; nur bestaetigte, sofort kaufbare Treffer.
+
+    Unbestaetigte Treffer, Vorbestellungen und Gebrauchtware erzeugen kein
+    Ereignis. Sie duerfen den spaeteren echten Restock nicht verdecken und
+    auch nicht als Schattenalarm im Log auftauchen. Ein neuer Preis wird erst
+    ab der konfigurierten Preistoleranz gemeldet.
+    """
+    if not ist_sofort_treffer(r):
+        return None
+    if not isinstance(eintrag, dict) or not eintrag.get("initialisiert"):
+        return None
+    if eintrag.get("verfuegbar") is False:
+        return "restock"
+    if preis_signifikant(r.get("preis"), eintrag.get("preis"), toleranz):
+        return "new"
+    return None
+
+
+def aktualisiere(eintrag, r, jetzt, tz=None):
+    """Shop-Zustand fortschreiben. Fehler ueberschreiben keinen Preis."""
+    if not isinstance(eintrag, dict):
+        return
+    status = str(r.get("klass") or "unknown")
+    eintrag["status"] = status
+    eintrag["ts"] = float(jetzt)
+    try:
+        eintrag["iso"] = datetime.fromtimestamp(float(jetzt), tz).isoformat(
+            timespec="seconds"
+        )
+    except Exception:
+        pass
+    eintrag["fehler"] = r.get("fehler")
+    try:
+        eintrag["bytes"] = int(r.get("bytes") or 0)
+    except (TypeError, ValueError):
+        eintrag["bytes"] = 0
+    try:
+        eintrag["ms"] = int(round(float(r.get("dauer") or 0) * 1000))
+    except (TypeError, ValueError):
+        eintrag["ms"] = 0
+    if r.get("fresh") is not None:
+        eintrag["frisch"] = bool(r.get("fresh"))
+    if r.get("verify"):
+        eintrag["verify"] = str(r.get("verify"))
+    if r.get("url"):
+        eintrag["url"] = str(r.get("url"))
+
+    if status == "challenge":
+        eintrag["fail_streak"] = int(eintrag.get("fail_streak") or 0) + 1
+        eintrag["challenge_serie"] = int(eintrag.get("challenge_serie") or 0) + 1
+        eintrag["challenge_bis"] = float(jetzt) + challenge_takt(eintrag)
+        return
+    if status in ("error", "parser"):
+        eintrag["fail_streak"] = int(eintrag.get("fail_streak") or 0) + 1
+        # Eine Fehlerzeile unterbricht die Challenge-Serie.
+        eintrag["challenge_serie"] = 0
+        return
+
+    # Jeder fachlich gueltige Abruf beendet eine Fehlerserie. Als Bestand
+    # zaehlt aber nur ein bestaetigter, sofort kaufbarer, nicht gebrauchter
+    # Treffer. Unbestaetigte Treffer, Vorbestellungen und Gebrauchtware
+    # bleiben "nicht verfuegbar", damit der spaetere echte Restock nicht
+    # als "schon verfuegbar" verdeckt wird.
+    eintrag["fail_streak"] = 0
+    eintrag["challenge_bis"] = 0.0
+    eintrag["challenge_serie"] = 0
+    eintrag["initialisiert"] = True
+    eintrag["letzter_erfolg"] = float(jetzt)
+    eintrag["verfuegbar"] = ist_sofort_treffer(r)
+    preis = r.get("preis")
+    if preis is not None:
+        try:
+            preis = float(preis)
+        except (TypeError, ValueError):
+            preis = None
+    if preis is not None:
+        eintrag["preis"] = preis
+        tief = eintrag.get("tief")
+        try:
+            eintrag["tief"] = preis if tief is None else min(float(tief), preis)
+        except (TypeError, ValueError):
+            eintrag["tief"] = preis
+
+
+def _jitter(name):
+    """Stabiler ±10-%-Versatz, damit nicht beide Shops sekundengleich starten."""
+    roh = zlib.crc32(str(name).encode("utf-8")) % 2001
+    return (roh / 1000.0 - 1.0) * 0.1
+
+
+def takt_sekunden(name, eintrag, jetzt_lokal, konfig):
+    """Naechster Abstand in Sekunden.
+
+    Im bekannten Auflegefenster 30-60 s (auch bei Jitter), ausserhalb der
+    konfigurierte ruhigere Takt. Eine Bot-Sperre setzt den Shop 15 Minuten aus;
+    zwei Parser-/Netzfehler in Folge 12 Minuten.
+    """
+    eintrag = eintrag if isinstance(eintrag, dict) else {}
+    status = str(eintrag.get("status") or "")
+    if status == "challenge":
+        return challenge_takt(eintrag)
+    if status in ("error", "parser") and int(eintrag.get("fail_streak") or 0) >= 2:
+        return FEHLER_TAKT
+    im_fenster = core.im_drop_fenster(name, jetzt_lokal)
+    basis = konfig.window_takt if im_fenster else konfig.aussen_takt
+    takt = int(round(float(basis) * (1.0 + _jitter(name))))
+    if im_fenster:
+        return max(30, min(60, takt))
+    return max(60, takt)
+
+
+def naechste_faelligkeit(eintrag, jetzt, takt):
+    try:
+        sperre = float((eintrag or {}).get("challenge_bis") or 0)
+    except (TypeError, ValueError):
+        sperre = 0.0
+    return max(float(jetzt) + float(takt), sperre)
+
+
+def pruefe_shop(h, deckel, stop):
+    """Einen Shop abrufen, Treffer zweitpruefen und Health fortschreiben."""
+    r = core.scan_einen(h, cancel=stop)
+    if not isinstance(r, dict):
+        return None
+    # scan_einen klassifiziert mit MAX_PREIS. Nur hit/expensive haengen vom
+    # Preisdeckel ab; alle anderen Klassen bleiben unveraendert.
+    if r.get("klass") in ("hit", "expensive"):
+        r["klass"] = core.classify(
+            True, r.get("preis"), core.preis_deckel(r.get("land"), deckel)
+        )
+    if r.get("klass") == "hit" and not core.ist_gebraucht(r.get("condition")):
+        r = core.verify_treffer(h, r, cancel=stop)
+    # JSON-LD liefert nicht immer ein eigenes "verfuegbar"-Feld. Der Zustand
+    # folgt deshalb der strengeren Regel: bestaetigt, sofort kaufbar, nicht
+    # gebraucht. Eine Vorbestellung ist kein Bestand.
+    r["verfuegbar"] = ist_sofort_treffer(r)
+    try:
+        core.health().record(r)
+    except Exception:
+        pass
+    return r
+
+
+def _tag_datum(jetzt, tz):
+    try:
+        return datetime.fromtimestamp(float(jetzt), tz).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
+def _tag_leer():
+    return {
+        "datum": "",
+        "checks": 0,
+        "treffer": 0,
+        "fehler": 0,
+        "parser": 0,
+        "challenge": 0,
+        "bytes": 0,
+        "requests": 0,
+        "alarme": 0,
+        "schatten": 0,
+        "ms": [],
+    }
+
+
+def tag_sicherstellen(zustand):
+    """Tageszaehler laden; ein alter oder defekter Block startet bei null."""
+    if not isinstance(zustand, dict):
+        return _tag_leer()
+    tag = zustand.get("tag")
+    if not isinstance(tag, dict):
+        tag = _tag_leer()
+        zustand["tag"] = tag
+    for key in ("checks", "treffer", "fehler", "parser", "challenge",
+                "bytes", "requests", "alarme", "schatten"):
+        tag[key] = max(0, _outbox_int(tag.get(key), 0))
+    tag["datum"] = str(tag.get("datum") or "")
+    ms = tag.get("ms")
+    if not isinstance(ms, list):
+        ms = []
+    tag["ms"] = [max(0, _outbox_int(x, 0)) for x in ms[-TAG_MS_MAX:]]
+    return tag
+
+
+def tag_buchen(zustand, r, jetzt, tz):
+    """Einen Check in die Tageszaehler uebernehmen."""
+    tag = tag_sicherstellen(zustand)
+    datum = _tag_datum(jetzt, tz)
+    if tag["datum"] and tag["datum"] != datum:
+        # Ohne tageswechsel() wuerde eine Zeile fehlen; lieber neu zaehlen
+        # als Zahlen zweier Tage zu vermischen.
+        tag = _tag_leer()
+        tag["datum"] = datum
+        zustand["tag"] = tag
+    elif not tag["datum"]:
+        tag["datum"] = datum
+    tag["checks"] += 1
+    tag["requests"] += 1 + (1 if (r or {}).get("verify") else 0)
+    tag["bytes"] += max(0, _outbox_int((r or {}).get("bytes"), 0))
+    try:
+        ms = max(0, int(round(float((r or {}).get("dauer") or 0) * 1000)))
+    except (TypeError, ValueError):
+        ms = 0
+    tag["ms"].append(ms)
+    if len(tag["ms"]) > TAG_MS_MAX:
+        del tag["ms"][:-TAG_MS_MAX]
+    klass = str((r or {}).get("klass") or "")
+    if klass == "hit":
+        tag["treffer"] += 1
+    elif klass == "challenge":
+        tag["challenge"] += 1
+    elif klass in ("error", "parser"):
+        tag["fehler"] += 1
+        if klass == "parser":
+            tag["parser"] += 1
+    return tag
+
+
+def _perzentil(werte, anteil):
+    if not werte:
+        return None
+    sortiert = sorted(werte)
+    index = int(round(float(anteil) * (len(sortiert) - 1)))
+    return sortiert[max(0, min(len(sortiert) - 1, index))]
+
+
+def tag_zusammenfassung(tag, box):
+    """Kennzahlen einer Tageszeile; reine Funktion, ohne Log und Netz."""
+    tag = tag if isinstance(tag, dict) else {}
+    checks = _outbox_int(tag.get("checks"), 0)
+    fehler = _outbox_int(tag.get("fehler"), 0)
+    challenge = _outbox_int(tag.get("challenge"), 0)
+    erfolge = max(0, checks - fehler - challenge)
+    ms = tag.get("ms") if isinstance(tag.get("ms"), list) else []
+    box = box if isinstance(box, dict) else {}
+    items = box.get("items") if isinstance(box.get("items"), list) else []
+    offen = sum(
+        1 for item in items
+        if isinstance(item, dict) and item.get("status") in ("pending", "sending")
+    )
+    failed = sum(
+        1 for item in items
+        if isinstance(item, dict) and item.get("status") == "failed"
+    )
+    return {
+        "datum": str(tag.get("datum") or ""),
+        "checks": checks,
+        "treffer": _outbox_int(tag.get("treffer"), 0),
+        "fehler": fehler,
+        "parser": _outbox_int(tag.get("parser"), 0),
+        "challenge": challenge,
+        "quote": round(100.0 * erfolge / checks, 1) if checks else 0.0,
+        "bytes": _outbox_int(tag.get("bytes"), 0),
+        "requests": _outbox_int(tag.get("requests"), 0),
+        "ms_p50": _perzentil(ms, 0.50),
+        "ms_p95": _perzentil(ms, 0.95),
+        "alarme": _outbox_int(tag.get("alarme"), 0),
+        "schatten": _outbox_int(tag.get("schatten"), 0),
+        "outbox_offen": offen,
+        "outbox_failed": failed,
+    }
+
+
+def tageswechsel(zustand, jetzt, tz):
+    """Beim lokalen Tageswechsel die Tageszeile liefern und neu zaehlen."""
+    tag = tag_sicherstellen(zustand)
+    datum = _tag_datum(jetzt, tz)
+    if not tag["datum"]:
+        tag["datum"] = datum
+        return None
+    if tag["datum"] == datum:
+        return None
+    zusammenfassung = tag_zusammenfassung(tag, outbox_sicherstellen(zustand))
+    neu = _tag_leer()
+    neu["datum"] = datum
+    zustand["tag"] = neu
+    return zusammenfassung
+
+
+def budget_rest(verlauf, jetzt, maximum):
+    """Freie Abrufe im gleitenden 60-s-Fenster (mindestens ein Budget)."""
+    maximum = max(1, _outbox_int(maximum, 12))
+    if not isinstance(verlauf, list):
+        return maximum
+    jetzt = _outbox_float(jetzt, time.time())
+    try:
+        verlauf[:] = [t for t in verlauf if jetzt - float(t) < 60.0]
+    except (TypeError, ValueError):
+        verlauf[:] = []
+    return max(0, maximum - len(verlauf))
+
+
+def shop_vorrang(name):
+    """PS Direct zuerst, danach alle uebrigen Shops."""
+    return 0 if str(name or "") in PRIORITY_SHOPS else 1
+
+
+def challenge_takt(eintrag):
+    """15 Minuten Sperre, nach drei Challenges in Folge eine Stunde."""
+    serie = _outbox_int((eintrag or {}).get("challenge_serie"), 0)
+    return CHALLENGE_LANG if serie >= CHALLENGE_LANG_NACH else CHALLENGE_TAKT
+
+
+def preflight(konfig, pfad=None):
+    """Startpruefung ohne Netzzugriff: Verzeichnis, Kanal, Zustand, Zeitzone."""
+    checks = []
+
+    def _check(name, ok, info="", kritisch=True):
+        checks.append({"name": name, "ok": bool(ok), "info": str(info)[:120],
+                       "kritisch": bool(kritisch)})
+
+    probe = os.path.join(konfig.data_dir, ".preflight")
+    try:
+        os.makedirs(konfig.data_dir, exist_ok=True)
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        _check("datenverzeichnis", True, konfig.data_dir)
+    except OSError as e:
+        _check("datenverzeichnis", False, type(e).__name__)
+
+    try:
+        ZoneInfo(konfig.tz_name)
+        _check("zeitzone", True, konfig.tz_name, kritisch=False)
+    except Exception:
+        _check("zeitzone", False, "unbekannt: " + konfig.tz_name,
+               kritisch=False)
+
+    if konfig.shadow and not konfig.webhook_url:
+        _check("webhook", True, "leer, Schattenmodus", kritisch=False)
+    else:
+        url = konfig.webhook_url
+        _check("webhook", url.lower().startswith("https://"),
+               core.redact_url(url) if url else "fehlt")
+
+    if konfig.ops_url:
+        _check("ops", konfig.ops_url.lower().startswith("https://"),
+               core.redact_url(konfig.ops_url), kritisch=False)
+
+    if pfad and os.path.exists(pfad):
+        try:
+            with open(pfad, encoding="utf-8") as f:
+                daten = json.load(f)
+            _check("zustand", isinstance(daten, dict),
+                   "lesbar" if isinstance(daten, dict) else "kein Objekt",
+                   kritisch=False)
+        except Exception as e:
+            _check("zustand", False, type(e).__name__, kritisch=False)
+    else:
+        _check("zustand", True, "neu", kritisch=False)
+
+    return all(c["ok"] for c in checks if c["kritisch"]), checks
+
+
+def settings_aus(konfig):
+    """Minimale Einstellungen fuer Webhook und Preisdeckel.
+
+    Der Waechter hat keine App-Einstellungen. Die Bestandsregel
+    ``ist_sofort_treffer`` erzwingt Bestaetigung, Sofortkauf und Neuware;
+    Ruhezeiten, Stummschaltung und Tiefstpreisfilter sind bewusst aus.
+    """
+    return {
+        "webhook_url": konfig.webhook_url,
+        "webhook_preset": konfig.webhook_preset,
+        "ops_url": konfig.ops_url,
+        "ops_preset": konfig.ops_preset,
+        "max_preis": konfig.max_preis,
+    }
+
+
+def log(daten):
+    with _LOG_LOCK:
+        print(json.dumps(daten, ensure_ascii=False, sort_keys=True), flush=True)
+
+
+def iso_ts(ts, tz):
+    try:
+        return datetime.fromtimestamp(float(ts), tz).isoformat(timespec="seconds")
+    except Exception:
+        return ""
+
+
+def melde(r, event, konfig, zustand, schatten, settings, tz, pfad=None):
+    """Alarm im Schatten protokollieren oder live persistent einreihen."""
+    restock = event == "restock"
+    titel = (
+        "PS5 Pro 2 TB: wieder verfuegbar"
+        if restock
+        else "PS5 Pro 2 TB: " + core.format_preis(r.get("preis"))
+    )
+    text = r.get("haendler", "?") + (
+        " - wieder verfuegbar" if restock else " - jetzt verfuegbar"
+    )
+    # sende_webhook_alarm nutzt das Flag fuer den Dedupe-Schluessel.
+    r["_restock"] = restock
+    jetzt = time.time()
+    tag = tag_sicherstellen(zustand)
+    tag["alarme"] += 1
+    if schatten:
+        tag["schatten"] += 1
+    basis = {
+        "typ": "alarm",
+        "ts": round(jetzt, 3),
+        "iso": iso_ts(jetzt, tz),
+        "modus": "schatten" if schatten else "live",
+        "shop": r.get("haendler"),
+        "event": event,
+        "preis": r.get("preis"),
+        "titel": titel,
+        "text": text,
+        "url": r.get("url"),
+        "preset": konfig.webhook_preset,
+    }
+
+    if schatten:
+        if not core.webhook_dedupe(r.get("haendler"), r.get("preis"), restock):
+            basis.update(
+                {
+                    "aktion": "unterdrueckt",
+                    "grund": "dedupe",
+                    "ok": None,
+                    "info": "dedupe",
+                }
+            )
+            log(basis)
+            return
+        zustand["alarme_schatten"] = int(zustand.get("alarme_schatten") or 0) + 1
+        basis.update(
+            {
+                "aktion": "wuerde_senden",
+                "ok": None,
+                "info": "Schattenmodus, kein Versand",
+            }
+        )
+        log(basis)
+        return
+
+    item = outbox_enqueue(r, event, zustand, jetzt, titel, text)
+    if item is None:
+        # Auch ein wegen Ueberlauf nicht aufgenommenes Ereignis darf nicht
+        # still verschwinden: einmaliger Systemalarm ueber den Webhook.
+        overflow = {
+            "id": "overflow_" + _outbox_id(jetzt).split("_")[-1],
+            "shop": r.get("haendler"),
+            "event": event,
+            "price": r.get("preis"),
+            "attempts": 0,
+            "last_error": "Outbox voll",
+            "failed_grund": "overflow",
+            "restock": restock,
+            "url": r.get("url"),
+        }
+        outbox_systemalarm(overflow, zustand, settings, jetzt, pfad)
+        basis.update(
+            {
+                "aktion": "nicht_aufgenommen",
+                "grund": "outbox_voll",
+                "ok": None,
+                "info": "Outbox voll",
+            }
+        )
+        log(basis)
+        return
+    if not _outbox_state_save(pfad, zustand, "enqueue", item):
+        basis.update(
+            {
+                "aktion": "nicht_gesendet",
+                "grund": "zustand_nicht_speicherbar",
+                "outbox_id": item.get("id"),
+                "ok": None,
+                "info": "Ereignis nicht persistent",
+            }
+        )
+        log(basis)
+        return
+    basis.update(
+        {
+            "aktion": "eingereiht",
+            "outbox_id": item.get("id"),
+            "versuch": 0,
+            "ok": None,
+            "info": "persistiert, Versand folgt",
+        }
+    )
+    log(basis)
+
+
+def heartbeat(konfig):
+    """Optionaler Lebenszeichen-Ping (z. B. healthchecks.io). Nie die URL loggen."""
+    if not konfig.heartbeat_url:
+        return
+    try:
+        ok, info = core.webhook_senden(
+            konfig.heartbeat_url, "generisch", "", "ok", timeout=5
+        )
+    except Exception as e:
+        ok, info = False, type(e).__name__
+    log({"typ": "heartbeat", "ok": bool(ok), "info": str(info or "")[:120]})
+
+
+def main():
+    STOP.clear()
+    try:
+        konfig = Konfig.aus_env()
+    except ValueError as e:
+        print("Konfiguration: %s" % e, file=sys.stderr)
+        return 2
+    if not konfig.shadow and not konfig.webhook_url:
+        print(
+            "WATCH_WEBHOOK_URL fehlt, obwohl WATCH_SHADOW=0. "
+            "Erst Schatten laufen lassen, dann Kanal setzen.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        os.makedirs(konfig.data_dir, exist_ok=True)
+    except OSError as e:
+        print("Datenverzeichnis: %s" % e, file=sys.stderr)
+        return 2
+    core.set_data_dir(konfig.data_dir)
+    core.reset_health()
+    tz = konfig.zeitzone()
+
+    pfad = os.path.join(konfig.data_dir, STATE_FILE)
+    jetzt = time.time()
+    preflight_ok, pruefungen = preflight(konfig, pfad)
+    log(
+        {
+            "typ": "preflight",
+            "ts": round(jetzt, 3),
+            "ok": preflight_ok,
+            "checks": pruefungen,
+        }
+    )
+    if not preflight_ok:
+        for pruefung in pruefungen:
+            if pruefung.get("kritisch") and not pruefung.get("ok"):
+                print(
+                    "Preflight: %s - %s"
+                    % (pruefung.get("name"), pruefung.get("info")),
+                    file=sys.stderr,
+                )
+        return 2
+    zustand = zustand_laden(pfad, jetzt, konfig.shadow_hours)
+    nach_name = {h["name"]: h for h in core.HAENDLER}
+    shops = [nach_name[n] for n in konfig.shops]
+    settings = settings_aus(konfig)
+    deckel = core.preis_deckel_aus(settings)
+    next_due = {h["name"]: 0.0 for h in shops}
+    schatten = schatten_aktiv(zustand, jetzt, konfig.shadow)
+
+    log(
+        {
+            "typ": "start",
+            "ts": round(jetzt, 3),
+            "iso": iso_ts(jetzt, tz),
+            "version": "p0",
+            "schatten": schatten,
+            "schatten_bis": iso_ts(zustand.get("schatten_bis"), tz),
+            "schatten_rest_h": round(
+                max(0.0, float(zustand.get("schatten_bis") or 0) - jetzt) / 3600.0, 2
+            ),
+            "shops": [h["name"] for h in shops],
+            "fenster": "09:00-18:00 " + konfig.tz_name,
+            "window_takt": konfig.window_takt,
+            "aussen_takt": konfig.aussen_takt,
+            "preset": konfig.webhook_preset,
+            "budget_min": konfig.max_req_min,
+            "preis_toleranz": konfig.preis_toleranz,
+            "ops": bool(konfig.ops_url),
+            "webhook": core.redact_url(konfig.webhook_url)
+            if konfig.webhook_url
+            else "-",
+            "heartbeat": bool(konfig.heartbeat_url),
+        }
+    )
+
+    # Bereits persistierte Alarme haben Vorrang vor neuen Scans. Im
+    # Schattenmodus bleibt die Outbox absichtlich liegen.
+    if not schatten:
+        outbox_drain(
+            zustand,
+            konfig,
+            settings,
+            tz,
+            jetzt=jetzt,
+            pfad=pfad,
+            schatten=False,
+        )
+
+    def _beenden(signum, frame):
+        STOP.set()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _beenden)
+        except (ValueError, OSError):
+            pass
+
+    request_verlauf = []
+    try:
+        while not STOP.is_set():
+            jetzt = time.time()
+            schatten = schatten_aktiv(zustand, jetzt, konfig.shadow)
+            abschluss = tageswechsel(zustand, jetzt, tz)
+            if abschluss:
+                log(dict(abschluss, typ="tag", ts=round(jetzt, 3)))
+            if not schatten:
+                outbox_drain(
+                    zustand,
+                    konfig,
+                    settings,
+                    tz,
+                    jetzt=jetzt,
+                    pfad=pfad,
+                    schatten=False,
+                )
+            faellig = [h for h in shops if next_due.get(h["name"], 0.0) <= jetzt]
+            if len(faellig) > 1:
+                faellig.sort(
+                    key=lambda h: (
+                        shop_vorrang(h["name"]),
+                        float(next_due.get(h["name"], 0.0)),
+                    )
+                )
+            rest = budget_rest(request_verlauf, jetzt, konfig.max_req_min)
+            if faellig and rest <= 0:
+                # Minutenbudget voll: kurz warten statt heiss zu drehen.
+                STOP.wait(2.0)
+                continue
+            faellig = faellig[:rest]
+            if faellig:
+                runde_start = time.time()
+                for h in faellig:
+                    request_verlauf.append(runde_start)
+                ergebnisse = []
+                ex = ThreadPoolExecutor(max_workers=max(1, min(2, len(faellig))))
+                try:
+                    futures = {
+                        ex.submit(pruefe_shop, h, deckel, STOP): h for h in faellig
+                    }
+                    for fut in as_completed(futures):
+                        h = futures[fut]
+                        name = h["name"]
+                        try:
+                            r = fut.result()
+                        except Exception as e:
+                            log(
+                                {
+                                    "typ": "fehler",
+                                    "ts": round(time.time(), 3),
+                                    "shop": name,
+                                    "info": type(e).__name__,
+                                }
+                            )
+                            r = None
+                        if not isinstance(r, dict):
+                            continue
+                        ergebnisse.append(r)
+                        if r.get("verify"):
+                            # Der zweite Abruf zaehlt ebenfalls als Request.
+                            request_verlauf.append(time.time())
+                        eintrag = zustand["shops"].setdefault(name, {})
+                        event = ereignis(eintrag, r, konfig.preis_toleranz)
+                        aktualisiere(eintrag, r, time.time(), tz)
+                        tag_buchen(zustand, r, time.time(), tz)
+                        if r.get("klass") == "challenge":
+                            serie = int(eintrag.get("challenge_serie") or 0)
+                            heute = _tag_datum(time.time(), tz)
+                            if (serie >= CHALLENGE_LANG_NACH
+                                    and eintrag.get("challenge_info_tag") != heute):
+                                eintrag["challenge_info_tag"] = heute
+                                log(
+                                    {
+                                        "typ": "challenge",
+                                        "ts": round(time.time(), 3),
+                                        "shop": name,
+                                        "serie": serie,
+                                        "bis": iso_ts(
+                                            eintrag.get("challenge_bis"), tz
+                                        ),
+                                        "info": "drei Challenges in Folge, "
+                                                "60 Minuten Pause",
+                                    }
+                                )
+                        if event:
+                            melde(
+                                r,
+                                event,
+                                konfig,
+                                zustand,
+                                schatten,
+                                settings,
+                                tz,
+                                pfad,
+                            )
+                        log(
+                            {
+                                "typ": "check",
+                                "ts": round(time.time(), 3),
+                                "iso": iso_ts(time.time(), tz),
+                                "shop": name,
+                                "klass": r.get("klass"),
+                                "preis": r.get("preis"),
+                                "verfuegbar": r.get("verfuegbar"),
+                                "status": r.get("status") or r.get("avail_state"),
+                                "bytes": r.get("bytes"),
+                                "ms": round(float(r.get("dauer") or 0) * 1000),
+                                "frisch": r.get("fresh"),
+                                "verify": r.get("verify"),
+                                "fehler": r.get("fehler"),
+                                "event": event,
+                            }
+                        )
+                finally:
+                    ex.shutdown(wait=True, cancel_futures=True)
+
+                try:
+                    core.health().save()
+                except Exception:
+                    pass
+                try:
+                    core.flush_http_cache()
+                except Exception:
+                    pass
+
+                jetzt_nach = time.time()
+                for h in faellig:
+                    eintrag = zustand["shops"].get(h["name"], {})
+                    takt = takt_sekunden(
+                        h["name"],
+                        eintrag,
+                        datetime.fromtimestamp(jetzt_nach, tz),
+                        konfig,
+                    )
+                    # Ab Rundenstart rechnen, damit die Pruefdauer den Takt
+                    # nicht zusaetzlich verlaengert.
+                    next_due[h["name"]] = naechste_faelligkeit(
+                        eintrag, jetzt, takt
+                    )
+
+                zustand["runden"] = int(zustand.get("runden") or 0) + 1
+                zustand["letzte_runde"] = jetzt_nach
+                try:
+                    zustand_speichern(pfad, zustand)
+                except Exception as e:
+                    log(
+                        {
+                            "typ": "fehler",
+                            "ts": round(time.time(), 3),
+                            "info": "zustand: " + type(e).__name__,
+                        }
+                    )
+                log(
+                    {
+                        "typ": "runde",
+                        "ts": round(jetzt_nach, 3),
+                        "geprueft": len(ergebnisse),
+                        "treffer": sum(
+                            1 for x in ergebnisse if x.get("klass") == "hit"
+                        ),
+                        "dauer_ms": round((jetzt_nach - runde_start) * 1000),
+                        "schatten": schatten,
+                        "runden": zustand["runden"],
+                        "budget_verbraucht": len(request_verlauf),
+                        "budget_max": konfig.max_req_min,
+                    }
+                )
+                heartbeat(konfig)
+
+            if STOP.is_set():
+                break
+            naechste = min(next_due.values()) if next_due else time.time() + 5
+            warten = naechste - time.time()
+            if warten > 0:
+                # Kurze Schlafstuecke: SIGTERM und fällige Shops werden zuegig
+                # bemerkt, ohne die CPU zu belasten.
+                STOP.wait(min(float(warten), 2.0))
+            else:
+                # Budget voll oder faelliger Shop ohne freien Platz: nicht
+                # heiss drehen, sondern kurz warten.
+                STOP.wait(1.0)
+    finally:
+        try:
+            zustand_speichern(pfad, zustand)
+        except Exception:
+            pass
+        try:
+            core.health().save()
+        except Exception:
+            pass
+        try:
+            core.flush_http_cache()
+        except Exception:
+            pass
+        log(
+            {
+                "typ": "stop",
+                "ts": round(time.time(), 3),
+                "runden": int(zustand.get("runden") or 0),
+                "alarme_schatten": int(zustand.get("alarme_schatten") or 0),
+                "alarme_gesendet": int(zustand.get("alarme_gesendet") or 0),
+            }
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

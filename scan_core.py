@@ -5,7 +5,7 @@ Der Service laeuft in einem eigenen Prozess ohne UI - dort darf kein Kivy
 importiert werden, deshalb liegt diese Logik hier getrennt.
 """
 import os, sys, json, re, time, random, threading, traceback, hashlib, zlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -112,12 +112,22 @@ HOT_SHOPS = ["Amazon DE","MediaMarkt DE","Saturn DE","Otto DE",
 # Das ist derselbe oeffentliche GET wie bisher - kein separater API-Pfad,
 # keine Umgehung. Shops ohne belegten Block bleiben beim HTML-Pfad.
 #   MediaMarkt/Saturn: BuyAction.object (ProductGroup) bei ~3,5 KB
-#   PS Direct DE/AT:   Product bei ~33 KB (nach dem Redirect)
+#   PS Direct DE/AT:   Product bei ~33 KB (nach dem Redirect); 64 KB genuegen
 #   Alternate DE:      Product bei ~7 KB
 FAST_JSON_SHOPS = frozenset(("MediaMarkt DE", "Saturn DE",
                              "PS Direct DE", "PS Direct AT",
                              "Alternate DE"))
 FAST_JSON_BYTES = 192 * 1024
+# PS Direct braucht den grossen Puffer nicht: Der Product-Block steht bei
+# ~33 KB. 64 KB sind rund doppelt so viel Luft und sparen den Seitenrest.
+FAST_JSON_64_SHOPS = frozenset(("PS Direct DE", "PS Direct AT"))
+FAST_JSON_BYTES_PSDIRECT = 64 * 1024
+
+
+def fast_json_limit(name):
+    """Byte-Grenze des JSON-LD-Teilabrufs; PS Direct kommt mit 64 KB aus."""
+    return (FAST_JSON_BYTES_PSDIRECT if str(name or "") in FAST_JSON_64_SHOPS
+            else FAST_JSON_BYTES)
 # ── Live-Taktung ────────────────────────────────────────────────────
 # "Live" heisst hier nicht Push (kein Shop bietet einen Kanal), sondern:
 # faellige Shops in kurzen Runden. Ein Shop, der zuletzt kaufbar war, wird
@@ -161,6 +171,12 @@ DROP_FENSTER = {
     "PS Direct DE": ((9, 0, 18, 0),),
     "PS Direct AT": ((9, 0, 18, 0),),
 }
+# ── Hintergrund-Hot-Shop ────────────────────────────────────────────
+# Im belegten PS-Direct-Fenster prueft der Dienst diese zwei Shops zusaetzlich
+# alle 45 s; die volle Runde bleibt bei 15 Minuten. Ausserhalb des Fensters
+# gibt es keine Extra-Abrufe, und eine Sperre schaltet den Hot-Takt ab.
+BG_HOT_SHOPS = ("PS Direct DE", "PS Direct AT")
+BG_HOT_TAKT = 45
 BG_STATUS_FILE = "ps5pro_bg.json"
 HEALTH_FILE = "ps5pro_health.json"
 # Letzte Pruefungen je Shop fuer die Zuordnung verpasster Fenster:
@@ -1383,16 +1399,18 @@ def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
 def _scan_einen_json(h, cancel=None):
     """Teilabruf mit JSON-LD; ``None`` bedeutet: HTML-Pfad versuchen.
 
-    Der Block steht bei den vorgesehenen Shops in den ersten 192 KB. Ist er
-    unvollstaendig, fehlt die Verfuegbarkeit oder passt das Produkt nicht,
-    wird bewusst ``None`` zurueckgegeben - dann laedt der normale Pfad die
-    Seite. Ein Fehler hier ist kein Shop-Fehler.
+    Der Block steht bei den vorgesehenen Shops in den ersten 192 KB, bei
+    PS Direct in den ersten 64 KB. Ist er unvollstaendig, fehlt die
+    Verfuegbarkeit oder passt das Produkt nicht, wird bewusst ``None``
+    zurueckgegeben - dann laedt der normale Pfad die Seite. Ein Fehler hier
+    ist kein Shop-Fehler.
     """
     st=time.time()
     try:
         if _abgebrochen(cancel): raise ScanAbgebrochen
         html,fu,_cached,meta=fetch_mit_cache(
-            h["urls"], cancel=cancel, force=True, limit=FAST_JSON_BYTES)
+            h["urls"], cancel=cancel, force=True,
+            limit=fast_json_limit(h.get("name")))
         if _abgebrochen(cancel): raise ScanAbgebrochen
         if not html:
             return None
@@ -1853,14 +1871,19 @@ def webhook_status_lesen():
     return dict(daten) if isinstance(daten,dict) else None
 
 
-def sende_webhook_alarm(r, settings, titel, text, tester=False):
-    """Webhook fuer einen Treffer. None = kein Kanal oder schon gemeldet."""
+def sende_webhook_alarm(r, settings, titel, text, tester=False, dedupe=True):
+    """Webhook fuer einen Treffer. None = kein Kanal oder schon gemeldet.
+
+    ``dedupe=False`` uebernimmt die Outbox: sie hat den Treffer bereits
+    persistent vorgemerkt und darf nicht an der gemeinsamen 10-Minuten-Sperre
+    scheitern. App und Testalarm behalten die bisherige Dedupe-Regel.
+    """
     url=str(_setting(settings,"webhook_url","") or "").strip()
     if not url: return None
     preset=_setting(settings,"webhook_preset","")
     if preset not in WEBHOOK_PRESETS: preset=webhook_preset(url)
-    if not tester and not webhook_dedupe(r.get("haendler"),r.get("preis"),
-                                        bool(r.get("_restock"))):
+    if dedupe and not tester and not webhook_dedupe(r.get("haendler"),r.get("preis"),
+                                                    bool(r.get("_restock"))):
         return None
     ok,info=webhook_senden(url,preset,titel,text,r.get("url"))
     # Ergebnis auch bei Fehler merken: der Dienst meldet damit genauso
@@ -1934,6 +1957,31 @@ def bg_intervall(sekunden, minimum=900):
     return max(minimum, s)
 
 
+def bg_wachhund(status, jetzt=None, intervall=None):
+    """Zustand des Hintergrunddienstes fuer die App.
+
+    ``wach_ts`` schreibt der Dienst nach jeder Runde - auch wenn er wegen
+    WLAN-/Ladeoption pausiert. Eine frische Pause ist kein toter Dienst und
+    darf deshalb keinen Fehlalarm ausloesen.
+    """
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    if not isinstance(status, dict):
+        return {"zustand": "unbekannt", "alter": None, "grund": ""}
+    try: wach = float(status.get("wach_ts") or status.get("ts") or 0)
+    except (TypeError, ValueError): wach = 0.0
+    if wach <= 0:
+        return {"zustand": "unbekannt", "alter": None, "grund": ""}
+    try: iv = max(60, int(intervall or status.get("intervall") or 900))
+    except (TypeError, ValueError): iv = 900
+    alter = int(max(0.0, jetzt - wach))
+    grenze = max(1800, iv * 2 + 600)
+    grund = str(status.get("pausiert") or "")
+    if status.get("wach_status") == "pausiert" and grund and alter <= grenze:
+        return {"zustand": "pausiert", "alter": alter, "grund": grund}
+    return {"zustand": "tot" if alter > grenze else "ok",
+            "alter": alter, "grund": grund}
+
+
 def _als_datetime(jetzt=None):
     """Akzeptiert datetime, Zeitstempel oder None (dann Ortszeit jetzt)."""
     if jetzt is None: return datetime.now()
@@ -1957,6 +2005,25 @@ def im_drop_fenster(name, jetzt=None):
         if (von <= minute <= bis) if von <= bis else (minute >= von or minute <= bis):
             return True
     return False
+
+
+def naechste_fenster_ts(jetzt=None):
+    """Naechster Beginn eines belegten Auflegefensters (Ortszeit).
+
+    Der Dienst schlaeft ausserhalb des Fensters bis zu diesem Zeitpunkt,
+    statt jede Minute nachzusehen - die 15-Minuten-Runde laeuft weiter.
+    """
+    d = _als_datetime(jetzt)
+    treffer = []
+    for fenster in DROP_FENSTER.values():
+        for sh, sm, eh, em in fenster:
+            start = d.replace(hour=sh, minute=sm, second=0, microsecond=0)
+            if start <= d:
+                start = start + timedelta(days=1)
+            treffer.append(start.timestamp())
+    if treffer: return min(treffer)
+    # Kein Fenster konfiguriert: nicht in eine Sofortschleife laufen.
+    return (time.time() if jetzt is None else float(jetzt)) + 60
 
 
 def live_takt(haendler, aktiv=None, jetzt=None):
@@ -2013,6 +2080,38 @@ def _jitter(name):
     return (roh / 1000.0 - 1.0) * LIVE_JITTER
 
 
+def shop_gesperrt(health_eintrag):
+    """Sperre oder zwei Fehler in Folge: gerade nicht dicht abfragen."""
+    e = health_eintrag if isinstance(health_eintrag, dict) else {}
+    status = str(e.get("last_status") or "")
+    if status == "challenge": return True
+    if status in ("parser", "error"):
+        try: return int(e.get("fail_streak") or 0) >= 2
+        except (TypeError, ValueError): return False
+    return False
+
+
+def bg_hot_shops(haendler, aktiv=None, health_daten=None, jetzt=None):
+    """PS Direct DE/AT fuer die kurze Hintergrundrunde im Fenster.
+
+    Ausserhalb des Fensters, ohne aktive Auswahl oder bei Sperre/Fehlerserie
+    bleibt die Liste leer - dann laeuft nur die normale 15-Minuten-Runde.
+    """
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    namen = set(aktiv) if aktiv else None
+    daten = health_daten if isinstance(health_daten, dict) else {}
+    out = []
+    for h in haendler or []:
+        name = h.get("name")
+        if not name or name not in BG_HOT_SHOPS: continue
+        if namen is not None and name not in namen: continue
+        if not im_drop_fenster(name, jetzt): continue
+        e = daten.get(name) if isinstance(daten.get(name), dict) else {}
+        if shop_gesperrt(e): continue
+        out.append(h)
+    return out
+
+
 def shop_intervall(name, health_daten=None, jetzt=None):
     """Sekunden bis zur naechsten Pruefung - aus Zustand und Stoerung.
 
@@ -2022,10 +2121,8 @@ def shop_intervall(name, health_daten=None, jetzt=None):
     e = health_daten.get(name) if isinstance(health_daten, dict) else None
     e = e if isinstance(e, dict) else {}
     status = str(e.get("last_status") or "")
-    if status == "challenge":
-        soll = LIVE_RUHE_S
-    elif status in ("parser", "error") and int(e.get("fail_streak") or 0) >= 2:
-        soll = LIVE_GESTOERT_S
+    if shop_gesperrt(e):
+        soll = LIVE_RUHE_S if status == "challenge" else LIVE_GESTOERT_S
     elif im_drop_fenster(name, jetzt):
         soll = LIVE_FENSTER_S
     elif status in ("hit", "expensive"):
@@ -2039,6 +2136,10 @@ def faellige_haendler(haendler, health_daten=None, jetzt=None,
                       budget=None, aktiv=None):
     """Shops der naechsten Live-Runde - die ueberfaelligsten zuerst.
 
+    Shops in einem belegten Auflegefenster stehen immer vorn: Sonst
+    verdraengen ueberfaellige Shops sie aus dem kleinen 10-s-Budget. Eine
+    Sperre oder Fehlerserie hebt den Vorrang auf.
+
     ``budget`` ist die Rundengroesse, nicht das Minutenbudget: eine Runde
     startet hoechstens alle ``LIVE_TAKT`` Sekunden. Weil absteigend nach
     Ueberfaelligkeit sortiert und dann abgeschnitten wird, verhungert kein
@@ -2047,12 +2148,14 @@ def faellige_haendler(haendler, health_daten=None, jetzt=None,
     jetzt = time.time() if jetzt is None else float(jetzt)
     namen = set(aktiv) if aktiv else None
     daten = health_daten if isinstance(health_daten, dict) else {}
-    faellig = []
+    vorrang, faellig = [], []
     for h in haendler or []:
         name = h.get("name")
         if not name: continue
         if namen is not None and name not in namen: continue
         e = daten.get(name) if isinstance(daten.get(name), dict) else {}
+        if im_drop_fenster(name, jetzt) and not shop_gesperrt(e):
+            vorrang.append((name, h)); continue
         try: letzte = float(e.get("last_ts") or 0)
         except (TypeError, ValueError): letzte = 0.0
         alter = max(0.0, jetzt - letzte)
@@ -2060,8 +2163,9 @@ def faellige_haendler(haendler, health_daten=None, jetzt=None,
         # 0.5 s Toleranz: ein gerundetes Intervall soll nicht eine Runde warten.
         if alter + 0.5 >= soll:
             faellig.append((alter - soll, name, h))
+    vorrang.sort(key=lambda t: t[0])
     faellig.sort(key=lambda t: (-t[0], t[1]))
-    out = [h for _, _, h in faellig]
+    out = [h for _, h in vorrang] + [h for _, _, h in faellig]
     if budget is not None:
         try: out = out[:max(1, int(budget))]
         except (TypeError, ValueError): pass

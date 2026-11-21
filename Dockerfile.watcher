@@ -1,0 +1,22 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HOME=/tmp \
+    TZ=Europe/Berlin
+
+WORKDIR /app
+
+COPY cloud_watcher/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && mkdir -p /data \
+    && chown 10001:10001 /data
+
+COPY scan_core.py ./
+COPY cloud_watcher ./cloud_watcher
+
+USER 10001:10001
+VOLUME ["/data"]
+
+CMD ["python", "-m", "cloud_watcher.watcher"]

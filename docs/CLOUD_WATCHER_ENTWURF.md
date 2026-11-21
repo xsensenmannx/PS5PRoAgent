@@ -1,7 +1,14 @@
 # Cloud-Wächter — Entwurf für sechs bis acht Shops
 
-**Stand:** 20.11.2026 · **Status:** Entwurf, nicht umgesetzt
+**Stand:** 21.11.2026 · **Status:** P0 umgesetzt in `cloud_watcher/` (Schattenbetrieb)
 **Baut auf:** `docs/KONZEPT.md` §5/§6 (v1.6) und `docs/RELEASE_1_5.md` §2
+
+> **Umsetzung (21.11.2026):** Der P0-Wächter liegt in `cloud_watcher/` und
+> startet mit zwei Shops (PS Direct DE/AT), 45 s im Fenster und 48 h
+> Schattenbetrieb. Dazu sind Alarm-Outbox mit optionalem Ops-Kanal, Preflight,
+> Tageszusammenfassung, Preistoleranz sowie Challenge- und Request-Budget
+> umgesetzt. Der Sechs-Shop-Ausbau bleibt P1; die Grenzen in diesem Dokument
+> gelten weiter.
 
 Dieses Dokument entscheidet, *was* gebaut würde, *was* es kostet und *wo* die
 Grenzen liegen. Es enthält keinen Code, kein Deployment und keine Änderung an
@@ -122,7 +129,7 @@ wie wichtig er wäre.
 |---|---|---|
 | Abruf und Parser | `scan_core.scan_einen()` | Dieselbe Erkennung wie App und Hintergrunddienst; keine zweite Parser-Wahrheit. |
 | Verifikation | `verify_treffer(h, r, pause=2.0)` | Ein Alarm muss stimmen; der zweite Abruf bleibt Pflicht. |
-| Alarmentscheidung | `alarm_ereignis()` und `alarm_erlaubt()` | Restock/Neupreis, Ruhezeit, stummgeschaltete Shops, Gebrauchtware. |
+| Alarmentscheidung | `alarm_ereignis()` plus `ist_sofort_treffer()` im Wächter | Restock/Neupreis, bestätigter Sofortkauf, Neuware; `alarm_erlaubt()` bleibt die App-Regel. |
 | Nachricht | `webhook_nachricht()` | ntfy, Telegram, Discord und generisch bleiben identisch zur App. |
 | Zustellung | `sende_webhook_alarm()` | Enthält Dedupe, Retry und die Statusdatei. |
 | Maskierung | `redact_url()` | Webhook-Tokens erscheinen nie im Log. |

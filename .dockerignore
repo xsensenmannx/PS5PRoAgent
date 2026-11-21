@@ -1,0 +1,9 @@
+# Der Waechter braucht nur scan_core.py und cloud_watcher/.
+*
+!scan_core.py
+!cloud_watcher/
+!cloud_watcher/**
+!Dockerfile.watcher
+cloud_watcher/.env
+cloud_watcher/data/
+cloud_watcher/__pycache__/
