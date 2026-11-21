@@ -19,4 +19,9 @@ COPY cloud_watcher ./cloud_watcher
 USER 10001:10001
 VOLUME ["/data"]
 
+# Ein haengender Loop schreibt keine frische Wachzeit mehr. 180 s Toleranz
+# liegen deutlich ueber dem Schreibabstand von 15 s.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD python -c "import json, os, time; p = os.path.join(os.environ.get('WATCH_DATA_DIR', '/data'), 'watcher_status.json'); d = json.load(open(p, encoding='utf-8')); raise SystemExit(0 if time.time() - float(d.get('wach_ts') or 0) <= 180 else 1)"
+
 CMD ["python", "-m", "cloud_watcher.watcher"]

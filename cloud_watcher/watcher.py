@@ -40,6 +40,11 @@ import scan_core as core  # noqa: E402  (Pfad steht erst zur Laufzeit fest)
 
 SCHEMA = 3
 STATE_FILE = "cloud_watch_state.json"
+STATUS_FILE = "watcher_status.json"
+# Die Statusdatei wird haeufiger geschrieben als der Healthcheck prueft.
+STATUS_TAKT = 15
+# Der Lebenszeichen-Ping laeuft unabhaengig von faelligen Shops.
+HEARTBEAT_TAKT = 60
 CHALLENGE_TAKT = 900
 # Nach drei Challenges in Folge bleibt der Shop eine Stunde aus.
 CHALLENGE_LANG = 3600
@@ -1164,13 +1169,89 @@ def melde(r, event, konfig, zustand, schatten, settings, tz, pfad=None):
     log(basis)
 
 
-def heartbeat(konfig):
+def outbox_stand(zustand):
+    """Offene und fehlgeschlagene Outbox-Eintraege fuer den Status."""
+    box = outbox_sicherstellen(zustand)
+    items = box.get("items") or []
+    offen = sum(
+        1 for item in items
+        if isinstance(item, dict) and item.get("status") in ("pending", "sending")
+    )
+    failed = sum(
+        1 for item in items
+        if isinstance(item, dict) and item.get("status") == "failed"
+    )
+    return {"offen": offen, "failed": failed,
+            "gesamt": _outbox_int(box.get("gesamt"), 0)}
+
+
+def status_daten(zustand, konfig, jetzt, tz, budget_verbraucht=0):
+    """Kompakter lokaler Status: Wachzeit, Runden, Outbox und Budget."""
+    zustand = zustand if isinstance(zustand, dict) else {}
+    jetzt = _outbox_float(jetzt, time.time())
+    return {
+        "schema": 1,
+        "ts": round(jetzt, 3),
+        "wach_ts": round(jetzt, 3),
+        "iso": iso_ts(jetzt, tz),
+        "pid": os.getpid(),
+        "runden": _outbox_int(zustand.get("runden"), 0),
+        "letzte_runde": round(
+            _outbox_float(zustand.get("letzte_runde"), 0.0), 3
+        ),
+        "schatten": schatten_aktiv(zustand, jetzt, konfig.shadow),
+        "schatten_bis": _outbox_float(zustand.get("schatten_bis"), 0.0),
+        "outbox": outbox_stand(zustand),
+        "budget": {
+            "max": _outbox_int(konfig.max_req_min, 12),
+            "verbraucht": max(0, _outbox_int(budget_verbraucht, 0)),
+        },
+    }
+
+
+def status_schreiben(status, pfad):
+    """Statusdatei atomar schreiben; ein Fehler stoppt den Loop nicht."""
+    if not pfad or not isinstance(status, dict):
+        return False
+    try:
+        zustand_speichern(pfad, status)
+        return True
+    except Exception as e:
+        log({
+            "typ": "status_fehler",
+            "ts": round(time.time(), 3),
+            "info": type(e).__name__,
+        })
+        return False
+
+
+def heartbeat_faellig(letzte, jetzt, takt=HEARTBEAT_TAKT):
+    """Der Ping laeuft im eigenen Takt, unabhaengig von faelligen Shops."""
+    try:
+        return float(jetzt) - float(letzte) >= float(takt)
+    except (TypeError, ValueError):
+        return True
+
+
+def heartbeat(konfig, status=None):
     """Optionaler Lebenszeichen-Ping (z. B. healthchecks.io). Nie die URL loggen."""
     if not konfig.heartbeat_url:
         return
+    text = "ok"
+    if isinstance(status, dict):
+        box = status.get("outbox")
+        box = box if isinstance(box, dict) else {}
+        budget = status.get("budget")
+        budget = budget if isinstance(budget, dict) else {}
+        text = "ok runden=%s offen=%s budget=%s/%s" % (
+            status.get("runden"),
+            box.get("offen"),
+            budget.get("verbraucht"),
+            budget.get("max"),
+        )
     try:
         ok, info = core.webhook_senden(
-            konfig.heartbeat_url, "generisch", "", "ok", timeout=5
+            konfig.heartbeat_url, "generisch", "", text, timeout=5
         )
     except Exception as e:
         ok, info = False, type(e).__name__
@@ -1278,6 +1359,12 @@ def main():
             pass
 
     request_verlauf = []
+    status_pfad = os.path.join(konfig.data_dir, STATUS_FILE)
+    letzte_status = 0.0
+    letzte_heartbeat = 0.0
+    # Sofort eine frische Datei, damit der Healthcheck nicht auf den ersten
+    # Loop warten muss.
+    status_schreiben(status_daten(zustand, konfig, jetzt, tz, 0), status_pfad)
     try:
         while not STOP.is_set():
             jetzt = time.time()
@@ -1285,6 +1372,16 @@ def main():
             abschluss = tageswechsel(zustand, jetzt, tz)
             if abschluss:
                 log(dict(abschluss, typ="tag", ts=round(jetzt, 3)))
+            status = status_daten(
+                zustand, konfig, jetzt, tz, len(request_verlauf)
+            )
+            # Der Ping misst den Loop, nicht die Faelligkeit der Shops.
+            if heartbeat_faellig(letzte_heartbeat, jetzt):
+                heartbeat(konfig, status)
+                letzte_heartbeat = jetzt
+            if jetzt - letzte_status >= STATUS_TAKT:
+                if status_schreiben(status, status_pfad):
+                    letzte_status = jetzt
             if not schatten:
                 outbox_drain(
                     zustand,
@@ -1431,6 +1528,12 @@ def main():
                             "info": "zustand: " + type(e).__name__,
                         }
                     )
+                if status_schreiben(
+                    status_daten(zustand, konfig, jetzt_nach, tz,
+                                 len(request_verlauf)),
+                    status_pfad,
+                ):
+                    letzte_status = jetzt_nach
                 log(
                     {
                         "typ": "runde",
@@ -1473,6 +1576,11 @@ def main():
             core.flush_http_cache()
         except Exception:
             pass
+        status_schreiben(
+            status_daten(zustand, konfig, time.time(), tz,
+                         len(request_verlauf)),
+            status_pfad,
+        )
         log(
             {
                 "typ": "stop",

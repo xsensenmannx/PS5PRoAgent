@@ -153,7 +153,10 @@ docker compose logs -f --tail=50
 
 Das Composefile baut aus dem Repository-Hauptverzeichnis, läuft mit
 `read_only`, ohne Capabilities und als UID 10001. Der Zustand liegt im
-benannten Volume `watcher_data`.
+benannten Volume `watcher_data`. Das Image bringt einen `HEALTHCHECK` mit,
+der `watcher_status.json` liest; `docker compose ps` zeigt damit `healthy`
+oder `unhealthy`. Auf Fly.io wird der Docker-Healthcheck nicht ausgewertet –
+dort tragen die Neustartpolitik und der externe Heartbeat.
 
 ```bash
 # Zustand ansehen
@@ -186,7 +189,7 @@ der Container nicht.
 | `WATCH_WEBHOOK_URL` | leer | **Geheim.** ntfy-/Telegram-/Discord-URL |
 | `WATCH_WEBHOOK_PRESET` | automatisch | `ntfy`, `telegram`, `discord`, `generisch` |
 | `WATCH_OPS_WEBHOOK_URL` | leer | Optionaler, unabhängiger Kanal nur für den Systemalarm; geheim |
-| `WATCH_HEARTBEAT_URL` | leer | Optionaler Ping nach jeder Runde, geheim |
+| `WATCH_HEARTBEAT_URL` | leer | Optionaler Lebenszeichen-Ping alle 60 s, geheim |
 
 `WATCH_MAX_REQ_MIN` zählt echte Abrufe im gleitenden 60-Sekunden-Fenster; ist
 es erschöpft, wartet der Wächter kurz, statt heiß zu drehen, und bedient bei
@@ -254,6 +257,14 @@ wird nur bei einem bestätigten, sofort kaufbaren, nicht gebrauchten Treffer
 `true`; unbestätigte Treffer, Vorbestellungen und Gebrauchtware bleiben
 `false`, damit der spätere echte Restock nicht verdeckt wird. Die Datei wird
 über eine temporäre Datei plus `os.replace` atomar geschrieben.
+
+Zusätzlich schreibt der Loop höchstens alle 15 s `watcher_status.json` mit
+`wach_ts`, `runden`, `letzte_runde`, Schattenmodus, Outbox-Stand und
+Budgetverbrauch. Der Docker-Healthcheck liest nur diese Datei und meldet den
+Container nach 180 s ohne frische Wachzeit als unhealthy. Damit ist ein
+hängender Loop von einer gewollten Challenge-Pause unterscheidbar: Der
+Heartbeat pingt alle 60 s unabhängig von fälligen Shops, die Statusdatei
+bleibt frisch.
 
 ### Ausfallsicherung der Live-Alarme
 

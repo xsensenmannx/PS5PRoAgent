@@ -2596,7 +2596,64 @@ def watcher_p0_tests():
         geladen = cw.zustand_laden(pfad, frueh, 48)
         check("p0 tag persistiert", geladen["tag"].get("datum"), "2026-11-22")
 
-        # 6. Alte Zustaende bleiben ohne Datenverlust migrierbar.
+        # 6. Lokaler Status: Wachzeit, Runden, Outbox, Budget und Heartbeat.
+        z = cw.neuer_zustand(3000.0, 48)
+        z["runden"] = 7
+        z["letzte_runde"] = 2990.0
+        box = cw.outbox_sicherstellen(z)
+        box["items"] = [
+            {"id": "a", "status": "pending"},
+            {"id": "b", "status": "sending"},
+            {"id": "c", "status": "failed"},
+            {"id": "d", "status": "sent"},
+        ]
+        box["gesamt"] = 4
+        k_status = cw.Konfig.aus_env({"WATCH_MAX_REQ_MIN": "9"})
+        status = cw.status_daten(z, k_status, 3000.0, None, 3)
+        check("p0 status wach", status.get("wach_ts"), 3000.0)
+        check("p0 status runden", status.get("runden"), 7)
+        check("p0 status outbox", status.get("outbox"),
+              {"offen": 2, "failed": 1, "gesamt": 4})
+        check("p0 status budget", status.get("budget"),
+              {"max": 9, "verbraucht": 3})
+        status_pfad = os.path.join(tmp, cw.STATUS_FILE)
+        check("p0 status schreiben",
+              cw.status_schreiben(status, status_pfad), True)
+        with open(status_pfad, encoding="utf-8") as f:
+            gespeichert = json.load(f)
+        check("p0 status datei wach", gespeichert.get("wach_ts"), 3000.0)
+        check("p0 status atomar", os.path.exists(status_pfad + ".tmp"), False)
+        check("p0 heartbeat faellig", cw.heartbeat_faellig(0.0, 60.0), True)
+        check("p0 heartbeat nicht faellig",
+              cw.heartbeat_faellig(10.0, 69.0), False)
+        pings = []
+        alt_send = core.webhook_senden
+        alt_log = cw.log
+        core.webhook_senden = lambda url, preset, titel, text, timeout=5: (
+            pings.append((url, text)) or (True, "HTTP 200"))
+        cw.log = lambda d: None
+        try:
+            k_hb = cw.Konfig.aus_env({
+                "WATCH_HEARTBEAT_URL": "https://hc-ping.com/secret-hb"})
+            cw.heartbeat(k_hb, status)
+        finally:
+            core.webhook_senden = alt_send
+            cw.log = alt_log
+        check("p0 heartbeat text", "runden=7" in pings[0][1], True)
+        check("p0 heartbeat outbox", "offen=2" in pings[0][1], True)
+        check("p0 heartbeat budget", "budget=3/9" in pings[0][1], True)
+        check("p0 heartbeat url nicht im text",
+              "secret-hb" not in pings[0][1], True)
+
+        # 7. Der Container-Healthcheck prueft die Statusdatei.
+        with open(os.path.join(ROOT, "Dockerfile.watcher"), encoding="utf-8") as f:
+            dockerfile = f.read()
+        check("p0 healthcheck vorhanden", "HEALTHCHECK" in dockerfile, True)
+        check("p0 healthcheck statusdatei",
+              "watcher_status.json" in dockerfile, True)
+        check("p0 healthcheck wachzeit", "wach_ts" in dockerfile, True)
+
+        # 8. Alte Zustaende bleiben ohne Datenverlust migrierbar.
         with open(pfad, "w", encoding="utf-8") as f:
             json.dump({"schema": 2, "angelegt": 1.0, "schatten_bis": 1.0,
                        "shops": {}, "runden": 0, "alarme_schatten": 0,
