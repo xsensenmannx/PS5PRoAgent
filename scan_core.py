@@ -105,6 +105,19 @@ WEBHOOK_PRESETS = ("ntfy","telegram","discord","generisch")
 # in HAENDLER vorkommen; unbekannte werden ignoriert.
 HOT_SHOPS = ["Amazon DE","MediaMarkt DE","Saturn DE","Otto DE",
              "Cyberport DE","Coolblue DE"]
+# ── Schneller JSON-LD-Pfad ──────────────────────────────────────────
+# Diese Shops liefern Preis und Verfuegbarkeit in einem Product-/BuyAction-
+# JSON-LD-Block in den ersten ~200 KB der Produktseite. Dann reicht ein
+# Teilabruf, der danach abbricht; der Rest der Seite wird nicht geladen.
+# Das ist derselbe oeffentliche GET wie bisher - kein separater API-Pfad,
+# keine Umgehung. Shops ohne belegten Block bleiben beim HTML-Pfad.
+#   MediaMarkt/Saturn: BuyAction.object (ProductGroup) bei ~3,5 KB
+#   PS Direct DE/AT:   Product bei ~33 KB (nach dem Redirect)
+#   Alternate DE:      Product bei ~7 KB
+FAST_JSON_SHOPS = frozenset(("MediaMarkt DE", "Saturn DE",
+                             "PS Direct DE", "PS Direct AT",
+                             "Alternate DE"))
+FAST_JSON_BYTES = 192 * 1024
 # ── Live-Taktung ────────────────────────────────────────────────────
 # "Live" heisst hier nicht Push (kein Shop bietet einen Kanal), sondern:
 # faellige Shops in kurzen Runden. Ein Shop, der zuletzt kaufbar war, wird
@@ -163,7 +176,12 @@ SHOP_CONFIG_MAX_MARKERS = 24
 # ── Händler ─────────────────────────────────────────────────────────
 def _h(n,l,u): return {"name":n,"land":l,"urls":[u]}
 HAENDLER = [
-    _h("PS Direct DE","DE","https://direct.playstation.com/de-de/buy-consoles/playstation5-pro-console-2-tb"),
+    # Die alte direct.playstation.com-URL leitet seit Oktober 2026 per 301
+    # auf playstation.com/de-de/ps5/ps5-pro/buy-now/ um. Das Ziel direkt
+    # abrufen spart pro Pruefung einen Request und eine Redirect-Runde.
+    # Geprueft 20.11.2026: 200 ohne Redirect, Canonical und og:url zeigen
+    # auf genau diese URL, Product-JSON-LD mit 899,99 EUR und OutOfStock.
+    _h("PS Direct DE","DE","https://www.playstation.com/de-de/ps5/ps5-pro/buy-now/"),
     _h("Amazon DE","DE","https://www.amazon.de/dp/B0FRYBZR91"),
     _h("MediaMarkt DE","DE","https://www.mediamarkt.de/de/product/_sony-playstationr5-pro-2-tb-konsole-3018022.html"),
     _h("Saturn DE","DE","https://www.saturn.de/de/product/_sony-playstationr5-pro-2-tb-konsole-3018022.html"),
@@ -184,7 +202,7 @@ HAENDLER = [
     _h("Alza DE","DE","https://www.alza.de/search.htm?exps=playstation+5+pro+2tb"),
     _h("Spielekauf.de","DE","https://www.spielekauf.de/ps5/konsolen/pro/"),
     _h("Geizhals DE","DE","https://geizhals.de/sony-playstation-5-pro-2tb-weiss-a3298140.html"),
-    _h("PS Direct AT","AT","https://direct.playstation.com/de-at/buy-consoles/playstation5-pro-console-2-tb"),
+    _h("PS Direct AT","AT","https://www.playstation.com/de-at/ps5/ps5-pro/buy-now/"),
     _h("MediaMarkt AT","AT","https://www.mediamarkt.at/de/product/_sony-playstationr5-pro-2-tb-2049935.html"),
     _h("Saturn AT","AT","https://www.saturn.at/de/search.html?query=playstation+5+pro+2tb"),
     _h("Libro AT","AT","https://www.libro.at/suche?q=playstation+5+pro+konsole"),
@@ -470,7 +488,9 @@ def extract_jsonld(html):
 def walk_products(node, acc):
     if isinstance(node,dict):
         t=node.get("@type"); types=t if isinstance(t,list) else [t] if t else []
-        if "Product" in types: acc.append(node)
+        # ProductGroup deckt MediaMarkt/Saturn ab: Dort steht das Produkt
+        # als BuyAction.object, nicht als eigenstaendiges Product.
+        if "Product" in types or "ProductGroup" in types: acc.append(node)
         for v in node.values(): walk_products(v,acc)
     elif isinstance(node,list):
         for i in node: walk_products(i,acc)
@@ -1012,6 +1032,31 @@ def _read_capped(resp):
     return b"".join(stuecke),False
 
 
+def _read_bis(resp, limit):
+    """Liest hoechstens ``limit`` Bytes und schliesst die Antwort danach.
+
+    Fuer den JSON-LD-Teilabruf: Der Block steht am Seitenanfang, der Rest
+    (Bewertungen, Empfehlungen, Fusszeile) wird nicht mehr uebertragen.
+    Ein Byte mehr wird gelesen, um ``truncated`` ehrlich zu setzen.
+    """
+    try: ziel=max(1,int(limit))
+    except (TypeError,ValueError): ziel=FAST_JSON_BYTES
+    stuecke=[]; gesamt=0; roh=b""
+    try:
+        for stueck in resp.iter_content(65536):
+            if not stueck: continue
+            rest=ziel+1-gesamt
+            if len(stueck)>=rest:
+                stuecke.append(stueck[:rest]); gesamt+=rest; break
+            stuecke.append(stueck); gesamt+=len(stueck)
+    finally:
+        try: resp.close()
+        except Exception: pass
+    roh=b"".join(stuecke)
+    if len(roh)>ziel: return roh[:ziel],True
+    return roh,False
+
+
 class HttpCache:
     """ETag/Last-Modified plus das letzte Extraktionsergebnis pro URL.
 
@@ -1132,14 +1177,15 @@ def fehler_klasse(fehler):
             else "error")
 
 
-def _try_url(u, att, proxy=None, force=False):
+def _try_url(u, att, proxy=None, force=False, limit=None):
     """Eine Anfrage. Rueckgabe (html, fehler, meta).
 
     meta["not_modified"] signalisiert einen 304. Bedingte Header gehen nur beim
     ersten Versuch mit: ein Cache-Buster im Retry wuerde den Cache ohnehin
     umgehen, und ein 304 auf einen Retry waere wertlos. ``force`` ueberspringt
     die Validatoren komplett - die Verifikation eines Treffers braucht den
-    echten aktuellen Stand, keinen 304 aus dem letzten Scan.
+    echten aktuellen Stand, keinen 304 aus dem letzten Scan. ``limit`` beendet
+    den Abruf nach so vielen dekomprimierten Bytes (JSON-LD-Teilabruf).
     """
     uu=u
     if att>0: uu+=("&" if "?" in uu else "?")+"_cb="+str(int(time.time()*1000))
@@ -1182,8 +1228,14 @@ def _try_url(u, att, proxy=None, force=False):
                         r.close()
                         return None,"Bot-Schutz (HTTP %d)"%r.status_code,meta
                 r.close(); return None,f"HTTP {r.status_code}",meta
-            roh,zu_gross=_read_capped(r)
-            if zu_gross: return None,"Antwort zu gross",meta
+            if limit is not None:
+                roh,gekuerzt=_read_bis(r,limit)
+                meta["partial"]=bool(gekuerzt)
+            else:
+                roh,zu_gross=_read_capped(r)
+                if zu_gross: return None,"Antwort zu gross",meta
+                meta["partial"]=False
+            meta["bytes"]=len(roh)
             # UTF-8 zuerst: requests faellt fuer text/html ohne charset im
             # Header auf ISO-8859-1 zurueck und zerlegt damit Umlaute (e-tec,
             # gemessen 17.11.2026: "weiÃ" statt "weiß"). Erst wenn striktes
@@ -1196,8 +1248,15 @@ def _try_url(u, att, proxy=None, force=False):
         req=Request(uu,headers=hd)
         with urlopen(req,timeout=TIMEOUT) as resp:
             meta["etag"]=resp.headers.get("ETag"); meta["last_modified"]=resp.headers.get("Last-Modified")
-            roh=resp.read(MAX_HTML_BYTES+1)
-            if len(roh)>MAX_HTML_BYTES: return None,"Antwort zu gross",meta
+            if limit is not None:
+                roh=resp.read(int(limit)+1)
+                meta["partial"]=len(roh)>int(limit)
+                if meta["partial"]: roh=roh[:int(limit)]
+            else:
+                roh=resp.read(MAX_HTML_BYTES+1)
+                if len(roh)>MAX_HTML_BYTES: return None,"Antwort zu gross",meta
+                meta["partial"]=False
+            meta["bytes"]=len(roh)
             return roh.decode("utf-8",errors="replace"),None,meta
     except HTTPError as e:
         # urlopen wirft bei 4xx/5xx; ohne diese Normalisierung greift die
@@ -1213,13 +1272,14 @@ def _try_url(u, att, proxy=None, force=False):
         return None,f"HTTP {e.code}",meta
     except Exception as e: return None,str(e)[:50],meta
 
-def fetch_mit_cache(urls, cancel=None, force=False):
+def fetch_mit_cache(urls, cancel=None, force=False, limit=None):
     """Wie fetch_html_multi, liefert zusaetzlich ein 304-Ergebnis aus dem Cache.
 
     ``cancel`` ist ein optionales threading.Event. Es wird vor jedem Versuch
     und vor jeder Retry-Pause geprueft; ein laufender HTTP-Request selbst kann
     nicht unterbrochen werden, aber danach wird kein weiterer Versuch gestartet.
     ``force`` laedt die Seite ohne ETag/Last-Modified neu (Treffer-Verifikation).
+    ``limit`` liest nur den Seitenanfang und beendet die Verbindung danach.
     """
     last=None
     proxy=os.environ.get("PS5_PROXY","").strip() or None
@@ -1232,8 +1292,12 @@ def fetch_mit_cache(urls, cancel=None, force=False):
             if _abgebrochen(cancel): raise ScanAbgebrochen
             # ``force`` nur weiterreichen, wenn es gesetzt ist: Tests ersetzen
             # _try_url durch ein einfaches Lambda mit drei Argumenten.
-            h,e,meta=(_try_url(u,att,proxy,force=True) if force
-                      else _try_url(u,att,proxy))
+            if limit is not None:
+                h,e,meta=(_try_url(u,att,proxy,force=True,limit=limit) if force
+                          else _try_url(u,att,proxy,limit=limit))
+            else:
+                h,e,meta=(_try_url(u,att,proxy,force=True) if force
+                          else _try_url(u,att,proxy))
             if _abgebrochen(cancel): raise ScanAbgebrochen
             if meta.get("not_modified"):
                 if force:
@@ -1312,7 +1376,74 @@ def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
     r.update(extra)
     return r
 
+def _scan_einen_json(h, cancel=None):
+    """Teilabruf mit JSON-LD; ``None`` bedeutet: HTML-Pfad versuchen.
+
+    Der Block steht bei den vorgesehenen Shops in den ersten 192 KB. Ist er
+    unvollstaendig, fehlt die Verfuegbarkeit oder passt das Produkt nicht,
+    wird bewusst ``None`` zurueckgegeben - dann laedt der normale Pfad die
+    Seite. Ein Fehler hier ist kein Shop-Fehler.
+    """
+    st=time.time()
+    try:
+        if _abgebrochen(cancel): raise ScanAbgebrochen
+        html,fu,_cached,meta=fetch_mit_cache(
+            h["urls"], cancel=cancel, force=True, limit=FAST_JSON_BYTES)
+        if _abgebrochen(cancel): raise ScanAbgebrochen
+        if not html:
+            return None
+        if detect_challenge(html[:3000].lower()):
+            return _res(h,None,"challenge",time.time()-st,"Bot-Challenge",fu,
+                        avail_state="unknown",stock_source="challenge")
+        s=extract_structured(html)
+        # Ohne Preis oder ohne ausdrueckliche Verfuegbarkeit ist der
+        # Teilabruf keine Entscheidungsgrundlage; der HTML-Pfad sieht mehr.
+        if not s.get("ist_konsole") or s.get("preis") is None:
+            return None
+        if s.get("verfuegbar") is None and s.get("state") is None:
+            return None
+        p=s["preis"]; state=s.get("state") or "unknown"; v=s.get("verfuegbar")
+        if state in CHANCE_STATES: v=True
+        res=_res(h,p,classify(v,p,MAX_PREIS,state),time.time()-st,None,fu,
+                 signal="jsonld",condition=s.get("condition"),
+                 seller=s.get("seller"),verfuegbarkeit=s.get("verfuegbarkeit"),
+                 sofort=s.get("sofort"),avail_state=state,
+                 stock_source="jsonld",gtin=s.get("gtin"),sku=s.get("sku"),
+                 bundle=bool(s.get("bundle")),
+                 marketplace=_marketplace(s.get("seller"),h["name"]))
+        res["fresh"]=True
+        res["confidence"]=berechne_konfidenz(res)
+        res["bytes"]=int(meta.get("bytes") or 0)
+        res["_fast"]=True
+        # Ein Beleg entsteht nur fuer echte Treffer/Chancen, wie im HTML-Pfad.
+        if res["klass"] in ("hit","chance"):
+            try:
+                beleg=beleg_erzeugen(html,p,state)
+                if beleg:
+                    res["beleg"]=beleg
+                    beleg_speichern(h["name"],beleg)
+            except Exception: pass
+        return res
+    except ScanAbgebrochen:
+        return None
+    except Exception as e:
+        # Netz-/Sperrfehler nicht als "kein JSON-LD" behandeln: sonst wuerde
+        # der HTML-Pfad denselben gesperrten Shop sofort noch einmal abrufen.
+        err=str(e)[:60]
+        return _res(h,None,fehler_klasse(err),time.time()-st,err,
+                    avail_state="unknown",stock_source="error")
+
+
 def scan_einen(h, cancel=None, force=False):
+    """Ein Shop: erst der JSON-LD-Teilabruf, sonst die ganze Seite."""
+    if h.get("name") in FAST_JSON_SHOPS:
+        r=_scan_einen_json(h, cancel=cancel)
+        if r is not None:
+            return r
+    return _scan_einen_html(h, cancel=cancel, force=force)
+
+
+def _scan_einen_html(h, cancel=None, force=False):
     st=time.time()
     try:
         if _abgebrochen(cancel): raise ScanAbgebrochen
@@ -1334,6 +1465,7 @@ def scan_einen(h, cancel=None, force=False):
             # Ein 304 ist ein gueltiger Stand, aber keine frische Antwort.
             res["fresh"]=False
             res["confidence"]=berechne_konfidenz(res)
+            res["bytes"]=int(meta.get("bytes") or 0)
             res["_cache"]=True
             return res
         if detect_challenge(html[:3000].lower()):
@@ -1415,6 +1547,7 @@ def scan_einen(h, cancel=None, force=False):
                  marketplace=_marketplace(s.get("seller"),h["name"]))
         res["fresh"]=True
         res["confidence"]=berechne_konfidenz(res)
+        res["bytes"]=int(meta.get("bytes") or 0)
         # Ein Beleg entsteht nur fuer echte Treffer/Chancen, nicht fuer jede
         # der 42 Seiten. Der Ausschnitt ist klein und enthaelt keine Tokens.
         if res["klass"] in ("hit","chance"):

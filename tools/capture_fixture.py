@@ -305,7 +305,10 @@ def pruefe_fixtures(out_dir=FIXTURE_DIR):
         try:
             with open(pfad, encoding="utf-8") as f:
                 fx = json.load(f)
-            if fx.get("shop") != shop["name"]:
+            # Auch die URL muss zur aktuellen Shop-Konfiguration passen:
+            # Eine veraltete Fixture-URL soll hier auffallen, nicht erst
+            # wenn der Parser die neue Seite nicht mehr erkennt.
+            if fx.get("shop") != shop["name"] or fx.get("url") not in shop["urls"]:
                 fehlend.append(shop["name"])
         except Exception:
             fehlend.append(shop["name"])

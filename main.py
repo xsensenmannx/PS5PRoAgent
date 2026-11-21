@@ -1918,7 +1918,7 @@ class MainUI(FloatLayout):
     def _send_test_alarm(self):
         try:
             ok=notify(branding.TEST_TITLE,"Benachrichtigungen funktionieren.",
-                      url="https://direct.playstation.com/de-de/buy-consoles/playstation5-pro-console-2-tb")
+                      url="https://www.playstation.com/de-de/ps5/ps5-pro/buy-now/")
         except Exception: ok=False
         self._toast("TESTALARM GESENDET" if ok else "TESTALARM FEHLGESCHLAGEN",
                     color=CARD_STATUS["hit"] if ok else PS1_YELLOW)

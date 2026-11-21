@@ -291,7 +291,8 @@ def main_tests():
     # so ein Datenfehler: der AT-Filter zeigte damit einen deutschen Shop.
     # Ausnahmen mit Grund: PS Direct fuehrt DE und AT unter derselben .com-Domain,
     # Computeruniverse ist ein deutscher Shop auf .net.
-    ausnahmen = ("direct.playstation.com", "www.computeruniverse.net")
+    ausnahmen = ("direct.playstation.com", "www.playstation.com",
+                 "www.computeruniverse.net")
     falsch = []
     for h in core.HAENDLER:
         host = h["urls"][0].split("/")[2].lower()
@@ -1046,6 +1047,7 @@ def fixture_tests():
     ordner = os.path.join(ROOT, "tools", "fixtures")
     namen = sorted(n for n in os.listdir(ordner) if n.endswith(".json"))
     shop_namen = {h["name"] for h in core.HAENDLER}
+    shop_urls = {h["name"]: h["urls"] for h in core.HAENDLER}
     gesehen = []
     check("Fixtures vorhanden", len(namen) >= 5 + len(shop_namen), True)
     for name in namen:
@@ -1061,6 +1063,10 @@ def fixture_tests():
                   fx.get("shop") in shop_namen, True)
             check("fixture %s name passt" % name, fx.get("name"),
                   os.path.splitext(name)[0])
+            # Die Fixture muss auf eine aktuell konfigurierte Shop-URL zeigen.
+            # Sonst bleibt eine umgezogene URL unbemerkt gruen.
+            check("fixture %s URL aktuell" % name,
+                  fx.get("url") in shop_urls.get(fx.get("shop"), ()), True)
             gesehen.append(fx.get("shop"))
         if exp.get("challenge"):
             check("fixture %s challenge" % name, core.detect_challenge(html.lower()), True)
@@ -1904,6 +1910,93 @@ def amazon_tests():
     check("400 ohne Schutz bleibt Fehler", core.fehler_klasse("HTTP 400"), "error")
 
 
+def fastpath_tests():
+    """JSON-LD-Teilabruf: BuyAction, Lesegrenze, Fallback, PS-Direct-Ziel."""
+    buy = ('<script type="application/ld+json">'
+           '{"@type":"BuyAction","object":{"@type":"ProductGroup",'
+           '"name":"SONY PlayStation\u00ae5 Pro - 2 TB Spielekonsole",'
+           '"sku":"3018022","gtin13":"0711719024040",'
+           '"offers":{"@type":"Offer","price":899.99,'
+           '"priceCurrency":"EUR",'
+           '"availability":"https://schema.org/OutOfStock"}}}'
+           '</script>')
+    st = core.extract_structured(buy)
+    check("buyaction ist_konsole", st["ist_konsole"], True)
+    check("buyaction preis", st["preis"], 899.99)
+    check("buyaction verfuegbar", st["verfuegbar"], False)
+    check("buyaction state", st["state"], "sold_out")
+    check("buyaction gtin", st["gtin"], "0711719024040")
+    check("buyaction sku", st["sku"], "3018022")
+
+    class _R:
+        def __init__(self, chunks):
+            self.chunks = chunks
+            self.closed = False
+
+        def iter_content(self, n):
+            yield from self.chunks
+
+        def close(self):
+            self.closed = True
+
+    r = _R([b"a" * 10, b"b" * 10])
+    roh, gekuerzt = core._read_bis(r, 15)
+    check("read_bis limit", len(roh), 15)
+    check("read_bis gekuerzt", gekuerzt, True)
+    check("read_bis schliesst", r.closed, True)
+    check("read_bis kurz", core._read_bis(_R([b"abc"]), 15), (b"abc", False))
+
+    _alt_fetch = core.fetch_mit_cache
+    _alt_beleg = core.beleg_speichern
+    core.beleg_speichern = lambda *a, **k: True
+    try:
+        core.fetch_mit_cache = lambda *a, **k: (
+            buy, "https://shop/x", None, {"bytes": len(buy)})
+        schnell = core._scan_einen_json({"name": "MediaMarkt DE", "land": "DE",
+                                         "urls": ["https://shop/x"]})
+        check("fastpath preis", schnell["preis"], 899.99)
+        check("fastpath klasse", schnell["klass"], "unavail")
+        check("fastpath bytes", schnell["bytes"], len(buy))
+        core.fetch_mit_cache = lambda *a, **k: (
+            "<html>kein jsonld</html>", "https://shop/x", None, {"bytes": 20})
+        check("fastpath fallback", core._scan_einen_json(
+            {"name": "MediaMarkt DE", "land": "DE", "urls": ["https://shop/x"]}), None)
+
+        def _gesperrt(*a, **k):
+            raise RuntimeError("Bot-Schutz (HTTP 403)")
+        core.fetch_mit_cache = _gesperrt
+        sperre = core._scan_einen_json(
+            {"name": "MediaMarkt DE", "land": "DE", "urls": ["https://shop/x"]})
+        check("fastpath sperre", sperre["klass"], "challenge")
+    finally:
+        core.fetch_mit_cache = _alt_fetch
+        core.beleg_speichern = _alt_beleg
+
+    # Die echte PS-Direct-Fixture (Captured 20.11.2026) muss auch durch den
+    # Teilabruf-Pfad gehen, nicht nur durch extract_structured.
+    with open(os.path.join(ROOT, "tools", "fixtures", "shop-ps-direct-de.json"),
+              encoding="utf-8") as f:
+        ps = json.load(f)
+    _alt_fetch = core.fetch_mit_cache
+    try:
+        core.fetch_mit_cache = lambda *a, **k: (
+            ps["html"], ps["url"], None, {"bytes": len(ps["html"])})
+        pd = core._scan_einen_json({"name": "PS Direct DE", "land": "DE",
+                                    "urls": [ps["url"]]})
+        check("fastpath ps direct preis", pd["preis"], 899.99)
+        check("fastpath ps direct zustand", pd["avail_state"], "sold_out")
+        check("fastpath ps direct klasse", pd["klass"], "unavail")
+        check("fastpath ps direct url", pd["url"], ps["url"])
+        check("fastpath ps direct signal", pd["signal"], "jsonld")
+    finally:
+        core.fetch_mit_cache = _alt_fetch
+
+    check("ps direct de ziel", core.HAENDLER_BASIS["PS Direct DE"][0],
+          "https://www.playstation.com/de-de/ps5/ps5-pro/buy-now/")
+    check("ps direct at ziel", core.HAENDLER_BASIS["PS Direct AT"][0],
+          "https://www.playstation.com/de-at/ps5/ps5-pro/buy-now/")
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -1923,6 +2016,7 @@ if __name__ == "__main__":
         kauf_tests()
         v14_tests()
         live_tests()
+        fastpath_tests()
         spec_tests()
         play_rebrand_tests()
     finally:
