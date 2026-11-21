@@ -163,6 +163,10 @@ DROP_FENSTER = {
 }
 BG_STATUS_FILE = "ps5pro_bg.json"
 HEALTH_FILE = "ps5pro_health.json"
+# Letzte Pruefungen je Shop fuer die Zuordnung verpasster Fenster:
+# Zeit, Status, Fehlertext und Dauer. Klein halten, die Datei wird oft
+# geschrieben und enthaelt nur lokale Diagnose, keinen Verlauf fuer immer.
+HEALTH_VERLAUF_MAX = 30
 CRASH_FILE = "ps5pro_crash.log"
 SHOP_CONFIG_FILE = "ps5pro_shop_config.json"
 SHOP_CONFIG_URL = "https://raw.githubusercontent.com/xsensenmannx/PS5PRoAgent/main/shop_config.json"
@@ -2451,6 +2455,8 @@ class Health:
         if not name: return
         ts=time.time(); status=r.get("klass") or "unknown"
         fehler=bool(status in ("error","challenge","parser"))
+        try: dauer=round(float(r.get("dauer")),1)
+        except (TypeError,ValueError): dauer=None
         with self._lock:
             e=dict(self.data.get(name) or {})
             e["last_ts"]=ts; e["last_status"]=status
@@ -2467,6 +2473,14 @@ class Health:
                 e["ok_ts"]=ts; e["fail_streak"]=0
                 e["successes"]=int(e.get("successes") or 0)+1
                 e["parser_streak"]=0
+            # Ringpuffer: aelteste zuerst, damit die zeitliche Reihenfolge
+            # beim Lesen der Datei sofort erkennbar ist.
+            verlauf=e.get("verlauf")
+            verlauf=list(verlauf) if isinstance(verlauf,list) else []
+            verlauf.append({"ts": datetime.now().isoformat(timespec="seconds"),
+                            "status": status, "fehler": r.get("fehler"),
+                            "dauer": dauer})
+            e["verlauf"]=verlauf[-HEALTH_VERLAUF_MAX:]
             self.data[name]=e
     def save(self):
         """Einmal pro Scan schreiben statt 42-mal (Flash/Akku)."""

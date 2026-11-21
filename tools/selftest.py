@@ -833,7 +833,8 @@ def feature_tests():
         # Health: ein Fehler erhoeht den Zaehler, ein Erfolg setzt ihn zurueck.
         core.reset_health()
         hh = core.health()
-        hh.record({"haendler": "Shop A", "klass": "challenge", "fehler": "Bot"})
+        hh.record({"haendler": "Shop A", "klass": "challenge",
+                   "fehler": "Bot", "dauer": 1.25})
         hh.record({"haendler": "Shop A", "klass": "error", "fehler": "Timeout"})
         check("Health Fehlerzaehler", hh.all()["Shop A"]["fail_streak"], 2)
         check("Health Parserzaehler anfangs leer",
@@ -850,6 +851,28 @@ def feature_tests():
         check("Health Erfolg setzt zurueck", hh.all()["Shop A"]["fail_streak"], 0)
         check("Health Parser-Serie nach Erfolg",
               hh.all()["Shop A"]["parser_streak"], 0)
+        # Ringpuffer je Shop: Zeit, Status, Fehler und Dauer fuer die
+        # nachtraegliche Zuordnung eines verpassten Fensters.
+        verlauf = hh.all()["Shop A"]["verlauf"]
+        check("Health Verlauf sammelt Pruefungen", len(verlauf), 5)
+        check("Health Verlauf Zeitstempel", bool(verlauf[-1].get("ts")), True)
+        check("Health Verlauf letzter Status", verlauf[-1].get("status"), "hit")
+        check("Health Verlauf Fehlertext", verlauf[0].get("fehler"), "Bot")
+        check("Health Verlauf Dauer", verlauf[0].get("dauer"), 1.2)
+        check("Health Verlauf Erfolg ohne Fehler", verlauf[-1].get("fehler"),
+              None)
+        for i in range(core.HEALTH_VERLAUF_MAX + 3):
+            hh.record({"haendler": "Shop Ring", "klass": "unavail",
+                       "fehler": None, "dauer": i})
+        ring = hh.all()["Shop Ring"]["verlauf"]
+        check("Health Verlauf gedeckelt", len(ring), core.HEALTH_VERLAUF_MAX)
+        check("Health Verlauf verwirft die aeltesten", ring[0]["dauer"], 3.0)
+        check("Health Verlauf neueste zuletzt", ring[-1]["dauer"],
+              float(core.HEALTH_VERLAUF_MAX + 2))
+        hh.save()
+        check("Health Verlauf ueberlebt Neuladen",
+              len(core.Health(hh.path).all()["Shop Ring"]["verlauf"]),
+              core.HEALTH_VERLAUF_MAX)
         core._crash_schreiben("test", "Traceback: Testfehler")
         check("Crash-Log schreibbar", "Testfehler" in core.read_crash_log(), True)
         core.clear_crash_log()
