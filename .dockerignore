@@ -1,8 +1,11 @@
-# Der Waechter braucht nur scan_core.py und cloud_watcher/.
+# Der Waechter braucht scan_core.py, cloud_watcher/ und das Report-Tool.
 *
 !scan_core.py
 !cloud_watcher/
 !cloud_watcher/**
+!tools/
+tools/*
+!tools/watcher_report.py
 !Dockerfile.watcher
 cloud_watcher/.env
 cloud_watcher/data/

@@ -3013,6 +3013,37 @@ def watcher_log_tests():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def watcher_report_tests():
+    """Report-Tool: Kennzahlen aus NDJSON-Zeilen."""
+    if os.path.join(ROOT, "tools") not in sys.path:
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import watcher_report as wr
+
+    zeilen = [
+        {"typ": "check", "ts": 1000.0, "ms": 100, "bytes": 1000,
+         "frisch": True, "not_modified": False, "klass": "unavail"},
+        {"typ": "check", "ts": 1100.0, "ms": 300, "bytes": 0,
+         "frisch": False, "not_modified": True, "klass": "unavail"},
+        {"typ": "alarm", "ts": 1200.0, "aktion": "wuerde_senden",
+         "event": "restock"},
+        {"typ": "check", "ts": 2000.0, "ms": 500, "bytes": 500,
+         "frisch": True, "not_modified": True, "klass": "hit"},
+    ]
+    bericht = wr.bericht(zeilen, 4.40)
+    check("report checks", bericht["checks"], 3)
+    check("report 304 quote", bericht["rate_304"], 66.7)
+    check("report 304 flag", bericht["not_modified"], 2)
+    check("report traffic", bericht["bytes"], 1500)
+    check("report p95", bericht["ms"]["p95"], 500)
+    check("report alarme", bericht["alarme"], 1)
+    check("report kosten pro alarm",
+          isinstance(bericht["kosten"]["pro_alarm"], float), True)
+    text = wr._text(bericht)
+    check("report text p95", "p95 500 ms" in text, True)
+    check("report text 304", "304-Quote: 66.7 %" in text, True)
+    check("report perzentil", wr.perzentil([10, 20, 30, 40], 0.95), 40)
+
+
 if __name__ == "__main__":
     try:
         main_tests()
@@ -3039,6 +3070,7 @@ if __name__ == "__main__":
         watcher_p0_tests()
         outbox_tests()
         watcher_log_tests()
+        watcher_report_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.
         try:

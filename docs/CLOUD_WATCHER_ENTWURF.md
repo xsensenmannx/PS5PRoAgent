@@ -345,9 +345,10 @@ der App, kein Ersatz für einen Shop mit Push-Kanal.
 nichts gesendet. Erst danach scharf schalten.
 
 **Log:** eine JSON-Zeile pro Prüfung mit `ts`, `shop`, `ms`, `bytes`,
-`klass`, `http`, `verify`, `alert`. Dazu eine Tageszeile mit Quote, p50/p95,
-Challenge-Zahl und offenen Zustellungen. Aufbewahrung: 14 Tage NDJSON,
-danach rotieren.
+`klass`, `frisch`, `not_modified`, `verify`, `event`. Dazu eine Tageszeile mit Quote, p50/p95,
+Challenge-Zahl und offenen Zustellungen. NDJSON-Tagesdateien in `/data`
+(`watcher-log-YYYY-MM-DD.ndjson`), max. 3 × 4 MB pro Tag, 14 Tage
+Aufbewahrung; Auswertung mit `tools/watcher_report.py`.
 
 **Health:** `/data/health.json` mit denselben Kennzahlen wie
 `health_uebersicht()`. Zusätzlich ein Heartbeat-Ping nach jeder vollständigen

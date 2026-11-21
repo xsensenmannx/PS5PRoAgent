@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY scan_core.py ./
 COPY cloud_watcher ./cloud_watcher
+COPY tools/watcher_report.py ./tools/watcher_report.py
 
 USER 10001:10001
 VOLUME ["/data"]

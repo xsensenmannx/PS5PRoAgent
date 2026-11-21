@@ -306,9 +306,27 @@ Vor dem Scharfschalten die Logs des gesamten Zeitraums ansehen:
   ob der Prozess durchlief. Ohne Heartbeat ist ein abgestürzter Wächter nicht
   von einem ruhigen Markt zu unterscheiden.
 
-Die Logs liegen nur auf stdout. Für 48 h vorher mitschneiden (Fly: Log-Drain
-oder `fly logs`; Hetzner: `docker compose logs`). Zustand und Health-Datei auf
-dem Volume zeigen nur den letzten Stand, nicht die ganze Historie.
+Die NDJSON-Dateien liegen im Volume und sind damit die eigentliche Historie
+für den 48-h-Lauf; ein Log-Drain ist nicht nötig. Auswerten:
+
+```bash
+# lokal, Logs im Projektverzeichnis
+python tools/watcher_report.py --dir cloud_watcher/data
+
+# im Container (Hetzner)
+docker compose exec watcher python tools/watcher_report.py --dir /data --json
+```
+
+Das Tool berechnet p50/p95 der Prüfdauer, die 304-Quote (Anteil der Abrufe mit
+beobachtetem HTTP 304), Traffic aus der Summe von `bytes`, Alarme und die
+Kosten pro nützlichem Alarm (`--kosten`, Standard 4,40 €/Monat). Checks mit
+`frisch: false` sind zusätzlich die aus dem Cache beantworteten; ein 304 im
+JSON-Fastpath wird als `not_modified: true` vermerkt, auch wenn danach frisch
+neu geladen wurde. Nützlich heißt: nicht unterdrückt und
+nicht wegen voller Outbox verworfen; im Schatten zählen `wuerde_senden`, live
+`eingereiht`. `zugestellt` zählt `outbox`/`gesendet`. Der zweite
+Verifikationsabruf eines Treffers steckt nicht in `check.bytes`; die
+Traffic-Zahl ist deshalb eine leichte Untergrenze.
 
 ## Grenzen und Verhalten
 
