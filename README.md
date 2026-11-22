@@ -290,7 +290,8 @@ Aktueller Stand und Archiv:
   Fenster sind als `LETZTER STAND` gekennzeichnet. Beim 60-Minuten-Takt bleibt
   eine Stunde die Obergrenze. Dieselbe Fensterlogik steht in der Detailansicht
   eines Produkts (`LETZTE ERFOLGE`, bis zu drei Fenster). Die Rohdaten liefert
-  derselbe Event-Ticker wie `VERLAUF`, ohne zusätzliche Abrufe. Dazu 1375
+  derselbe Event-Ticker wie `VERLAUF`, ohne zusätzliche Abrufe. Daneben sind
+  Health-Verlauf, JSON-LD-Teilabruf und Support-Diagnose enthalten. Dazu 1375
   Logiktests.
 * **v1.5.1** – Vorherige Version (versionCode 10501): Live-Taktung statt starrer
   Runden: Scheduler im Kern (`shop_intervall`, `faellige_haendler`) mit 30 s für
@@ -301,12 +302,14 @@ Aktueller Stand und Archiv:
   belegte Treffer sofort, während die Verifikation parallel läuft. Neu ist der
   Verlauf-Ticker (SETUP → VERLAUF) mit der Dauer des abgelaufenen Fensters und
   „zuletzt verfügbar am" je Shop, auch im ausverkauften Zustand. 890 Logiktests.
+* **v1.5.0** – Zwischenrelease (versionCode 10500): erste Live-Taktung und
+  Drop-Fenster; durch v1.5.1 abgelöst.
 * **v1.4.0** – Ältere Version (versionCode 10400): Verfügbarkeitszustände statt
   eines booleschen „verfügbar", CHANCE für Marktabholung, Lotterie, Einladung
   und Vorbestellung, Konfidenz 0–100 mit optionaler 70-%-Schwelle,
   Beleg-Ausschnitt mit Hash, GTIN/EAN- und Bundle-Erkennung, Marketplace-Hinweis
   und ein 304-Cache mit maximal sechs Stunden Alter. Dazu 777 Logiktests.
-* **v1.3** – Vorherige Version (versionCode 10300): Webhook-Alarme für ntfy,
+* **v1.3** – Ältere Version (versionCode 10300): Webhook-Alarme für ntfy,
   Telegram und Discord, Treffer-Verifikation mit Bestätigungskennzeichnung und
   „nur bestätigte Treffer", Schnell-Modus für sechs heiße Shops im Minutentakt.
   Dazu Token-Redaction, Webhook-Dedupe und Tests für alle drei Pfade.

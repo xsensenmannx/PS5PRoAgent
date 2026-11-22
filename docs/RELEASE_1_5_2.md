@@ -1,8 +1,8 @@
 # Release 1.5.2 — Erfolge-Ansicht und Takt-Frische
 
-**Stand:** lokal vorbereitet, nicht veröffentlicht.
+**Stand:** veröffentlicht am 22.11.2026.
 **Basis:** v1.5.1 (`versionCode 10501`).
-**Ziel:** v1.5.2 (`versionCode 10502`).
+**Release:** v1.5.2 (`versionCode 10502`), Commit `f25fc97`.
 
 ## Inhalt
 
@@ -21,22 +21,28 @@
 
 ## Gates
 
+Alle Release-Gates bestanden:
+
 - `PYTHONIOENCODING=utf-8 python tools/selftest.py` — 1375/1375.
 - `python tools/kivy_smoke.py` — sechs Größen: 360×780, 420×820, 720×480,
   620×380, 620×380 @ 120 %, 884×700.
 - `python tools/validate_shop_config.py`
 - `python tools/check_hilfe_specs.py`
+- APK: `versionName=1.5.2`, `versionCode=10502`, `targetSdkVersion=36`.
+- Signatur mit `apksigner` gegen den festen Zertifikat-Fingerprint geprüft.
 
 ## Veröffentlichung
 
-1. Commit auf `main`.
-2. `main` pushen, Tag `v1.5.2` setzen und pushen.
-3. Die CI baut die signierte APK; Asset
-   `ps5prosearchagent-1.5.2-arm64-v8a.apk`.
-4. Prüfen: `versionName 1.5.2`, `versionCode 10502`, kein
-   `application-debuggable`, Signatur und SHA-256.
+Release: https://github.com/xsensenmannx/PS5PRoAgent/releases/tag/v1.5.2
 
-Bis dahin bleibt v1.5.1 das veröffentlichte Release.
+Asset: `ps5prosearchagent-1.5.2-arm64-v8a.apk`, 23.062.789 Bytes, nur
+`arm64-v8a`.
+
+SHA-256:
+
+```
+f5fa4ee6ca55068a10810f398d85052b40d4ab8227d23c74b1b2a3aa06c0ba99
+```
 
 ## Rollback
 

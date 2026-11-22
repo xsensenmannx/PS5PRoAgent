@@ -1,8 +1,8 @@
 # Konzept — PS5 Pro Search Agent
 
-**Stand:** v1.4.0 ist veröffentlicht (`versionCode 10400`); v1.3 bleibt als
-Release unverändert. Dieses Dokument beschreibt, was das Produkt ist, warum es
-so gebaut ist und was als Nächstes kommt.
+**Stand:** v1.5.2 ist veröffentlicht (`versionCode 10502`); v1.5.1 und v1.4.0
+bleiben als Releases erhalten. Dieses Dokument beschreibt, was das Produkt ist,
+warum es so gebaut ist und was als Nächstes kommt.
 **Leitsatz:** Ein Alarm muss stimmen. Lieber 30 Sekunden später als einmal falsch.
 
 ---
@@ -53,11 +53,12 @@ Unterschied machen. Die Basis dafür steht seit v1.3; die Bausteine selbst sind 
    Tests entscheiden, ein Mensch gibt frei. Kein LLM im Scan-Pfad.
 
 Bereits gebaut: Webhook-Alarme, Treffer-Verifikation und Schnell-Modus (v1.3);
-Verfügbarkeitszustände, Konfidenz, Beleg und GTIN/Bundle (v1.4).
+Verfügbarkeitszustände, Konfidenz, Beleg und GTIN/Bundle (v1.4); Live-Takt,
+Verlauf-Ticker und Erfolge (v1.5).
 
 ---
 
-## 2. Ist-Stand v1.4
+## 2. Ist-Stand v1.5.2
 
 Bereits gebaut und getestet:
 
@@ -72,11 +73,19 @@ Bereits gebaut und getestet:
 * **Treffer-Verifikation** per zweitem Abruf ohne Cache; Rückstufung bei Ausverkauf.
 * **Live-Modus (v1.5)** für die fälligen Shops: 30 s heiße, 4 min stille,
   12 min gestörte, Runde auf 12 Shops gedeckelt; im Hintergrund 15 min.
+* **Verlauf-Ticker (v1.5.1):** Zustandswechsel mit Dauer des abgelaufenen
+  Fensters und „zuletzt verfügbar am" je Shop.
+* **Erfolge (v1.5.2):** SETUP → ERFOLGE bündelt Verfügbarkeitsfenster mit Shop,
+  Preis, Dauer und Bestpreis. `OFFEN` nur bei frischem Wechsel oder
+  bestätigendem Scan im Taktbudget, sonst `LETZTER STAND`; die Detailansicht
+  zeigt bis zu drei `LETZTE ERFOLGE`.
+* **Scan-Datenpfad:** JSON-LD-Teilabruf und direkte PlayStation-Direct-URLs;
+  Health-Verlauf der letzten 30 Prüfungen je Shop.
 * Remote-Konfiguration für URLs und deklarative Parser-Regeln.
 * **v1.4:** Verfügbarkeitszustände (Markt/Lotterie/Einladung/Vorbestellung),
   Konfidenz 0–100, Beleg-Ausschnitt mit Hash, GTIN/EAN, Bundle-Filter,
   Marketplace-Hinweis und ein 304-Cache mit maximal sechs Stunden Alter.
-* 798 Logiktests, sechs Kivy-Smoke-Läufe (inkl. 120 % Schrift), signierte Releases.
+* 1375 Logiktests, sechs Kivy-Smoke-Läufe (inkl. 120 % Schrift), signierte Releases.
 
 Was das *nicht* löst: Das Handy schläft weiterhin, Lotterien werden nur erkannt,
 aber nicht automatisch bedient, und ein Treffer ist noch keine erklärte
@@ -183,10 +192,13 @@ Kein Laufzeit-LLM, keine automatische Veröffentlichung, keine Nutzerdaten.
 * Ein Lotterie-/Einladungszustand erzeugt CHANCE, nie VERFÜGBAR.
 * 800+ Tests, alle sechs Smoke-Läufe, Release-Gates wie v1.3.
 
-### v1.5 — „Live" (Händler-Erkennung + Live-Überwachung)
+### v1.5 — „Live" (Live-Überwachung; Händler-Erkennung offen)
 
 Kurzfassung hier; Etappen, Aufwände und Abnahmekriterien stehen in
 [`RELEASE_1_5.md`](RELEASE_1_5.md).
+
+**Stand v1.5.2:** Live-Takt, Verlauf und Erfolge sind umgesetzt. Die
+Händler-Erkennung (Etappen 4/5) ist noch offen.
 
 **Live-Überwachung.** Statt starrer 5–60-Minuten-Runden über alle 42 Shops prüft die
 App nur die fälligen: heiße Shops im Vordergrund alle 20–30 s, gestörte Shops mit
@@ -378,7 +390,7 @@ Jede Version muss dieselben Tore passieren wie v1.3:
 3. **ARM32:** weitere Geräte gegen größere APK und mehr Testmatrix. Empfehlung: erst
    wenn Nachfrage belegt ist.
 4. **F-Droid:** wünschenswert für Vertrauen, kostet Reproduzierbarkeit und Pflege.
-   Empfehlung: nach v1.4 prüfen.
+   Empfehlung: nach v1.5 prüfen.
 
 ---
 

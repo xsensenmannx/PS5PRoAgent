@@ -1,16 +1,17 @@
 # Release 1.5 — Live-Überwachung und Händler-Erkennung
 
-**Stand:** v1.5.1 veröffentlicht; v1.5.2 mit Erfolge-Ansicht lokal vorbereitet. Ausgangspunkt ist v1.4.0 (`versionCode 10400`).
-**Ziel:** v1.5.1 (`versionCode 10501`) erkennt Restocks früh und findet neue Händler mit
-einem nachvollziehbaren Verfahren — ohne Bot-Schutz zu umgehen, ohne Backend und ohne
-die Host-Allowlist der Remote-Konfiguration aufzuweichen.
+**Stand:** v1.5.2 veröffentlicht (Erfolge-Ansicht und Takt-Frische); v1.5.1 und v1.4.0 bleiben als Releases erhalten. Ausgangspunkt ist v1.4.0 (`versionCode 10400`).
+**Ziel:** v1.5.1 (`versionCode 10501`, erreicht) erkennt Restocks früh. Die
+Händler-Erkennung (Etappen 4/5) bleibt offen; sie soll Kandidaten mit einem
+nachvollziehbaren Verfahren prüfen — ohne Bot-Schutz zu umgehen, ohne Backend und
+ohne die Host-Allowlist der Remote-Konfiguration aufzuweichen.
 
 **Stand der Umsetzung (main):** Etappe 0, 1 und 3 vollständig. Etappe 3 umfasst den
 Live-Takt mit 20-s-Runde und Rundendeckel 12, das **Drop-Fenster** (10-s-Takt, HUD
 `FENSTER`), die **Sofortmeldung** für belegte Treffer sowie den **Event-Ticker** mit
 Fensterdauer und „zuletzt verfügbar am" je Shop. Offen: Etappe 2 (JSON-Datenpfad),
 Etappe 4/5 (Discovery, Aufnahme, Marketplace-Zeile) und Etappe 6 (optional). Etappe 7
-ist mit `v1.5.1` abgeschlossen; `v1.5.2` ergänzt die Erfolge-Ansicht und die Takt-Frische.
+ist mit `v1.5.1` abgeschlossen; `v1.5.2` ist veröffentlicht und ergänzt die Erfolge-Ansicht und die Takt-Frische.
 
 ---
 
