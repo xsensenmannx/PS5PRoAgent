@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.4.0 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.4.0/ps5prosearchagent-1.4.0-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.5.2 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.5.2/ps5prosearchagent-1.5.2-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -23,8 +23,11 @@ einmalig eine Deinstallation nötig.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.4.0** | Die aktuelle Version (versionCode 10400). Diese APK installieren. |
-| **v1.3** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.2** | Die aktuelle Version (versionCode 10502). Diese APK installieren. |
+| **v1.5.1** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.0** | Ältere Version; bleibt als Archiv-Release erhalten. |
+| **v1.4.0** | Ältere Version; bleibt als Archiv-Release erhalten. |
+| **v1.3** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.2** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.1** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.0** | Der erste fertige Stand; bleibt als Archiv-Release erhalten. |
@@ -33,12 +36,12 @@ Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
 aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
-> **Eine Nummer für alles:** App, Release und Download heißen **v1.4.0**
-> (App-Version 1.4.0, versionCode 10400). Der Button oben führt immer zur
+> **Eine Nummer für alles:** App, Release und Download heißen **v1.5.2**
+> (App-Version 1.5.2, versionCode 10502). Der Button oben führt immer zur
 > aktuellen APK.
 >
-> **Zur Zählung:** v1.4.0 ist die Fortsetzung der bisherigen 5.x-Stände. Die
-> Zählung läuft jetzt sauber als 1.x-Linie weiter (v1.0–v1.3 Archiv, v1.4.0 aktuell).
+> **Zur Zählung:** v1.5.2 setzt die 1.5-Linie fort. Die
+> Zählung läuft sauber als 1.x-Linie weiter (v1.0–v1.5.1 Archiv, v1.5.2 aktuell).
 
 ## Eindruck
 
@@ -125,6 +128,11 @@ Signal, Preistiefs und den Preisverlauf:
   melden sofort, die Gegenprüfung läuft parallel und stuft bei Ausverkauf zurück. Im
   WLAN, mit Backoff nach Bot-Schutz und ohne Überlappung mit dem vollen Scan. Im
   Hintergrund bleibt es bei 15 Minuten.
+* **Erfolge (v1.5.2)**: SETUP → ERFOLGE bündelt die Verfügbarkeitsfenster
+  mit Shop, Preis, Dauer und Bestpreis. `OFFEN` gilt nur bei frischem Wechsel
+  oder bestätigendem Scan im Taktbudget; sonst steht `LETZTER STAND`. Die
+  Detailansicht zeigt bis zu drei `LETZTE ERFOLGE`; die Liste nutzt denselben
+  Event-Ticker wie `VERLAUF`, ohne zusätzliche Abrufe.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
   Treffer eines Laufs werden gruppiert.
@@ -274,35 +282,30 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.4.0** – Die aktuelle veröffentlichte Version (versionCode 10400):
-  Verfügbarkeitszustände statt eines booleschen „verfügbar", CHANCE für
-  Marktabholung, Lotterie, Einladung und Vorbestellung, Konfidenz 0–100 mit
-  optionaler 70-%-Schwelle, Beleg-Ausschnitt mit Hash, GTIN/EAN- und
-  Bundle-Erkennung, Marketplace-Hinweis und ein 304-Cache mit maximal sechs
-  Stunden Alter. Dazu 777 Logiktests.
-* **v1.5.1** – versionCode 10501: Live-Taktung statt starrer Runden:
-  Scheduler im Kern (`shop_intervall`, `faellige_haendler`) mit 30 s für heiße,
-  4 min für stille und 12 min für gestörte Shops, Circuit Breaker nach
+* **v1.5.2** – Die aktuelle veröffentlichte Version (versionCode 10502):
+  SETUP → ERFOLGE bündelt die Verfügbarkeitsfenster aus dem Verlauf: Shop,
+  Preis, Dauer und Bestpreis. `OFFEN` steht nur, solange der letzte
+  `verfügbar`-Wechsel innerhalb des eingestellten Scan-Takts plus zwei Minuten
+  liegt oder ein frischer, erfolgreicher Scan den Stand bestätigt; ältere offene
+  Fenster sind als `LETZTER STAND` gekennzeichnet. Beim 60-Minuten-Takt bleibt
+  eine Stunde die Obergrenze. Dieselbe Fensterlogik steht in der Detailansicht
+  eines Produkts (`LETZTE ERFOLGE`, bis zu drei Fenster). Die Rohdaten liefert
+  derselbe Event-Ticker wie `VERLAUF`, ohne zusätzliche Abrufe. Dazu 1375
+  Logiktests.
+* **v1.5.1** – Vorherige Version (versionCode 10501): Live-Taktung statt starrer
+  Runden: Scheduler im Kern (`shop_intervall`, `faellige_haendler`) mit 30 s für
+  heiße, 4 min für stille und 12 min für gestörte Shops, Circuit Breaker nach
   Bot-Schutz, stabilem Jitter und Rundendeckel; dazu eine Health-Auswertung pro
   Shop. Der Schnell-Modus verhält sich jetzt wie ein Live-Modus (20-s-Takt,
   fällige statt sechs feste Shops), kennt Drop-Fenster mit 10-s-Takt und meldet
   belegte Treffer sofort, während die Verifikation parallel läuft. Neu ist der
   Verlauf-Ticker (SETUP → VERLAUF) mit der Dauer des abgelaufenen Fensters und
   „zuletzt verfügbar am" je Shop, auch im ausverkauften Zustand. 890 Logiktests.
-* **Erfolge (unveröffentlicht, main)** – SETUP → ERFOLGE bündelt die
-  Verfügbarkeitsfenster aus dem Verlauf: Shop, Preis, Dauer und Bestpreis.
-  `OFFEN` steht nur, solange der letzte `verfügbar`-Wechsel innerhalb des
-  eingestellten Scan-Takts plus zwei Minuten liegt oder ein frischer,
-  erfolgreicher Scan den Stand bestätigt; ältere offene Fenster sind als
-  `LETZTER STAND` gekennzeichnet. Beim 60-Minuten-Takt bleibt eine Stunde
-  die Obergrenze. Dieselbe Fensterlogik steht in der Detailansicht eines
-  Produkts (`LETZTE ERFOLGE`, bis zu drei Fenster). Die Rohdaten liefert
-  derselbe Event-Ticker wie `VERLAUF`, ohne zusätzliche Abrufe.
-* **Review-Fixes (unveröffentlicht, main)** – `OnlineOnly` und
-  `LimitedAvailability` zählen wie `InStock`, `Discontinued` wie `SoldOut`;
-  Vorbestellungen laufen wieder über den v1.3-Pfad „NUR SOFORT"; nur belegte
-  Konfidenzsignale, kürzere Belege und besser lesbare UI-Labels. Dazu 798
-  Logiktests.
+* **v1.4.0** – Ältere Version (versionCode 10400): Verfügbarkeitszustände statt
+  eines booleschen „verfügbar", CHANCE für Marktabholung, Lotterie, Einladung
+  und Vorbestellung, Konfidenz 0–100 mit optionaler 70-%-Schwelle,
+  Beleg-Ausschnitt mit Hash, GTIN/EAN- und Bundle-Erkennung, Marketplace-Hinweis
+  und ein 304-Cache mit maximal sechs Stunden Alter. Dazu 777 Logiktests.
 * **v1.3** – Vorherige Version (versionCode 10300): Webhook-Alarme für ntfy,
   Telegram und Discord, Treffer-Verifikation mit Bestätigungskennzeichnung und
   „nur bestätigte Treffer", Schnell-Modus für sechs heiße Shops im Minutentakt.
