@@ -2,7 +2,7 @@
 
 **Stand:** 23.11.2026.
 **Basis:** v1.5.2 (`versionCode 10502`).
-**Release:** v1.5.3 (`versionCode 10503`).
+**Release:** v1.5.3 (`versionCode 10503`), Commit `0839abf`.
 
 ## Inhalt
 
@@ -34,9 +34,14 @@
 
 Release: https://github.com/xsensenmannx/PS5PRoAgent/releases/tag/v1.5.3
 
-Asset: `ps5prosearchagent-1.5.3-arm64-v8a.apk`, nur `arm64-v8a`.
+Asset: `ps5prosearchagent-1.5.3-arm64-v8a.apk`, 23.087.365 Bytes, nur
+`arm64-v8a`.
 
-SHA-256 und Größe werden nach dem erfolgreichen Workflow-Lauf ergänzt.
+SHA-256:
+
+```
+3805fa8ef2abc0798cb468fc37c89ebb1d97c87ce9154cc3d7c70d861c4600ce
+```
 
 ## Rollback
 
