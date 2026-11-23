@@ -14,6 +14,7 @@ import math
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -865,7 +866,7 @@ def feature_tests():
               core.zeitraum_text("2026-11-13T10:35:00", None), "?")
         check("Zeitraum ohne Werte", core.zeitraum_text(None, None), "")
 
-        # Nur echte Zustandswechsel kommen in den Ringpuffer; beim Wechsel auf
+        # Nur echte Zustandswechsel kommen ins Journal; beim Wechsel auf
         # ausverkauft traegt der Eintrag die Dauer des abgelaufenen Fensters.
         core.reset_events()
         ev = core.events(); ev.clear()
@@ -1060,18 +1061,9 @@ def feature_tests():
         check("Erfolg Preis vom letzten Wechsel", doppelt[0].get("preis"), 799.0)
 
         check("Verlauf je Shop", len(ev.fuer_shop("Shop E")), 2)
-        for i in range(core.MAX_EVENTS + 5):
-            ev.add({"typ": "verfuegbar", "haendler": f"Ring {i}",
-                    "ts": "2026-11-13T10:00:00"})
-        check("Ringpuffer gedeckelt", len(ev.all()), core.MAX_EVENTS)
-        check("Ringpuffer verwirft die aeltesten", ev.all()[0]["haendler"], "Ring 5")
-        check("Neueste zuerst", ev.letzte(1)[0]["haendler"],
-              f"Ring {core.MAX_EVENTS + 4}")
-        check("Verlauf ueberlebt Neuladen", len(core.Events().all()), core.MAX_EVENTS)
-        check("Alte Eintraege fallen aus dem Ring", ev.fuer_shop("Shop E"), [])
         ev.clear()
         check("Verlauf leeren", core.Events().all(), [])
-        # Zwei Prozesse: der Dienst schreibt, die App liest nur bei Aenderung.
+        # Zwei Instanzen: der Dienst schreibt, die App liest nur bei Aenderung.
         a, b = core.Events(), core.Events()
         b.add({"typ": "verfuegbar", "haendler": "Shop Z",
                "ts": "2026-11-13T10:00:00"})
@@ -1082,6 +1074,26 @@ def feature_tests():
         check("Add schreibt kein geleertes Ereignis zurueck",
               [e["haendler"] for e in a.all()], ["Shop Y"])
         a.clear()
+
+        # Der Erfolgs-Feed journalisiert den Abruf, nicht das Rundenende.
+        # Ein Einzelupdate mit persist=False ist sofort im Journal sichtbar;
+        # erst flush() schreibt die History-Datei. Der Test steht bewusst
+        # nach den Fensterpruefungen, damit sein Ereignis deren Zaehlung
+        # nicht veraendert.
+        hist.update([{"haendler": "Shop Z", "klass": "unavail",
+                       "preis": None, "erkannt": "2026-11-20T10:00:00"}])
+        hist.update([{"haendler": "Shop Z", "klass": "hit",
+                       "preis": 799.0, "erkannt": "2026-11-20T10:00:30"}],
+                    persist=False)
+        zeit_ereignis = ev.all()[-1]
+        check("Ereignis sofort im Journal", zeit_ereignis.get("typ"), "verfuegbar")
+        check("Ereigniszeit aus dem Abruf", zeit_ereignis.get("ts"),
+              "2026-11-20T10:00:30")
+        check("Ereignisstart aus dem Abruf", zeit_ereignis.get("start"),
+              "2026-11-20T10:00:30")
+        check("History noch nicht geschrieben", hist._dirty, True)
+        hist.flush()
+        check("History nach flush sauber", hist._dirty, False)
 
         # Health: ein Fehler erhoeht den Zaehler, ein Erfolg setzt ihn zurueck.
         core.reset_health()
@@ -1551,6 +1563,272 @@ def adaptive_boot_tests():
     check("Manifest BootAction", "android.intent.action.BOOT_COMPLETED" in neu, True)
     check("Manifest specialUse", "PROPERTY_SPECIAL_USE_FGS_SUBTYPE" in neu, True)
     check("Manifest idempotent", hook.erweitere_manifest(neu).count(".BootReceiver"), 1)
+
+
+def events_journal_tests():
+    """Journal: JSONL, Dedupe, Rotation, Prozess-Lock und LEEREN."""
+    alt_dir = core._data_dir()
+    tmp = tempfile.mkdtemp(prefix="ps5pro-events-")
+    try:
+        core.set_data_dir(tmp)
+        ev = core.Events()
+        ev.clear()
+        ereignis = {"typ": "verfuegbar", "haendler": "Journal A",
+                    "ts": "2026-11-23T20:00:00", "preis": 799.0}
+        check("Journal schreibt", ev.add(ereignis), True)
+        check("Journal dedupe", ev.add(dict(ereignis)), False)
+        check("Journal ein Eintrag", len(ev.all()), 1)
+        with open(os.path.join(tmp, core.EVENTS_FILE), encoding="utf-8") as f:
+            roh = [z for z in f if z.strip()]
+        check("Journal ist JSONL", len(roh), 1)
+        check("Journal Zeile ist Objekt", json.loads(roh[0]).get("haendler"),
+              "Journal A")
+        check("Journal Lock entfernt", os.path.exists(ev._lock_path), False)
+        neu = core.Events()
+        check("Journal Reload", len(neu.reload().all()), 1)
+        check("Journal letzte", neu.letzte(1)[0]["haendler"], "Journal A")
+        check("Journal fuer_shop", len(neu.fuer_shop("Journal A")), 1)
+        check("Journal letztes", neu.letztes("Journal A")["typ"], "verfuegbar")
+
+        # Rotation: aktive Datei plus zwei Archive, aeltestes faellt weg.
+        rot_pfad = os.path.join(tmp, "rotation.jsonl")
+        rot = core.Events(rot_pfad, max_events=6, max_lines=2, max_segments=3)
+        rot.clear()
+        for i in range(5):
+            check(f"Rotation schreibt {i}", rot.add({
+                "typ": "verfuegbar", "haendler": "Rotation",
+                "ts": "2026-11-23T20:00:00", "i": i}), True)
+        check("Rotation aktive Zeilen", rot._active_zeilen, 1)
+        check("Rotation zwei Archive",
+              [os.path.exists(rot_pfad+f".{i}") for i in (1,2)], [True,True])
+        check("Rotation kein drittes Archiv", os.path.exists(rot_pfad+".3"), False)
+        geladen = core.Events(rot_pfad, max_events=6, max_lines=2,
+                              max_segments=3)
+        check("Rotation laedt alle Segmente",
+              [e["i"] for e in geladen.all()], [0,1,2,3,4])
+        rot.add({"typ": "verfuegbar", "haendler": "Rotation",
+                 "ts": "2026-11-23T20:00:00", "i": 5})
+        geladen = core.Events(rot_pfad, max_events=6, max_lines=2,
+                              max_segments=3)
+        check("Rotation verwirft aeltestes",
+              [e["i"] for e in geladen.all()], [2,3,4,5])
+        check("Rotation dedupe nach Reload",
+              geladen.add({"typ": "verfuegbar", "haendler": "Rotation",
+                           "ts": "2026-11-23T20:00:00", "i": 5}), False)
+        rot.clear()
+        check("Rotation LEEREN", rot.all(), [])
+        check("Rotation Archive weg",
+              [os.path.exists(rot_pfad+f".{i}") for i in (1,2)], [False,False])
+
+        # Parallele Prozesse: kein Lost Update, keine zerrissene Zeile.
+        ptmp = os.path.join(tmp, "parallel")
+        os.makedirs(ptmp)
+        core.set_data_dir(ptmp)
+        core.reset_events()
+        core.events().clear()
+        script = os.path.join(tmp, "writer.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(
+                "import sys\n"
+                "sys.path.insert(0, sys.argv[1])\n"
+                "import scan_core\n"
+                "scan_core.set_data_dir(sys.argv[2])\n"
+                "ev = scan_core.Events()\n"
+                "for i in range(int(sys.argv[4])):\n"
+                "    if not ev.add({'typ': 'verfuegbar', 'haendler': 'P'+sys.argv[3],\n"
+                "                   'ts': '2026-11-23T20:00:00', 'i': i}):\n"
+                "        raise SystemExit(3)\n")
+        umgebung = dict(os.environ); umgebung["PYTHONIOENCODING"] = "utf-8"
+        procs = [subprocess.Popen(
+            [sys.executable, script, ROOT, ptmp, str(i), "10"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=umgebung, text=True) for i in range(4)]
+        for p in procs:
+            try:
+                _out, err = p.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                p.kill(); _out, err = p.communicate()
+            check(f"Parallel Writer {p.pid}", p.returncode, 0)
+        alle = core.Events().all()
+        check("Parallel kein Verlust", len(alle), 40)
+        check("Parallel eindeutig",
+              len({(e.get("haendler"), e.get("i")) for e in alle}), 40)
+        with open(os.path.join(ptmp, core.EVENTS_FILE), encoding="utf-8") as f:
+            check("Parallel JSONL Zeilen", len([z for z in f if z.strip()]), 40)
+
+        # LEEREN wirkt auch auf eine zweite Instanz, ohne Altes zurueckzuholen.
+        core.set_data_dir(tmp)
+        core.reset_events()
+        a, b = core.Events(), core.Events()
+        a.clear()
+        b.add({"typ": "verfuegbar", "haendler": "Alt",
+               "ts": "2026-11-23T20:01:00"})
+        check("LEEREN sieht fremdes Ereignis", len(a.reload().all()), 1)
+        a.clear()
+        check("LEEREN leert andere Instanz", b.reload().all(), [])
+        a.add({"typ": "verfuegbar", "haendler": "Neu",
+               "ts": "2026-11-23T20:02:00"})
+        check("LEEREN keine Wiederauferstehung",
+              [e["haendler"] for e in b.reload().all()], ["Neu"])
+        a.clear()
+
+        # Alte JSON-Array-Datei wird einmalig uebernommen.
+        mig = os.path.join(tmp, "migration")
+        os.makedirs(mig)
+        with open(os.path.join(mig, core.EVENTS_LEGACY_FILE), "w",
+                  encoding="utf-8") as f:
+            json.dump([{"typ": "verfuegbar", "haendler": "Alt-JSON",
+                        "ts": "2026-11-23T20:03:00"}], f)
+        core.set_data_dir(mig)
+        m = core.Events()
+        check("Migration liest Altdatei", [e["haendler"] for e in m.all()],
+              ["Alt-JSON"])
+        check("Migration schreibt JSONL",
+              os.path.exists(os.path.join(mig, core.EVENTS_FILE)), True)
+        check("Migration benennt Altdatei um",
+              os.path.exists(os.path.join(mig, core.EVENTS_LEGACY_FILE+".migrated")),
+              True)
+        m.clear()
+        check("LEEREN entfernt migrierte Altdatei",
+              os.path.exists(os.path.join(mig, core.EVENTS_LEGACY_FILE+".migrated")),
+              False)
+    finally:
+        core.set_data_dir(alt_dir)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def abdeckung_tests():
+    """Abdeckungs- und Herkunftslabels aus Health.verlauf und Takt."""
+    from datetime import datetime
+    jetzt = datetime(2026, 11, 20, 12, 0, 0)
+
+    def evs(shop, start="2026-11-20T11:58:00",
+            ende="2026-11-20T11:59:00", dauer=60):
+        return [
+            {"typ": "verfuegbar", "haendler": shop,
+             "ts": start, "start": start, "preis": 799.0},
+            {"typ": "ausverkauft", "haendler": shop,
+             "ts": ende, "start": start, "dauer": dauer, "preis": 799.0},
+        ]
+
+    health = {
+        "Cover A": {"verlauf": [
+            {"ts": "2026-11-20T11:58:30", "status": "hit"}]},
+        "Cover B": {"verlauf": [
+            {"ts": "2026-11-20T11:50:00", "status": "hit"}]},
+        "Cover C": {"verlauf": [
+            {"ts": "2026-11-20T11:59:00", "status": "challenge"}]},
+        "Cover Alt": {"last_ts": jetzt.timestamp() - 90,
+                      "last_status": "hit"},
+    }
+    gesehen = core.erfolgs_fenster(
+        evs("Cover A"), jetzt=jetzt, health_daten=health, takt=600)[0]
+    check("Abdeckung gesehen", gesehen.get("abdeckung"), "gesehen")
+    check("Abdeckung Herkunft Scan", gesehen.get("herkunft"), "scan")
+    check("Abdeckung kurzes Fenster", gesehen.get("kurz"), True)
+    check("Abdeckung Label gesehen", core.erfolg_abdeckung_text(gesehen),
+          "GESEHEN · SCAN · FENSTER KÜRZER ALS TAKT")
+
+    luecke = core.erfolgs_fenster(
+        evs("Cover B"), jetzt=jetzt, health_daten=health, takt=600)[0]
+    check("Abdeckung Luecke", luecke.get("abdeckung"), "luecke")
+    check("Abdeckung Herkunft Ereignis", luecke.get("herkunft"), "ereignis")
+    check("Abdeckung Label Luecke", core.erfolg_abdeckung_text(luecke),
+          "LÜCKE · EREIGNIS · FENSTER KÜRZER ALS TAKT")
+
+    fehler = core.erfolgs_fenster(
+        evs("Cover C"), jetzt=jetzt, health_daten=health, takt=600)[0]
+    check("Abdeckung Fehler ist Luecke", fehler.get("abdeckung"), "luecke")
+    ohne = core.erfolgs_fenster(
+        evs("Cover D"), jetzt=jetzt, health_daten=health, takt=600)[0]
+    check("Abdeckung ohne Health-Eintrag", ohne.get("abdeckung"), "unbekannt")
+    check("Abdeckung ohne Daten Label", core.erfolg_abdeckung_text(ohne),
+          "OHNE DATEN · EREIGNIS · FENSTER KÜRZER ALS TAKT")
+    alt = core.erfolgs_fenster(
+        evs("Cover Alt"), jetzt=jetzt, health_daten=health, takt=600)[0]
+    check("Abdeckung alter Health-Stand", alt.get("abdeckung"), "gesehen")
+
+    lang = core.erfolgs_fenster(
+        evs("Cover A", start="2026-11-20T11:45:00",
+            ende="2026-11-20T11:59:00", dauer=840),
+        jetzt=jetzt, health_daten=health, takt=600)[0]
+    check("Abdeckung langes Fenster", lang.get("kurz"), False)
+    check("Abdeckung langes Fenster gesehen", lang.get("abdeckung"), "gesehen")
+    ohne_takt = core.erfolgs_fenster(
+        evs("Cover A"), jetzt=jetzt, health_daten=health, takt=0)[0]
+    check("Abdeckung ohne Takt kein Kurz", ohne_takt.get("kurz"), False)
+
+    offen = core.erfolgs_fenster(
+        evs("Cover A")[:1], jetzt=jetzt, max_alter=3600,
+        health_daten=health, takt=600)[0]
+    check("Abdeckung offen gesehen", offen.get("abdeckung"), "gesehen")
+    check("Abdeckung offen nicht kurz", offen.get("kurz"), False)
+
+    e = evs("Cover A")[1]
+    check("Ereignis Abdeckung", core.ereignis_abdeckung_text(e, health, 600),
+          "GESEHEN · SCAN · FENSTER KÜRZER ALS TAKT")
+    check("Ereignis Luecke",
+          core.ereignis_abdeckung_text(evs("Cover B")[1], health, 600),
+          "LÜCKE · EREIGNIS · FENSTER KÜRZER ALS TAKT")
+    check("Ereignis ohne Health",
+          core.ereignis_abdeckung_text(e, None, 600), "")
+    check("Abdeckung ohne Health nicht gesetzt",
+          "abdeckung" in core.erfolgs_fenster(evs("Cover A"), jetzt=jetzt)[0],
+          False)
+    check("Abdeckung Labels direkt",
+          core.abdeckung_labels("unbekannt", "ereignis", False),
+          "OHNE DATEN · EREIGNIS")
+
+
+def alltag_tests():
+    """Tagesgruppen, OFFEN SEIT und Preis-/Deckel-Badges."""
+    from datetime import datetime
+    jetzt = datetime(2026, 11, 23, 12, 0, 0)
+
+    check("Alltag Tagesschluessel",
+          core.tages_key("2026-11-23T10:00:00"), "2026-11-23")
+    check("Alltag Tagesschluessel leer", core.tages_key("kaputt"), "")
+    check("Alltag Tageslabel heute",
+          core.tages_label("2026-11-23T08:00:00", jetzt), "HEUTE")
+    check("Alltag Tageslabel gestern",
+          core.tages_label("2026-11-22T08:00:00", jetzt), "GESTERN")
+    check("Alltag Tageslabel gleiches Jahr",
+          core.tages_label("2026-11-13T08:00:00", jetzt), "13.11.")
+    check("Alltag Tageslabel anderes Jahr",
+          core.tages_label("2025-12-31T08:00:00", jetzt), "31.12.2025")
+    check("Alltag Tageslabel unbrauchbar",
+          core.tages_label(None, jetzt), "OHNE DATUM")
+
+    check("Alltag offen gerade",
+          core.offen_seit_text("2026-11-23T11:59:30", jetzt),
+          "OFFEN SEIT GERADE")
+    check("Alltag offen Minuten",
+          core.offen_seit_text("2026-11-23T11:48:00", jetzt),
+          "OFFEN SEIT 12 MIN")
+    check("Alltag offen Stunden",
+          core.offen_seit_text("2026-11-23T10:55:00", jetzt),
+          "OFFEN SEIT 1 STD 5 MIN")
+    check("Alltag offen Tage",
+          core.offen_seit_text("2026-11-21T11:00:00", jetzt),
+          "OFFEN SEIT 2 TAGEN")
+    check("Alltag offen unbrauchbar",
+          core.offen_seit_text(None, jetzt), "OFFEN SEIT ?")
+
+    check("Alltag Preis-Badge", core.preis_badge_text(899.0),
+          "PREIS 899,00 €")
+    check("Alltag Preis-Badge leer", core.preis_badge_text(None), "PREIS —")
+    check("Alltag Deckel-Badge", core.deckel_badge_text(900.0),
+          "DECKEL 900 €")
+    check("Alltag Deckel-Badge offen", core.deckel_badge_text(None),
+          "DECKEL OFFEN")
+    check("Alltag Preis unter Deckel", core.preis_unter_deckel(899.0, 900.0),
+          True)
+    check("Alltag Preis ueber Deckel", core.preis_unter_deckel(901.0, 900.0),
+          False)
+    check("Alltag Preis ohne Deckel", core.preis_unter_deckel(901.0, None),
+          True)
+    check("Alltag Preis ohne Wert", core.preis_unter_deckel(None, 900.0),
+          None)
 
 
 def v13_tests():
@@ -3343,6 +3621,9 @@ if __name__ == "__main__":
         progress_tests()
         service_tests()
         feature_tests()
+        events_journal_tests()
+        abdeckung_tests()
+        alltag_tests()
         adaptive_boot_tests()
         fixture_tests()
         amazon_tests()

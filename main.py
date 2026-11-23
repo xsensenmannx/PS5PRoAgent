@@ -46,7 +46,10 @@ from scan_core import (
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
     bg_wachhund,
     kurz_zeit, kurz_tag, event_zeile,
+    tages_key, tages_label, offen_seit_text,
+    preis_badge_text, deckel_badge_text, preis_unter_deckel,
     erfolgs_fenster, erfolg_zeile, erfolg_offen_max, erfolg_letzte_scans,
+    erfolg_abdeckung_text, ereignis_abdeckung_text,
     events as verlauf_events,
     preis_deckel, deckel_wert, stumm_bis, Kaeufe, KAUF_STUMM_S,
     health_export_json,
@@ -825,6 +828,123 @@ def erfolg_farbe(f):
     """Punktfarbe eines Erfolgsfensters: aktuell, alter Stand oder Abschluss."""
     if f.get("offen"): return PS1_GREEN
     return PS1_YELLOW if f.get("veraltet") else PS1_CYAN
+
+
+class Badge(Label):
+    """Kompakter PS1-Chip fuer Preis, Deckel und OFFEN SEIT."""
+    def __init__(self,text,fg=None,bg=None,**kw):
+        kw.setdefault("font_name",SST_FONT)
+        kw.setdefault("font_size",sp(7.2))
+        kw.setdefault("bold",True)
+        kw.setdefault("color",fg or PS1_SILVER)
+        kw.setdefault("halign","left")
+        kw.setdefault("valign","middle")
+        kw.setdefault("size_hint",(None,None))
+        kw.setdefault("height",dp(13))
+        kw.setdefault("markup",False)
+        kw.setdefault("padding",(dp(4),0))
+        super().__init__(text=str(text),**kw)
+        self._bg=bg or (0.10,0.11,0.13,1)
+        self._fg=fg or PS1_SILVER
+        self.width=dp(20)
+        self.bind(texture_size=self._sync_width,pos=self._redraw,size=self._redraw)
+        Clock.schedule_once(self._sync_width,0)
+    def _sync_width(self,*_):
+        try: tw=self.texture_size[0]
+        except Exception: tw=0
+        self.width=max(dp(18),tw+dp(8))
+        self.height=dp(13)
+        self._redraw()
+    def _redraw(self,*_):
+        self.canvas.before.clear()
+        if self.width<=0 or self.height<=0: return
+        with self.canvas.before:
+            Color(0,0,0,0.65)
+            RoundedRectangle(pos=(self.x-dp(1),self.y-dp(1)),
+                             size=(self.width+dp(2),self.height+dp(2)),
+                             radius=[dp(2)])
+            Color(*self._bg)
+            RoundedRectangle(pos=self.pos,size=self.size,radius=[dp(2)])
+            Color(self._fg[0],self._fg[1],self._fg[2],0.65)
+            Line(rectangle=(self.x,self.y,self.width,self.height),width=dp(1))
+
+
+class ListenRow(ButtonBehavior, BoxLayout):
+    """Antippbare Zeile in ERFOLGE/VERLAUF; Wischen scrollt weiter."""
+    def __init__(self,eintrag,on_tap=None,**kw):
+        super().__init__(orientation="horizontal",size_hint_y=None,
+                         spacing=dp(4),padding=0,**kw)
+        self.eintrag=eintrag or {}
+        self._tap=on_tap or self.eintrag.get("on_tap")
+        self._down=None; self._moved=False; self._pressed=False; self._fired=False
+        self.bind(on_release=self._fire)
+        detail=self.eintrag.get("detail") or ""
+        badges=self.eintrag.get("badges") or []
+        self.height=dp(24)+(dp(12) if detail else 0)+(dp(14) if badges else 0)
+        self.bind(pos=self._redraw,size=self._redraw)
+        self.add_widget(Dot(self.eintrag.get("farbe") or PS1_SILVER))
+        spalte=BoxLayout(orientation="vertical",spacing=0)
+        lb=Label(text=str(self.eintrag.get("text") or ""),
+                 color=PS1_TEXT if self.eintrag.get("hell") else PS1_SILVER,
+                 font_size=sp(9),font_name=SST_FONT,halign="left",valign="middle",
+                 shorten=True,shorten_from="right",
+                 size_hint_y=None,height=dp(24))
+        lb.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        spalte.add_widget(lb)
+        if detail:
+            dl=Label(text=detail,color=PS1_GREY,font_size=sp(7.5),
+                     font_name=SST_FONT,halign="left",valign="middle",
+                     shorten=True,shorten_from="right",
+                     size_hint_y=None,height=dp(12))
+            dl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+            spalte.add_widget(dl)
+        if badges:
+            br=BoxLayout(orientation="horizontal",size_hint_y=None,
+                         height=dp(14),spacing=dp(3))
+            for b in badges:
+                if isinstance(b,Badge): br.add_widget(b)
+                elif isinstance(b,(tuple,list)) and len(b)>=3:
+                    br.add_widget(Badge(b[0],fg=b[1],bg=b[2]))
+            spalte.add_widget(br)
+        self.add_widget(spalte)
+        chev=Label(text=">",color=PS1_GREY,font_size=sp(10),font_name=SST_FONT,
+                   bold=True,halign="right",valign="middle",
+                   size_hint=(None,1),width=dp(9))
+        chev.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        self.add_widget(chev)
+        Clock.schedule_once(self._redraw,0)
+    def _redraw(self,*_):
+        self.canvas.before.clear()
+        if self.width<=0 or self.height<=0: return
+        bg=PS1_PANEL_HI if self._pressed else (0.075,0.078,0.088,0.82)
+        with self.canvas.before:
+            Color(*bg); Rectangle(pos=self.pos,size=self.size)
+            Color(0.28,0.29,0.32,0.55)
+            Line(points=[self.x,self.y,self.right,self.y],width=dp(1))
+    def on_touch_down(self,touch):
+        if self.collide_point(*touch.pos):
+            self._down=touch.pos; self._moved=False; self._pressed=True
+            self._fired=False; self._redraw()
+        return super().on_touch_down(touch)
+    def on_touch_move(self,touch):
+        if self._down and (abs(touch.x-self._down[0])+
+                           abs(touch.y-self._down[1]))>dp(14):
+            self._moved=True; self._pressed=False; self._redraw()
+        return super().on_touch_move(touch)
+    def on_touch_up(self,touch):
+        inside=self.collide_point(*touch.pos)
+        out=super().on_touch_up(touch)
+        if inside and self._down is not None: self._fire()
+        self._pressed=False; self._down=None; self._redraw()
+        return out
+    def _fire(self,*_):
+        """Tap-Callback; Wischen hat Vorrang und loest keinen Detailwechsel aus."""
+        if self._moved or self._fired: return
+        self._fired=True
+        haptic(0.02)
+        if self._tap:
+            try: self._tap()
+            except Exception: pass
 
 
 class PSMark(Widget):
@@ -2383,11 +2503,69 @@ class MainUI(FloatLayout):
         try: return erfolg_letzte_scans(Health().all())
         except Exception: return {}
 
-    def _listen_popup(self,titel,sub,leer_text,zeilen,leer_toast):
+    def _land_fuer_shop(self,shop):
+        for h in HAENDLER:
+            if h.get("name")==shop: return str(h.get("land") or "DE")
+        return "AT" if str(shop or "").upper().endswith(" AT") else "DE"
+
+    def _badges(self,preis,deckel,offen_seit=""):
+        """Drei kompakte Badges: Preis, Deckel und optional OFFEN SEIT."""
+        unter=preis_unter_deckel(preis,deckel)
+        if unter is None:
+            p_fg,p_bg=PS1_GREY,(0.10,0.11,0.13,1)
+        elif unter:
+            p_fg,p_bg=PS1_GREEN,(0.03,0.18,0.08,1)
+        else:
+            p_fg,p_bg=PS1_RED,(0.25,0.04,0.04,1)
+        badges=[(preis_badge_text(preis),p_fg,p_bg),
+                (deckel_badge_text(deckel),PS1_CYAN,(0.04,0.14,0.20,1))]
+        if offen_seit:
+            badges.append((offen_seit,PS1_YELLOW,(0.20,0.15,0.03,1)))
+        return badges
+
+    def _open_shop_detail(self,shop,preis=None,url=None,aktiv=False):
+        """Zeile antippen: Detail des Shops, mit aktuellem Health-Stand."""
+        shop=str(shop or "")
+        if not shop: return
+        try: halle=Health().all()
+        except Exception: halle={}
+        h=halle.get(shop) or {}
+        status=str(h.get("last_status") or "")
+        mapping={"hit":("hit","in_stock",True),
+                 "expensive":("expensive","in_stock",True),
+                 "chance":("chance","pickup_only",False),
+                 "unavail":("unavail","sold_out",False),
+                 "unknown":("unknown","unknown",None),
+                 "error":("error","unknown",None),
+                 "challenge":("challenge","unknown",None),
+                 "parser":("parser","unknown",None)}
+        if status in mapping: klass,state,sofort=mapping[status]
+        else:
+            klass="hit" if aktiv else "unavail"
+            state="in_stock" if aktiv else "sold_out"
+            sofort=True if aktiv else False
+        if preis is None:
+            try: preis=self.history.get_last(shop)
+            except Exception: preis=None
+        try: preis=float(preis) if preis is not None else None
+        except (TypeError,ValueError): preis=None
+        if not url:
+            cur=self.scanned.get(shop) if isinstance(self.scanned,dict) else None
+            if isinstance(cur,dict): url=cur.get("url")
+        r={"haendler":shop,"preis":preis,"url":url or "",
+           "klass":klass,"condition":"new","avail_state":state,
+           "sofort":sofort,"land":self._land_fuer_shop(shop)}
+        try: serie=self.history.get_serie(shop)
+        except Exception: serie=[]
+        self._open_detail(r,serie)
+
+    def _listen_popup(self,titel,sub,leer_text,eintraege,leer_toast,
+                      aktiv_leer=None):
         """Gemeinsames Geruest fuer VERLAUF und ERFOLGE.
 
-        ``zeilen`` ist eine Liste aus ``(Punktfarbe, Text, hervorgehoben)``.
-        Beide Ansichten teilen Kopf, Scrollbereich, LEEREN und Groesse.
+        ``eintraege`` sind Dicts mit Punktfarbe, Text, Detailzeile, Tag,
+        Badges und optionalem Tap-Callback. Die Liste wird beim Filterwechsel
+        neu aufgebaut, damit Tagesgruppen und AKTIVE/ALLE konsistent bleiben.
         """
         haptic(0.02)
         box=BoxLayout(orientation="vertical",spacing=dp(5),padding=dp(8))
@@ -2402,32 +2580,79 @@ class MainUI(FloatLayout):
                     shorten=True,shorten_from="right")
         sub_l.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
         box.add_widget(sub_l)
+
+        filter_box=BoxLayout(size_hint_y=None,height=dp(28),spacing=dp(4))
+        fl=Label(text="FILTER",color=PS1_GREY,font_size=sp(7.5),font_name=SST_FONT,
+                 size_hint=(None,1),width=dp(38),halign="left",valign="middle")
+        fl.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+        filter_box.add_widget(fl)
+        aktiv_n=sum(1 for e in eintraege if e.get("aktiv"))
+        chip_aktiv=Chip(text=f"AKTIVE {aktiv_n}",accent=PS1_GREEN,
+                        size_hint=(None,1),width=dp(84),state="normal")
+        chip_alle=Chip(text=f"ALLE {len(eintraege)}",accent=PS1_BLUE,
+                       size_hint=(None,1),width=dp(68),state="down")
+        filter_box.add_widget(chip_aktiv); filter_box.add_widget(chip_alle)
+        filter_box.add_widget(Widget())
+        box.add_widget(filter_box)
+
         sv=ScrollView(bar_width=dp(4))
         inner=BoxLayout(orientation="vertical",size_hint_y=None,spacing=dp(2))
         inner.bind(minimum_height=inner.setter("height"))
-        if not zeilen:
-            leer=Label(text=leer_text,color=PS1_GREY,font_size=sp(9),
+
+        def _leer(text):
+            leer=Label(text=text,color=PS1_GREY,font_size=sp(9),
                        font_name=SST_FONT,halign="left",valign="top",
                        size_hint_y=None,height=dp(44))
             leer.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             inner.add_widget(leer)
-        for farbe,text,hell in zeilen:
-            row=BoxLayout(size_hint_y=None,height=dp(24),spacing=dp(4))
-            row.add_widget(Dot(farbe))
-            lb=Label(text=text,color=PS1_TEXT if hell else PS1_SILVER,
-                     font_size=sp(9),font_name=SST_FONT,halign="left",valign="middle",
-                     shorten=True,shorten_from="right")
-            lb.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
-            row.add_widget(lb); inner.add_widget(row)
+
+        def render():
+            inner.clear_widgets()
+            modus="aktiv" if chip_aktiv.state=="down" else "alle"
+            rows=[e for e in eintraege if modus=="alle" or e.get("aktiv")]
+            if not rows:
+                _leer(aktiv_leer if modus=="aktiv" and eintraege else leer_text)
+                return
+            counts={}
+            for e in rows:
+                tag=e.get("tag") or ""
+                counts[tag]=counts.get(tag,0)+1
+            letzter=None
+            for e in rows:
+                tag=e.get("tag") or ""
+                if tag!=letzter:
+                    letzter=tag
+                    hdr=Label(text=f"{tages_label(tag)} · {counts.get(tag,0)}",
+                              color=PS1_CYAN,font_size=sp(8),font_name=SST_FONT,
+                              bold=True,halign="left",valign="middle",
+                              size_hint_y=None,height=dp(16))
+                    hdr.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
+                    inner.add_widget(hdr)
+                inner.add_widget(ListenRow(e,on_tap=e.get("on_tap")))
+
+        def set_filter(modus):
+            haptic(0.01)
+            chip_aktiv.state="down" if modus=="aktiv" else "normal"
+            chip_alle.state="down" if modus=="alle" else "normal"
+            sv.scroll_y=1
+            render()
+        chip_aktiv.bind(on_release=lambda *_:set_filter("aktiv"))
+        chip_alle.bind(on_release=lambda *_:set_filter("alle"))
+        render()
         sv.add_widget(inner); box.add_widget(sv)
+
         btns=BoxLayout(size_hint_y=None,height=dp(36),spacing=dp(5))
         lb2=PS1Button(text="LEEREN",accent=PS1_YELLOW,font_size=sp(9))
         cb=PS1Button(text="ZU",accent=PS1_SILVER,font_size=sp(9))
         btns.add_widget(lb2); btns.add_widget(cb); box.add_widget(btns)
-        # Die Hoehe folgt dem Inhalt: Bei drei Erfolgen stand das Popup sonst
-        # fast leer da, waehrend lange Listen weiterhin bei 520 dp scrollen.
-        anzahl=max(1,len(zeilen))
-        inhalt=dp(22+14+36+16+15)+dp(26)*anzahl
+        # Die Hoehe folgt dem Inhalt; der Filter bleibt immer erreichbar.
+        def row_h(e):
+            return (dp(24)+(dp(12) if e.get("detail") else 0)
+                    +(dp(14) if e.get("badges") else 0))
+        tags={e.get("tag") or "" for e in eintraege}
+        zeilen_h=sum(row_h(e) for e in eintraege)
+        inhalt=dp(22+14+28+36+16+15)+zeilen_h+dp(18)*len(tags)
+        inhalt+=dp(2)*max(0,len(eintraege)-1)
         p=Popup(title="",content=box,size_hint=(None,None),
                 width=min(dp(560),Window.width*0.92),
                 height=min(dp(520),Window.height*0.82,max(dp(220),inhalt)),
@@ -2442,8 +2667,10 @@ class MainUI(FloatLayout):
     def _open_erfolge(self):
         """Erfolge: abgeschlossene und offene Verfuegbarkeitsfenster."""
         ev=verlauf_events().reload()
+        halle=Health().all()
         alle=erfolgs_fenster(ev.all(), max_alter=self._erfolg_frische(),
-                             letzte_scans=self._erfolg_scans())
+                             letzte_scans=erfolg_letzte_scans(halle),
+                             health_daten=halle,takt=self.auto_interval)
         preise=[]
         for f in alle:
             if f.get("preis") is None: continue
@@ -2451,31 +2678,79 @@ class MainUI(FloatLayout):
             except (TypeError,ValueError): pass
         best=format_preis(min(preise)) if preise else "—"
         shops=len({f.get("haendler") for f in alle if f.get("haendler")})
-        zeilen=[]
+        eintraege=[]
         for f in alle[:30]:
             offen=bool(f.get("offen"))
-            zeilen.append((erfolg_farbe(f),erfolg_zeile(f),offen))
+            shop=str(f.get("haendler") or "?")
+            deckel=self._deckel(self._land_fuer_shop(shop))
+            badges=self._badges(f.get("preis"),deckel,
+                                offen_seit_text(f.get("start")) if offen else "")
+            eintraege.append({
+                "farbe":erfolg_farbe(f),"text":erfolg_zeile(f),
+                "hell":offen,"detail":erfolg_abdeckung_text(f),
+                "tag":tages_key(f.get("start")),"aktiv":offen,
+                "badges":badges,
+                "on_tap":(lambda f=f: self._open_shop_detail(
+                    f.get("haendler"),f.get("preis"),f.get("url"),
+                    bool(f.get("offen")))),
+            })
         self._listen_popup(
             "ERFOLGE",
             f"{len(alle)} FENSTER · {shops} SHOP{'S' if shops != 1 else ''} · BESTER PREIS {best}",
             "Noch keine Erfolge. Sobald ein Shop verfuegbar wird, "
             "steht das Fenster hier - mit Preis und Dauer.",
-            zeilen,"ERFOLGE GELEERT")
+            eintraege,"ERFOLGE GELEERT",
+            aktiv_leer="Keine aktiven Fenster. Mit ALLE bleibt die Historie sichtbar.")
 
     def _open_events(self):
         """Detail A: Ticker der Zustandswechsel samt Fensterdauer."""
         ev=verlauf_events(); ev.reload()
-        zeilen=[]
-        for e in ev.letzte(30):
+        halle=Health().all()
+        alle=ev.all()
+        fenster=erfolgs_fenster(alle,max_alter=self._erfolg_frische(),
+                                letzte_scans=erfolg_letzte_scans(halle),
+                                health_daten=halle,takt=self.auto_interval)
+        offene={f.get("haendler"):f for f in fenster if f.get("offen")}
+        # Fuer ein verfuegbar-Ereignis reicht die Abdeckung bis zum naechsten
+        # Wechsel desselben Shops; beim letzten Ereignis bis jetzt.
+        naechste={}; letzte={}
+        for i,e in enumerate(alle):
+            if not isinstance(e,dict): continue
+            shop=e.get("haendler")
+            if not shop: continue
+            if shop in letzte: naechste[letzte[shop]]=e.get("ts")
+            letzte[shop]=i
+        eintraege=[]
+        for i in range(len(alle)-1,max(-1,len(alle)-31),-1):
+            e=alle[i]
+            shop=str(e.get("haendler") or "?")
             neu=e.get("typ")=="verfuegbar"
-            zeilen.append((PS1_GREEN if neu else PS1_SILVER,
-                           event_zeile(e),neu))
+            aktiv=bool(neu and shop!="?" and letzte.get(shop)==i
+                       and shop in offene)
+            offen_seit=""
+            if aktiv:
+                start=(offene.get(shop) or {}).get("start") or e.get("start") or e.get("ts")
+                offen_seit=offen_seit_text(start)
+            detail=ereignis_abdeckung_text(
+                e,health_daten=halle,takt=self.auto_interval,
+                ende=naechste.get(i))
+            deckel=self._deckel(self._land_fuer_shop(shop))
+            eintraege.append({
+                "farbe":PS1_GREEN if neu else PS1_SILVER,
+                "text":event_zeile(e),"hell":neu,"detail":detail,
+                "tag":tages_key(e.get("ts")),"aktiv":aktiv,
+                "badges":self._badges(e.get("preis"),deckel,offen_seit),
+                "on_tap":(lambda e=e: self._open_shop_detail(
+                    e.get("haendler"),e.get("preis"),e.get("url"),
+                    e.get("typ")=="verfuegbar")),
+            })
         self._listen_popup(
             "VERLAUF",
-            f"{len(ev.all())} EREIGNISSE · FENSTERDAUER AUS EIGENEN SCANS",
+            f"{len(alle)} EREIGNISSE · FENSTERDAUER AUS EIGENEN SCANS",
             "Noch keine Zustandswechsel. Der Ticker fuellt sich, "
             "sobald ein Shop zwischen verfuegbar und weg wechselt.",
-            zeilen,"VERLAUF GELEERT")
+            eintraege,"VERLAUF GELEERT",
+            aktiv_leer="Keine aktiven Verläufe. Mit ALLE bleibt die Historie sichtbar.")
 
     def _shop_config_bg(self,force=False):
         try: n=aktualisiere_shop_config(force)
@@ -2545,8 +2820,11 @@ class MainUI(FloatLayout):
         halle=Health().all()
         fenster=[f for f in erfolgs_fenster(verlauf_events().reload().all(),
                                             max_alter=self._erfolg_frische(),
-                                            letzte_scans=erfolg_letzte_scans(halle))
+                                            letzte_scans=erfolg_letzte_scans(halle),
+                                            health_daten=halle,
+                                            takt=self.auto_interval)
                  if f.get("haendler")==name][:3]
+        offener_erfolg=next((f for f in fenster if f.get("offen")),None)
         hzustand=halle.get(name) or {}
         if hzustand.get("last_ts"):
             zeilen.append(("ZULETZT GEPRUEFT", self._age_text(hzustand["last_ts"])+" alt"))
@@ -2564,6 +2842,15 @@ class MainUI(FloatLayout):
                     halign="right",valign="middle",shorten=True,shorten_from="right")
             for x in (a,b): x.bind(size=lambda w,*_:setattr(w,"text_size",w.size))
             row.add_widget(a); row.add_widget(b); box.add_widget(row)
+        # Bestell.bar zeigt den aktuellen Erfolg als direkten "BESTELLBAR"-
+        # Link. Der Feed bleibt chronologisch; dieser Knopf spart den Umweg
+        # ueber die Karten- oder Detailansicht, wenn es gerade zaehlt.
+        if offener_erfolg:
+            bb=PS1Button(text="BESTELLBAR · SHOP OEFFNEN",accent=PS1_GREEN,
+                         font_size=sp(9),size_hint_y=None,height=dp(34))
+            bb.bind(on_release=lambda *_:open_url(
+                offener_erfolg.get("url") or r.get("url")))
+            box.add_widget(bb)
         if fenster:
             kopf=Label(text="LETZTE ERFOLGE",color=PS1_GREY,font_size=sp(8.5),
                        font_name=SST_FONT,halign="left",valign="middle",
@@ -2909,6 +3196,10 @@ class MainUI(FloatLayout):
         self.scan_btn.text="STOP"
         self._scan_t0=time.time(); self._scan_done=0
         self._scan_total=len(aktive)
+        # Ein Soforttreffer wird vor der Verifikation als Vorschau gezeigt.
+        # Seine bestaetigte Fassung muss noch verarbeitet werden, bevor die
+        # Runde endet und der Erfolgs-Feed abgeschlossen wird.
+        self._verify_pending=0
         self._update_radar_hud()
         self.results_count.text=f"0/{len(aktive)}"
         self.results_count.color=PS1_GREY
@@ -2954,7 +3245,12 @@ class MainUI(FloatLayout):
                     r["_detect_ts"]=time.time()
                     gemeldet=False
                     if meldebereit(r):
-                        self.queue.put((tok,dict(r),False)); gemeldet=True
+                        # Vorschau sofort zeigen, aber noch nicht in History/
+                        # Journal schreiben: erst die Verifikation entscheidet.
+                        if tok==self._scan_token:
+                            self._verify_pending+=1
+                        vorschau=dict(r); vorschau["_vorlaeufig"]=True
+                        self.queue.put((tok,vorschau,False)); gemeldet=True
                     try: verify_treffer(futs[f],r,cancel)
                     except Exception as e: print(f"[Verify] {r.get('haendler','?')}: {e}")
                     self.queue.put((tok,r,gemeldet))
@@ -2980,15 +3276,29 @@ class MainUI(FloatLayout):
         name=r.get("haendler","?")
         if nach:
             # Nachtrag der Verifikation: Karte korrigieren, nicht erneut melden
-            # und den Fortschritt nicht doppelt zaehlen.
+            # und den Fortschritt nicht doppelt zaehlen. Erst jetzt darf der
+            # Zustandswechsel ins Journal: die Vorschau kann noch zurueckgestuft
+            # werden (verify == "weg").
             alt=self.scanned.get(name) or {}
-            for marke in ("_is_new","_restock"):
-                if alt.get(marke): r[marke]=True
+            for marke in ("_prev","_is_new","_restock"):
+                if marke in alt: r[marke]=alt[marke]
+            if r.get("klass") not in ("error","challenge","unavail","parser","chance"):
+                r["klass"]=classify(True,r.get("preis"),self._deckel(r.get("land")),
+                                    r.get("avail_state"))
             self.scanned[name]=r
+            # Der bestaetigte Stand wird sofort verarbeitet, nicht erst beim
+            # Rundenende. Das ist der Unterschied zu einem Feed, der auf alle
+            # 42 Shops wartet.
+            try:
+                self.history.update([r],persist=False)
+            except Exception as e:
+                print(f"[History] {name}: {e}")
+            self._verify_pending=max(0,getattr(self,"_verify_pending",0)-1)
             self._update_blip(name,r.get("klass") or "unknown")
             if r.get("verify")=="weg":
                 self._toast(f"{name}: ZURÜCKGESTUFT",color=PS1_YELLOW)
             self._rerender_throttled()
+            self._maybe_scan_end()
             return
         self._scan_done+=1
         self._update_radar_hud()
@@ -3003,6 +3313,14 @@ class MainUI(FloatLayout):
             r["_is_new"]=ereignis=="new"
             r["_restock"]=ereignis=="restock"
             self.scanned[name]=r
+            # Eine meldebereite Vorschau zeigt den Treffer sofort, wird aber
+            # erst nach der Verifikation journalisiert. Normale Ergebnisse
+            # gehen direkt in den Erfolgs-Feed.
+            if not r.get("_vorlaeufig"):
+                try:
+                    self.history.update([r],persist=False)
+                except Exception as e:
+                    print(f"[History] {name}: {e}")
             self._update_blip(name,r["klass"])
             hits=sum(1 for x in self.scanned.values() if x["klass"]=="hit"
                      and not ist_gebraucht(x.get("condition")))
@@ -3016,7 +3334,12 @@ class MainUI(FloatLayout):
             self._rerender_throttled()
         except Exception as e:
             print(f"[Scan] {name}: {e}")
-        if self._scan_done>=self._scan_total: self._scan_end()
+        self._maybe_scan_end()
+    def _maybe_scan_end(self):
+        """Runde erst beenden, wenn auch bestaetigte Vorschauen verarbeitet sind."""
+        if (self.scanning and self._scan_done>=self._scan_total
+                and getattr(self,"_verify_pending",0)<=0):
+            self._scan_end()
     def _update_blip(self,name,klass):
         h=int(hashlib.md5(name.encode()).hexdigest()[:8],16)
         ang=math.radians(h%360); dist=0.25+(h%60)/100.0
@@ -3035,7 +3358,17 @@ class MainUI(FloatLayout):
         back=sum(1 for x in self.scanned.values() if x.get("_restock"))
         try: health().save()
         except Exception: pass
-        self.history.update(self.scanned.values())
+        # Vorschauen sind keine bestaetigten Zustaende. Die bestaetigten
+        # Ergebnisse wurden bereits einzeln verarbeitet; dieser Lauf sichert
+        # nur noch den Stand und faengt nicht journalisierte Ergebnisse ab.
+        self._verify_pending=0
+        try:
+            self.history.update(
+                [x for x in self.scanned.values()
+                 if not x.get("_vorlaeufig")])
+            self.history.flush()
+        except Exception as e:
+            print(f"[History] Runde: {e}")
         # Bei Treffern keinen kompletten Karten-Neubau mitten in den letzten
         # Radar-Frame legen; der geplante Throttle-Render uebernimmt.
         if hits: self._rerender_throttled()

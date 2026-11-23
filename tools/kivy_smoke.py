@@ -620,6 +620,13 @@ class SmokeApp(App):
         check("Detail: Handler stumm", self.ui.settings.get("mute_haendler"), ["Amazon DE"])
         check("Detail: Stumm-Button gedreht", self.button(p, "HANDLER LAUT") is not None, True)
 
+        # Der aktuelle Erfolg ist wie bei Bestell.bar direkt erreichbar.
+        bb = self.button(p, "BESTELLBAR · SHOP OEFFNEN")
+        bb.dispatch("on_release")
+        self.pump()
+        check("Detail: Bestellbar oeffnet Shop", OPEN_URLS[-1], result["url"])
+        OPEN_URLS.clear()
+
         # SHOP OEFFNEN darf im Test keinen Browser starten.
         self.button(p, "SHOP OEFFNEN").dispatch("on_release")
         self.pump()
@@ -679,22 +686,93 @@ class SmokeApp(App):
     def verlauf(self):
         scan_core.reset_events()
         ev = scan_core.events(); ev.clear()
+        jetzt = datetime.now()
         ev.add({"typ": "verfuegbar", "haendler": "Shop A",
                 "ts": "2026-11-13T10:35:00", "start": "2026-11-13T10:35:00",
                 "dauer": None})
         ev.add({"typ": "ausverkauft", "haendler": "Shop A",
                 "ts": "2026-11-13T10:36:35", "start": "2026-11-13T10:35:00",
                 "dauer": 95})
+        # Health.verlauf fuer die Abdeckung: ein Scan liegt im Fenster.
+        h = scan_core.health()
+        h.data["Shop A"] = {"last_status": "unavail",
+                            "last_ts": 0,
+                            "verlauf": [
+                                {"ts": "2026-11-13T10:35:30", "status": "hit"},
+                                {"ts": "2026-11-13T10:36:30", "status": "unavail"}]}
+        # Ein aktuell offenes Fenster fuer den AKTIVE-Filter und OFFEN SEIT.
+        frisch = jetzt.isoformat(timespec="seconds")
+        ev.add({"typ": "verfuegbar", "haendler": "Shop B",
+                "ts": frisch, "preis": 799.0})
+        h.data["Shop B"] = {"last_status": "hit", "last_ts": jetzt.timestamp(),
+                            "verlauf": [{"ts": frisch, "status": "hit"}]}
+        h.save()
+        alt_takt = self.ui.auto_interval
+        self.ui.auto_interval = 600
         self.ui._open_setup()
         p = self.popup("System Config mit Verlauf")
         b = next(w for w in p.content.walk()
                  if isinstance(w, main.PS1Button) and str(w.text).startswith("VERLAUF"))
-        check("Setup: Verlauf nennt die Anzahl", "2 EREIGNISSE" in str(b.text), True)
+        check("Setup: Verlauf nennt die Anzahl", "3 EREIGNISSE" in str(b.text), True)
         b.dispatch("on_release")
         p = self.popup("Verlauf")
         text = " ".join(self.texts(p))
         check("Verlauf: Restock", "VERFÜGBAR · Shop A" in text, True)
         check("Verlauf: Fensterdauer", "FENSTER 1 MIN" in text, True)
+        check("Verlauf: Abdeckung GESEHEN", "GESEHEN" in text, True)
+        check("Verlauf: Herkunft SCAN", "SCAN" in text, True)
+        check("Verlauf: kurzes Fenster", "FENSTER KÜRZER ALS TAKT" in text, True)
+        detail_labels = [w for w in p.content.walk()
+                         if isinstance(w, main.Label)
+                         and "FENSTER KÜRZER ALS TAKT" in str(w.text)]
+        check("Verlauf: Abdeckungszeile vorhanden", bool(detail_labels), True)
+        check("Verlauf: Abdeckungszeile passt",
+              all(fits(w) for w in detail_labels), True)
+        check("Verlauf: Filter aktiv/all",
+              "AKTIVE 1" in text and "ALLE 3" in text, True)
+        check("Verlauf: Tagesgruppe heute", "HEUTE" in text, True)
+        check("Verlauf: Tagesgruppe alt", "13.11." in text, True)
+        check("Verlauf: OFFEN SEIT", "OFFEN SEIT" in text, True)
+        check("Verlauf: Preis-Badge", "PREIS 799,00 €" in text, True)
+        check("Verlauf: Deckel-Badge",
+              f"DECKEL {int(self.ui.max_preis)} €" in text, True)
+        badge_labels = [w for w in p.content.walk() if isinstance(w, main.Badge)]
+        check("Verlauf: Badges vorhanden", bool(badge_labels), True)
+        check("Verlauf: Badges passen", all(fits(w) for w in badge_labels), True)
+        badge_rows = [w for w in p.content.walk()
+                      if isinstance(w, main.ListenRow)
+                      and any(isinstance(x, main.Badge) for x in w.walk())]
+        check("Verlauf: Badge-Zeile passt",
+              all(sum(b.width for b in row.walk(restrict=True)
+                      if isinstance(b, main.Badge)) <= row.width
+                  for row in badge_rows), True)
+        chip_aktiv = next(w for w in p.content.walk()
+                          if isinstance(w, main.Chip)
+                          and str(w.text).startswith("AKTIVE"))
+        chip_alle = next(w for w in p.content.walk()
+                         if isinstance(w, main.Chip)
+                         and str(w.text).startswith("ALLE"))
+        chip_aktiv.dispatch("on_release"); self.pump()
+        aktiv_text = " ".join(self.texts(p))
+        check("Verlauf: AKTIVE zeigt offenen Shop", "Shop B" in aktiv_text, True)
+        check("Verlauf: AKTIVE ohne Historie", "Shop A" in aktiv_text, False)
+        chip_alle.dispatch("on_release"); self.pump()
+        check("Verlauf: ALLE zeigt Historie",
+              "Shop A" in " ".join(self.texts(p)), True)
+        # Antippbare Zeile: oeffnet die bestehende Detailansicht.
+        row_b = next(w for w in p.content.walk()
+                     if isinstance(w, main.ListenRow)
+                     and "Shop B" in str(w.eintrag.get("text") or ""))
+        row_b._fire(); self.pump()
+        detail = next(w for w in self.popups()
+                      if any("LETZTE ERFOLGE" in str(getattr(x, "text", ""))
+                             for x in w.content.walk()))
+        check("Verlauf: Zeile oeffnet Detail",
+              any("Shop B" in str(getattr(w, "text", ""))
+                  for w in detail.content.walk()), True)
+        self.button(detail, "SCHLIESSEN").dispatch("on_release"); self.pump()
+        check("Verlauf: Detail wieder geschlossen", len(self.popups()), 1)
+        self.ui.auto_interval = alt_takt
         self.close(p, "ZU")
 
         # Ausverkaufte Trefferzeile zeigt den letzten Tag (Detail B).
@@ -781,6 +859,22 @@ class SmokeApp(App):
                 "ts": frisch, "preis": 799.0})
         ev.add({"typ": "verfuegbar", "haendler": "Shop C",
                 "ts": alt, "preis": 899.0})
+        # Shop A hat Scans im kurzen Fenster, Shop B einen aktuellen Scan,
+        # Shop C bewusst keinen Eintrag: GESEHEN, SCAN und OHNE DATEN.
+        h = scan_core.health()
+        h.data = {
+            "Shop A": {"verlauf": [
+                {"ts": "2026-11-13T10:35:30", "status": "hit"},
+                {"ts": "2026-11-13T10:36:30", "status": "unavail"}]},
+            "Shop B": {"verlauf": [{"ts": frisch, "status": "hit"}]},
+            # Shop C hat Health-Daten, aber keinen Scan im alten Fenster:
+            # daraus wird LÜCKE statt OHNE DATEN.
+            "Shop C": {"verlauf": [
+                {"ts": "2026-11-10T10:00:00", "status": "hit"}]},
+        }
+        h.save()
+        alt_takt = self.ui.auto_interval
+        self.ui.auto_interval = 600
         self.ui._open_setup()
         p = self.popup("System Config mit Erfolgen")
         b = next(w for w in p.content.walk()
@@ -792,6 +886,16 @@ class SmokeApp(App):
         check("Erfolge: Zusammenfassung",
               "3 FENSTER" in text and "3 SHOPS" in text, True)
         check("Erfolge: Bestpreis", "799,00 €" in text, True)
+        check("Erfolge: Abdeckung GESEHEN", "GESEHEN" in text, True)
+        check("Erfolge: Herkunft SCAN", "SCAN" in text, True)
+        check("Erfolge: kurzes Fenster", "FENSTER KÜRZER ALS TAKT" in text, True)
+        check("Erfolge: Abdeckung LÜCKE", "LÜCKE" in text, True)
+        detail_labels = [w for w in p.content.walk()
+                         if isinstance(w, main.Label)
+                         and "FENSTER KÜRZER ALS TAKT" in str(w.text)]
+        check("Erfolge: Abdeckungszeile vorhanden", bool(detail_labels), True)
+        check("Erfolge: Abdeckungszeile passt",
+              all(fits(w) for w in detail_labels), True)
         zeilen = [str(getattr(w, "text", "")) for w in p.content.walk()
                   if isinstance(w, main.Label)]
         frisch_zeile = next((z for z in zeilen if "Shop B" in z), "")
@@ -823,7 +927,52 @@ class SmokeApp(App):
                      if isinstance(w,main.Label) and "FENSTER" in str(w.text)
                      and "SHOPS" in str(w.text))
         check("Erfolge: Zusammenfassung nicht abgeschnitten", fits(summary), True)
+        check("Erfolge: Filter aktiv/all",
+              "AKTIVE 1" in text and "ALLE 3" in text, True)
+        check("Erfolge: Tagesgruppe heute", "HEUTE" in text, True)
+        check("Erfolge: Tagesgruppe alt", "13.11." in text, True)
+        check("Erfolge: OFFEN SEIT", "OFFEN SEIT" in text, True)
+        check("Erfolge: Preis-Badge", "PREIS 799,00 €" in text, True)
+        check("Erfolge: Deckel-Badge",
+              f"DECKEL {int(self.ui.max_preis)} €" in text, True)
+        badge_labels = [w for w in p.content.walk() if isinstance(w, main.Badge)]
+        check("Erfolge: Badges vorhanden", bool(badge_labels), True)
+        check("Erfolge: Badges passen", all(fits(w) for w in badge_labels), True)
+        badge_rows = [w for w in p.content.walk()
+                      if isinstance(w, main.ListenRow)
+                      and any(isinstance(x, main.Badge) for x in w.walk())]
+        check("Erfolge: Badge-Zeile passt",
+              all(sum(b.width for b in row.walk(restrict=True)
+                      if isinstance(b, main.Badge)) <= row.width
+                  for row in badge_rows), True)
+        chip_aktiv = next(w for w in p.content.walk()
+                          if isinstance(w, main.Chip)
+                          and str(w.text).startswith("AKTIVE"))
+        chip_alle = next(w for w in p.content.walk()
+                         if isinstance(w, main.Chip)
+                         and str(w.text).startswith("ALLE"))
+        chip_aktiv.dispatch("on_release"); self.pump()
+        aktiv_text = " ".join(self.texts(p))
+        check("Erfolge: AKTIVE zeigt offenes Fenster", "Shop B" in aktiv_text, True)
+        check("Erfolge: AKTIVE ohne Historie", "Shop A" in aktiv_text, False)
+        chip_alle.dispatch("on_release"); self.pump()
+        check("Erfolge: ALLE zeigt Historie",
+              "Shop A" in " ".join(self.texts(p)), True)
+        # Antippbare Zeile: oeffnet die bestehende Detailansicht.
+        row_b = next(w for w in p.content.walk()
+                     if isinstance(w, main.ListenRow)
+                     and "Shop B" in str(w.eintrag.get("text") or ""))
+        row_b._fire(); self.pump()
+        detail = next(w for w in self.popups()
+                      if any("LETZTE ERFOLGE" in str(getattr(x, "text", ""))
+                             for x in w.content.walk()))
+        check("Erfolge: Zeile oeffnet Detail",
+              any("Shop B" in str(getattr(w, "text", ""))
+                  for w in detail.content.walk()), True)
+        self.button(detail, "SCHLIESSEN").dispatch("on_release"); self.pump()
+        check("Erfolge: Detail wieder geschlossen", len(self.popups()), 1)
         # LEEREN raeumt die Erfolge wie den Verlauf.
+        self.ui.auto_interval = alt_takt
         self.button(p, "LEEREN").dispatch("on_release"); self.pump()
         check("Erfolge: geleert", scan_core.events().all(), [])
         # Der Leerzustand laeuft durch dasselbe Popup-Geruest wie der Verlauf.

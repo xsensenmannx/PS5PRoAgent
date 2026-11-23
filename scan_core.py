@@ -1392,9 +1392,14 @@ def fetch_html_multi(urls, cancel=None):
 
 def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
          seller=None,verfuegbarkeit=None,sofort=None,**extra):
+    jetzt=datetime.now()
     r={"haendler":h["name"],"url":final_url or h["urls"][0],"land":h["land"],
        "preis":preis,"klass":klass,"dauer":round(dauer,1),
-       "zeit":datetime.now().strftime("%H:%M:%S"),"fehler":err,
+       "zeit":jetzt.strftime("%H:%M:%S"),
+       # Der Wechsel wird mit der Zeit des Abrufs journalisiert, nicht erst
+       # am Ende einer ganzen Runde. Sonst teilen sich alle Shops denselben
+       # spaeten Zeitstempel und der Erfolgs-Feed wirkt traeger als er ist.
+       "erkannt":jetzt.isoformat(timespec="seconds"),"fehler":err,
        "signal":signal or "unbekannt","condition":condition,"seller":seller,
        "verfuegbarkeit":verfuegbarkeit,"sofort":sofort}
     r.update(extra)
@@ -2201,8 +2206,17 @@ def health_uebersicht(health_daten=None, jetzt=None):
     return out
 
 
-EVENTS_FILE="ps5pro_events.json"
-MAX_EVENTS=200
+EVENTS_FILE="ps5pro_events.jsonl"
+EVENTS_LEGACY_FILE="ps5pro_events.json"
+# Das Journal haelt die letzten 5000 Wechsel ueber hoechstens fuenf Dateien.
+# Eine aktive Datei rotiert nach 1000 Zeilen oder 512 KB; aeltere Segmente
+# bleiben als .1 bis .4 erhalten. So waechst der Speicher nicht unbegrenzt.
+MAX_EVENTS=5000
+EVENTS_MAX_LINES=1000
+EVENTS_MAX_BYTES=512*1024
+EVENTS_MAX_SEGMENTS=5
+EVENTS_LOCK_TIMEOUT=10.0
+EVENTS_LOCK_STALE=30.0
 # Ein offenes Fenster gilt nur als aktuell, wenn der letzte verfuegbar-Wechsel
 # hoechstens einen Scan-Takt plus Kulanz zurueckliegt. ERFOLG_OFFEN_MAX bleibt
 # die Obergrenze fuer den 60-Minuten-Takt. Ein frischer, erfolgreicher Scan
@@ -2213,6 +2227,11 @@ ERFOLG_OFFEN_KULANZ=120
 # Nur diese Scan-Ergebnisse belegen Verfuegbarkeit. Ein erfolgreicher Abruf
 # mit "unavail" darf ein offenes Fenster nicht wieder als OFFEN bestaetigen.
 ERFOLG_SCAN_GUELTIG=frozenset(("hit","expensive","chance","unknown"))
+# Abdeckung: Ein Treffer oder ein sauberer "nicht verfuegbar"-Scan belegt,
+# dass der Shop in diesem Zeitraum tatsaechlich angesehen wurde. Fehler-,
+# Challenge- und Parser-Scans sind keine Beobachtung des Bestands.
+ABDECKUNG_GUT=frozenset(("hit","expensive","unavail","chance","unknown"))
+ABDECKUNG_TOLERANZ=2
 
 
 def erfolg_offen_max(intervall=None):
@@ -2251,6 +2270,40 @@ def dauer_text(sekunden):
     return f"{std} STD" if not minuten else f"{std} STD {minuten} MIN"
 
 
+def offen_seit_text(start, jetzt=None):
+    """OFFEN SEIT plus Alter; Tage bleiben lesbar statt „49 STD“."""
+    alter=_alter_sekunden(start,jetzt)
+    if alter is None: return "OFFEN SEIT ?"
+    if alter<60: return "OFFEN SEIT GERADE"
+    if alter<86400: return "OFFEN SEIT "+dauer_text(alter)
+    tage=alter//86400
+    return "OFFEN SEIT 1 TAG" if tage==1 else f"OFFEN SEIT {tage} TAGEN"
+
+
+def preis_badge_text(preis):
+    """Kompakter Preis-Badge-Text; fehlender Preis bleibt sichtbar."""
+    try: p=float(preis)
+    except (TypeError,ValueError): return "PREIS —"
+    return "PREIS "+format_preis(p)
+
+
+def deckel_badge_text(deckel):
+    """Kompakter Deckel-Badge-Text; None heisst bewusst „kein Deckel“."""
+    if deckel is None: return "DECKEL OFFEN"
+    try: d=float(deckel)
+    except (TypeError,ValueError): return "DECKEL OFFEN"
+    return f"DECKEL {int(round(d))} €"
+
+
+def preis_unter_deckel(preis, deckel):
+    """True/False fuer die Badge-Farbe; None, wenn kein Preis vorliegt."""
+    try: p=float(preis)
+    except (TypeError,ValueError): return None
+    if deckel is None: return True
+    try: return p<=float(deckel)+0.005
+    except (TypeError,ValueError): return True
+
+
 def _iso_dt(iso):
     """ISO-Zeitstempel als datetime; eine Stelle fuer alle Anzeigeformate."""
     try: return datetime.fromisoformat(str(iso))
@@ -2267,6 +2320,26 @@ def kurz_tag(iso):
     """Nur '13.11.' fuer enge Zeilen, sonst leer."""
     dt=_iso_dt(iso)
     return dt.strftime("%d.%m.") if dt else ""
+
+
+def tages_key(iso):
+    """Stabiler Tagesschluessel fuer Gruppen; leer bei unbrauchbarem Datum."""
+    dt=_iso_dt(iso)
+    return dt.strftime("%Y-%m-%d") if dt else ""
+
+
+def tages_label(iso, jetzt=None):
+    """Tagesueberschrift: HEUTE, GESTERN oder 13.11./13.11.2025."""
+    dt=_iso_dt(iso)
+    if dt is None: return "OHNE DATUM"
+    if isinstance(jetzt,datetime): heute=jetzt.date()
+    else:
+        j=_iso_dt(jetzt) if jetzt is not None else None
+        heute=(j or datetime.now()).date()
+    if dt.date()==heute: return "HEUTE"
+    if dt.date()==heute-timedelta(days=1): return "GESTERN"
+    return (dt.strftime("%d.%m.%Y") if dt.year!=heute.year
+            else dt.strftime("%d.%m."))
 
 
 def zeitraum_text(start, ende):
@@ -2340,8 +2413,131 @@ def _alter_scan(ts, jetzt=None):
     except (TypeError,ValueError,OverflowError): return None
 
 
+def _ts_zu_epoch(ts):
+    """ISO-Zeitstempel oder Epoch-Sekunden als float; None bei Unbrauchbarem."""
+    if ts is None: return None
+    if isinstance(ts,(int,float)):
+        try: return float(ts)
+        except (TypeError,ValueError): return None
+    dt=_iso_dt(ts)
+    return dt.timestamp() if dt else None
+
+
+def _jetzt_epoch(jetzt=None):
+    if jetzt is None: return time.time()
+    if isinstance(jetzt,datetime):
+        try: return jetzt.timestamp()
+        except (TypeError,ValueError,OverflowError): return None
+    return _ts_zu_epoch(jetzt)
+
+
+def _takt_sekunden(takt):
+    try: t=int(takt)
+    except (TypeError,ValueError): return None
+    return t if t>0 else None
+
+
+def _health_verlauf(health_daten, shop):
+    """Health.verlauf eines Shops; alte Dateien haben nur last_ts/last_status."""
+    if not isinstance(health_daten,dict): return []
+    e=health_daten.get(shop)
+    if not isinstance(e,dict): return []
+    verlauf=e.get("verlauf")
+    if isinstance(verlauf,list):
+        return [x for x in verlauf if isinstance(x,dict)]
+    if e.get("last_ts") is not None and e.get("last_status"):
+        return [{"ts":e.get("last_ts"),"status":e.get("last_status")}]
+    return []
+
+
+def _abdeckung_fuer_zeitraum(shop,start,ende,health_daten=None,takt=None,
+                             dauer=None,offen=False,jetzt=None):
+    """Abdeckung und Herkunft aus den Health-Scans im Zeitraum.
+
+    ``gesehen`` verlangt einen erfolgreichen Scan innerhalb des Fensters.
+    Ohne Health-Eintrag ist die Abdeckung ``unbekannt`` - das ist ehrlicher
+    als eine Luecke zu behaupten, wenn der 30er-Ring den Zeitraum nicht mehr
+    abdeckt. ``kurz`` markiert nur abgeschlossene Fenster, deren Dauer unter
+    dem eingestellten Takt liegt.
+    """
+    if health_daten is None: return {}
+    start_ts=_ts_zu_epoch(start)
+    if start_ts is None: return {}
+    ende_ts=(_jetzt_epoch(jetzt) if ende is None else _ts_zu_epoch(ende))
+    if ende_ts is None or ende_ts<start_ts: return {}
+    verlauf=_health_verlauf(health_daten,shop)
+    gesehen=False
+    for e in verlauf:
+        ts=_ts_zu_epoch(e.get("ts"))
+        if ts is None: continue
+        if ts<start_ts-ABDECKUNG_TOLERANZ or ts>ende_ts+ABDECKUNG_TOLERANZ:
+            continue
+        if str(e.get("status") or "") in ABDECKUNG_GUT:
+            gesehen=True; break
+    if gesehen:
+        abdeckung,herkunft="gesehen","scan"
+    elif verlauf:
+        abdeckung,herkunft="luecke","ereignis"
+    else:
+        abdeckung,herkunft="unbekannt","ereignis"
+    if dauer is None and not offen and ende is not None:
+        dauer=_fenster_dauer(start,ende)
+    try: dauer=int(dauer) if dauer is not None else None
+    except (TypeError,ValueError): dauer=None
+    takt=_takt_sekunden(takt)
+    kurz=bool(not offen and dauer is not None and takt is not None
+              and dauer<takt)
+    return {"abdeckung":abdeckung,"herkunft":herkunft,
+            "takt":takt,"kurz":kurz}
+
+
+def abdeckung_labels(abdeckung,herkunft=None,kurz=False):
+    """Kurze, sichtbare Labels fuer Abdeckung und Herkunft."""
+    teile=[]
+    if abdeckung=="gesehen": teile.append("GESEHEN")
+    elif abdeckung=="luecke": teile.append("LÜCKE")
+    elif abdeckung=="unbekannt": teile.append("OHNE DATEN")
+    if herkunft=="scan": teile.append("SCAN")
+    elif herkunft=="ereignis": teile.append("EREIGNIS")
+    if kurz: teile.append("FENSTER KÜRZER ALS TAKT")
+    return " · ".join(teile)
+
+
+def erfolg_abdeckung_text(f):
+    if not isinstance(f,dict) or "abdeckung" not in f: return ""
+    return abdeckung_labels(f.get("abdeckung"),f.get("herkunft"),
+                             bool(f.get("kurz")))
+
+
+def ereignis_abdeckung(e,health_daten=None,takt=None,ende=None,jetzt=None):
+    """Abdeckung eines Verlaufs-Eintrags; ``ende`` ist der naechste Wechsel."""
+    if not isinstance(e,dict) or health_daten is None: return {}
+    shop=str(e.get("haendler") or "")
+    if not shop: return {}
+    typ=e.get("typ")
+    if typ=="ausverkauft":
+        start=e.get("start") or e.get("ts")
+        return _abdeckung_fuer_zeitraum(
+            shop,start,e.get("ts"),health_daten,takt,
+            dauer=e.get("dauer"),jetzt=jetzt)
+    if typ=="verfuegbar":
+        start=e.get("start") or e.get("ts")
+        return _abdeckung_fuer_zeitraum(
+            shop,start,ende,health_daten,takt,
+            offen=ende is None,jetzt=jetzt)
+    return {}
+
+
+def ereignis_abdeckung_text(e,health_daten=None,takt=None,ende=None,
+                            jetzt=None):
+    info=ereignis_abdeckung(e,health_daten,takt,ende,jetzt)
+    if not info: return ""
+    return abdeckung_labels(info.get("abdeckung"),info.get("herkunft"),
+                            bool(info.get("kurz")))
+
+
 def erfolgs_fenster(ereignisse, jetzt=None, max_alter=ERFOLG_OFFEN_MAX,
-                    letzte_scans=None):
+                    letzte_scans=None, health_daten=None, takt=None):
     """Verfuegbarkeitsfenster aus dem Event-Ticker.
 
     Paart jeden Wechsel auf ``verfuegbar`` mit dem naechsten Wechsel auf
@@ -2394,7 +2590,7 @@ def erfolgs_fenster(ereignisse, jetzt=None, max_alter=ERFOLG_OFFEN_MAX,
         preis = alt.get("preis")
         if preis is None:
             preis = e.get("preis")
-        fenster.append({
+        f={
             "haendler": shop,
             "start": start,
             "ende": e.get("ts"),
@@ -2402,7 +2598,11 @@ def erfolgs_fenster(ereignisse, jetzt=None, max_alter=ERFOLG_OFFEN_MAX,
             "preis": preis,
             "url": alt.get("url") or e.get("url"),
             "offen": False,
-        })
+        }
+        if health_daten is not None:
+            f.update(_abdeckung_fuer_zeitraum(
+                shop,start,e.get("ts"),health_daten,takt,dauer=dauer))
+        fenster.append(f)
     for f in offen.values():
         stand = f.get("gesehen") or f.get("start")
         alter = _alter_sekunden(stand, jetzt)
@@ -2420,6 +2620,10 @@ def erfolgs_fenster(ereignisse, jetzt=None, max_alter=ERFOLG_OFFEN_MAX,
             f["veraltet"] = True
             f["letzter_stand"] = stand
         f.pop("gesehen", None)
+        if health_daten is not None:
+            f.update(_abdeckung_fuer_zeitraum(
+                f.get("haendler"),f.get("start"),None,health_daten,takt,
+                offen=True,jetzt=jetzt))
         fenster.append(f)
 
     def _sortiert(f):
@@ -2454,21 +2658,114 @@ def erfolg_zeile(f):
 
 
 class Events:
-    """Ringpuffer der Zustandswechsel (max. MAX_EVENTS), aelteste zuerst."""
-    def __init__(self,path=None):
+    """Append-only-Journal der Zustandswechsel, aelteste zuerst.
+
+    Eine Zeile ist ein JSON-Objekt. Normale Schreiber haengen nur hinten an;
+    bei Erreichen der Zeilen- oder Groessengrenze rotiert die aktive Datei
+    nach ``.1``. Der Lock schuetzt App und Hintergrunddienst. ``clear()`` ist
+    die bewusste Ausnahme: Es leert Journal und Archive gemeinsam.
+    """
+    def __init__(self,path=None,max_events=None,max_lines=None,
+                 max_bytes=None,max_segments=None):
         self.path=path or os.path.join(_data_dir(),EVENTS_FILE)
-        self._stamp=self._datei_stamp()
-        self.data=self._laden()
-    def _datei_stamp(self):
-        try: return (os.path.getmtime(self.path),os.path.getsize(self.path))
-        except OSError: return None
-    def _laden(self):
+        self.max_events=max(1,int(max_events or MAX_EVENTS))
+        self.max_lines=max(1,int(max_lines or EVENTS_MAX_LINES))
+        self.max_bytes=max(1024,int(max_bytes or EVENTS_MAX_BYTES))
+        self.max_segments=max(2,int(max_segments or EVENTS_MAX_SEGMENTS))
+        self._lock_path=self.path+".lock"
+        self.data=[]
+        self._hashes=set()
+        self._active_zeilen=0
+        self._active_bytes=0
+        self._stamp=None
+        ordner=os.path.dirname(self.path)
+        if ordner:
+            try: os.makedirs(ordner,exist_ok=True)
+            except OSError: pass
+        # Beim ersten Start darf nur ein Prozess migrieren. Ist der Lock
+        # gerade belegt, wird wenigstens der vorhandene Stand gelesen.
+        if not self._mit_lock(self._initialisieren): self._laden()
+    def _initialisieren(self):
+        self._migrieren()
+        self._laden()
+        return True
+    def _legacy_pfad(self):
+        """Alte JSON-Array-Datei neben dem neuen Journal, sonst None."""
+        if not self.path.endswith(".jsonl"): return None
+        if os.path.basename(self.path)==EVENTS_FILE:
+            return os.path.join(os.path.dirname(self.path),EVENTS_LEGACY_FILE)
+        return os.path.splitext(self.path)[0]+".json"
+    def _migrieren(self):
+        """Einmalige Migration von ps5pro_events.json nach JSONL."""
+        if os.path.exists(self.path): return
+        alt=self._legacy_pfad()
+        if not alt or not os.path.exists(alt): return
+        tmp=self.path+".tmp"
         try:
-            with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
-        except Exception: return []
-        return [dict(e) for e in data if isinstance(e,dict)] if isinstance(data,list) else []
+            with open(alt,"r",encoding="utf-8") as f: daten=json.load(f)
+            if not isinstance(daten,list): return
+            with open(tmp,"w",encoding="utf-8",newline="\n") as f:
+                for e in daten:
+                    if not isinstance(e,dict): continue
+                    f.write(json.dumps(e,ensure_ascii=False,
+                                       separators=(",",":"))+"\n")
+            os.replace(tmp,self.path)
+            try: os.replace(alt,alt+".migrated")
+            except OSError: pass
+        except Exception:
+            try: os.unlink(tmp)
+            except OSError: pass
+    def _segmente(self):
+        """Aeltestes Archiv zuerst, aktive Datei zuletzt."""
+        return ([self.path+f".{i}" for i in range(self.max_segments-1,0,-1)]
+                +[self.path])
+    def _datei_stamp(self):
+        stamp=[]
+        for p in self._segmente():
+            try:
+                s=os.stat(p); stamp.append((p,s.st_mtime_ns,s.st_size))
+            except OSError: pass
+        return tuple(stamp)
+    @staticmethod
+    def _fingerprint(ereignis):
+        roh=json.dumps(ereignis,ensure_ascii=False,sort_keys=True,
+                       separators=(",",":"))
+        return hashlib.sha256(roh.encode("utf-8")).hexdigest()
+    @staticmethod
+    def _aktiver_stand(pfad):
+        try: bytes_=os.path.getsize(pfad)
+        except OSError: bytes_=0
+        try:
+            with open(pfad,"r",encoding="utf-8") as f:
+                zeilen=sum(1 for _ in f)
+        except OSError: zeilen=0
+        return zeilen,bytes_
+    def _laden(self):
+        daten=[]; hashes=set()
+        for p in self._segmente():
+            try:
+                with open(p,"r",encoding="utf-8") as f:
+                    for zeile in f:
+                        zeile=zeile.strip()
+                        if not zeile: continue
+                        try: e=json.loads(zeile)
+                        except ValueError: continue
+                        if not isinstance(e,dict): continue
+                        try: fp=self._fingerprint(e)
+                        except (TypeError,ValueError): continue
+                        # Dedupe auch ueber Rotationsgrenzen hinweg.
+                        if fp in hashes: continue
+                        daten.append(e); hashes.add(fp)
+            except OSError: pass
+        if len(daten)>self.max_events:
+            daten=daten[-self.max_events:]
+            hashes=set(self._fingerprint(e) for e in daten)
+        self.data=daten; self._hashes=hashes
+        self._active_zeilen,self._active_bytes=self._aktiver_stand(self.path)
+        self._stamp=self._datei_stamp()
+        return daten
     def reload(self):
-        """Datei nur neu lesen, wenn sie sich geaendert hat.
+        """Journal nur neu lesen, wenn sich eine Datei geaendert hat.
 
         SETUP-Zaehler, Detailansicht und Ticker fragen bei jedem Oeffnen; der
         Hintergrunddienst schreibt in einem eigenen Prozess. Vorher wurde die
@@ -2476,17 +2773,95 @@ class Events:
         """
         stamp=self._datei_stamp()
         if stamp==self._stamp: return self
-        self.data=self._laden(); self._stamp=stamp
+        self._laden()
         return self
+    def _lock_erwerben(self):
+        ende=time.time()+EVENTS_LOCK_TIMEOUT
+        while True:
+            try:
+                fd=os.open(self._lock_path,
+                           os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+                try:
+                    os.write(fd,(str(os.getpid())+"\n").encode("ascii"))
+                finally:
+                    os.close(fd)
+                return True
+            except FileExistsError:
+                try:
+                    if time.time()-os.path.getmtime(self._lock_path)>EVENTS_LOCK_STALE:
+                        os.unlink(self._lock_path)
+                        continue
+                except OSError: pass
+                if time.time()>=ende: return False
+                time.sleep(0.01)
+            except OSError:
+                return False
+    def _mit_lock(self,aktion):
+        if not self._lock_erwerben(): return None
+        try: return aktion()
+        finally:
+            try: os.unlink(self._lock_path)
+            except OSError: pass
+    def _anhaengen(self,ereignis):
+        """Eine Zeile append-only schreiben, danach ggf. rotieren."""
+        try:
+            # Ein abgebrochener Schreibvorgang darf die naechste Zeile nicht
+            # mit seiner halben Zeile verbinden.
+            if os.path.exists(self.path):
+                with open(self.path,"rb") as f:
+                    f.seek(0,2)
+                    if f.tell():
+                        f.seek(-1,2)
+                        if f.read(1)!=b"\n":
+                            with open(self.path,"ab") as a: a.write(b"\n")
+                            self._active_zeilen+=1
+            zeile=json.dumps(ereignis,ensure_ascii=False,
+                             separators=(",",":"))+"\n"
+            with open(self.path,"a",encoding="utf-8",newline="\n") as f:
+                f.write(zeile)
+                f.flush()
+                os.fsync(f.fileno())
+            self._active_zeilen+=1
+            self._active_bytes=os.path.getsize(self.path)
+            if (self._active_zeilen>=self.max_lines or
+                    self._active_bytes>=self.max_bytes):
+                self._rotieren()
+            return True
+        except Exception:
+            return False
+    def _rotieren(self):
+        """Aktive Datei nach .1 schieben; aeltestes Archiv faellt weg."""
+        archive=self.max_segments-1
+        if archive<1: return
+        try: os.unlink(self.path+f".{archive}")
+        except OSError: pass
+        for i in range(archive-1,0,-1):
+            src=self.path+f".{i}"; dst=self.path+f".{i+1}"
+            if os.path.exists(src):
+                try: os.replace(src,dst)
+                except OSError: pass
+        if os.path.exists(self.path):
+            try: os.replace(self.path,self.path+".1")
+            except OSError: pass
+        self._active_zeilen=0; self._active_bytes=0
     def add(self,ereignis):
         if not isinstance(ereignis,dict): return False
-        # Erst den fremden Stand uebernehmen: sonst schriebe dieser Prozess
-        # nach einem LEEREN im anderen Prozess die alten Ereignisse zurueck.
-        self.reload()
-        self.data=self.data+[dict(ereignis)]
-        self.data=self.data[-MAX_EVENTS:]
-        self._speichern()
-        return True
+        ereignis=dict(ereignis)
+        try: fp=self._fingerprint(ereignis)
+        except (TypeError,ValueError): return False
+        def _schreiben():
+            # Fremden Stand unter Lock uebernehmen: nach einem LEEREN im
+            # anderen Prozess darf dieser Prozess nichts Altes zurueckholen.
+            self.reload()
+            if fp in self._hashes: return False
+            if not self._anhaengen(ereignis): return False
+            self.data.append(ereignis); self._hashes.add(fp)
+            if len(self.data)>self.max_events:
+                self.data=self.data[-self.max_events:]
+                self._hashes=set(self._fingerprint(e) for e in self.data)
+            self._stamp=self._datei_stamp()
+            return True
+        return bool(self._mit_lock(_schreiben))
     def all(self):
         return [dict(e) for e in self.data]
     def letzte(self,n=20):
@@ -2501,23 +2876,37 @@ class Events:
             if e.get("haendler")==name: return dict(e)
         return None
     def clear(self):
-        self.data=[]
-        self._speichern()
-    def _speichern(self):
-        try:
+        """Journal und alle Rotationen unter Lock leeren."""
+        def _leeren():
+            alt=self._legacy_pfad()
+            dateien=self._segmente()
+            if alt: dateien=dateien+[alt,alt+".migrated"]
+            for p in dateien:
+                try: os.unlink(p)
+                except OSError: pass
             tmp=self.path+".tmp"
-            with open(tmp,"w",encoding="utf-8") as f:
-                json.dump(self.data,f,ensure_ascii=False,indent=1)
-            os.replace(tmp,self.path)
+            try:
+                with open(tmp,"w",encoding="utf-8") as f:
+                    f.flush(); os.fsync(f.fileno())
+                os.replace(tmp,self.path)
+            except Exception:
+                try: os.unlink(tmp)
+                except OSError: pass
+                return False
+            self.data=[]; self._hashes=set()
+            self._active_zeilen=0; self._active_bytes=0
             self._stamp=self._datei_stamp()
-        except Exception: pass
+            return True
+        # Wie bisher ohne Rueckgabewert: Aufrufer pruefen den Zustand ueber
+        # ``all()``; ein fehlgeschlagener Lock darf die UI nicht ausnehmen.
+        self._mit_lock(_leeren)
 
 
 _EVENTS=None
 
 
 def events():
-    """Prozessweiter Zugriff auf den Ereignis-Ringpuffer."""
+    """Prozessweiter Zugriff auf das Ereignis-Journal."""
     global _EVENTS
     if _EVENTS is None: _EVENTS=Events()
     return _EVENTS
@@ -2533,6 +2922,7 @@ def reset_events():
 class History:
     def __init__(self):
         self.path=os.path.join(_data_dir(),HISTORY_FILE)
+        self._dirty=False
         try:
             with open(self.path,"r",encoding="utf-8") as f: data=json.load(f)
             self.data=data if isinstance(data,dict) else {}
@@ -2588,11 +2978,21 @@ class History:
             if not ts: continue
             out.append([ts,preis])
         return out[-MAX_SERIE_PUNKTE:]
-    def update(self,results):
-        now=datetime.now().isoformat(timespec="seconds")
+    def update(self,results,persist=True):
+        """Ergebnisse uebernehmen; standardmaessig sofort auf Platte sichern.
+
+        ``persist=False`` haelt die Aenderung nur im Speicher. Die App nutzt
+        das fuer jeden einzelnen Shop waehrend einer Runde und schreibt die
+        Datei am Rundenende einmal; das Event-Journal wird trotzdem sofort
+        fortgeschrieben. ``erkannt`` aus dem Abruf ist der Zeitstempel des
+        Wechsels, nicht das Ende der ganzen Runde.
+        """
+        default_now=datetime.now().isoformat(timespec="seconds")
         for r in results:
             if not isinstance(r,dict) or not r.get("haendler"): continue
             name=r["haendler"]
+            now=str(r.get("erkannt") or default_now)
+            if _iso_dt(now) is None: now=default_now
             alt=dict(self.data.get(name) or {})
             serie=self._saubere_serie(alt.get("serie"))
             # Verfuegbarkeit auch ohne Preis festhalten: nur so laesst sich
@@ -2624,17 +3024,27 @@ class History:
                 start=alt.get("verfuegbar_zeit") if not av else now
                 verlauf_ereignis={"typ":"verfuegbar" if av else "ausverkauft",
                                   "haendler":name,"ts":now,"start":start,
-                                  "dauer":None if av else self._sekunden_seit(start),
+                                  "dauer":None if av else _fenster_dauer(start,now),
                                   "preis":alt.get("preis"),
                                   "url":r.get("url")}
                 events().add(verlauf_ereignis)
             if alt: self.data[name]=alt
+        self._dirty=True
+        if persist: self._speichern()
+    def _speichern(self):
+        """Aktuellen Stand atomar schreiben; Fehler bleiben still wie bisher."""
         try:
             tmp=self.path+".tmp"
             with open(tmp,"w",encoding="utf-8") as f:
                 json.dump(self.data,f,ensure_ascii=False,indent=1)
             os.replace(tmp,self.path)
+            self._dirty=False
         except Exception: pass
+    def flush(self):
+        """Offene, nicht persistierte Aenderungen einmalig schreiben."""
+        if not self._dirty: return False
+        self._speichern()
+        return not self._dirty
 
 class Kaeufe:
     """Kaufprotokoll: Haendler, Preis und Zeitpunkt der "Gekauft"-Markierung."""

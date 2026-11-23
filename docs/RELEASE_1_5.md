@@ -1,6 +1,6 @@
 # Release 1.5 — Live-Überwachung und Händler-Erkennung
 
-**Stand:** v1.5.2 veröffentlicht (Erfolge-Ansicht und Takt-Frische); v1.5.1 und v1.4.0 bleiben als Releases erhalten. Ausgangspunkt ist v1.4.0 (`versionCode 10400`).
+**Stand:** v1.5.3 veröffentlicht (sofortiger Erfolgs-Feed und Journal); v1.5.2, v1.5.1 und v1.4.0 bleiben als Releases erhalten. Ausgangspunkt ist v1.4.0 (`versionCode 10400`).
 **Ziel:** v1.5.1 (`versionCode 10501`, erreicht) erkennt Restocks früh. Die
 Händler-Erkennung (Etappen 4/5) bleibt offen; sie soll Kandidaten mit einem
 nachvollziehbaren Verfahren prüfen — ohne Bot-Schutz zu umgehen, ohne Backend und
@@ -11,7 +11,7 @@ Live-Takt mit 20-s-Runde und Rundendeckel 12, das **Drop-Fenster** (10-s-Takt, H
 `FENSTER`), die **Sofortmeldung** für belegte Treffer sowie den **Event-Ticker** mit
 Fensterdauer und „zuletzt verfügbar am" je Shop. Offen: Etappe 2 (JSON-Datenpfad),
 Etappe 4/5 (Discovery, Aufnahme, Marketplace-Zeile) und Etappe 6 (optional). Etappe 7
-ist mit `v1.5.1` abgeschlossen; `v1.5.2` ist veröffentlicht und ergänzt die Erfolge-Ansicht und die Takt-Frische.
+ist mit `v1.5.3` abgeschlossen; `v1.5.2` ergänzte die Erfolge-Ansicht und die Takt-Frische, `v1.5.3` den sofortigen Erfolgs-Feed und das JSONL-Journal.
 
 ---
 
@@ -308,6 +308,12 @@ frischem Erfolgs-Scan, ältere offene Fenster als `LETZTER STAND`),
 SETUP → ERFOLGE) in der Detailansicht sowie `ZUL. TT.MM.` in der Trefferzeile
 ausverkaufter Shops. Die Shop-Health-Liste bleibt bewusst bei der
 Scan-Gesundheit — dort „verfügbar" mit „OK/ERROR" zu mischen, wäre irreführend.
+
+**Nachtrag (nach 1.5.2):** Der 200er-Ringpuffer ist durch das append-only
+JSONL-Journal `ps5pro_events.jsonl` ersetzt; Lock, Dedupe und Rotation halten
+die Events-API stabil. Die damalige Abnahme bleibt als Historie stehen, die
+aktuellen Journal-Tests liegen in `tools/selftest.py`.
+
 **Risiko:** Akku/Datenvolumen. Gegenmaßnahme: nur Vordergrund, nur bei Bedarf, WLAN-Schalter
 bleibt, Takt in SETUP sichtbar.
 

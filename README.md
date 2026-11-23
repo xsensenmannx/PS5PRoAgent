@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.5.2 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.5.2/ps5prosearchagent-1.5.2-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.5.3 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.5.3/ps5prosearchagent-1.5.3-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -23,8 +23,9 @@ einmalig eine Deinstallation nötig.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.5.2** | Die aktuelle Version (versionCode 10502). Diese APK installieren. |
-| **v1.5.1** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.3** | Die aktuelle Version (versionCode 10503). Diese APK installieren. |
+| **v1.5.2** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.1** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.5.0** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.4.0** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.3** | Ältere Version; bleibt als Archiv-Release erhalten. |
@@ -36,12 +37,12 @@ Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
 aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
-> **Eine Nummer für alles:** App, Release und Download heißen **v1.5.2**
-> (App-Version 1.5.2, versionCode 10502). Der Button oben führt immer zur
+> **Eine Nummer für alles:** App, Release und Download heißen **v1.5.3**
+> (App-Version 1.5.3, versionCode 10503). Der Button oben führt immer zur
 > aktuellen APK.
 >
-> **Zur Zählung:** v1.5.2 setzt die 1.5-Linie fort. Die
-> Zählung läuft sauber als 1.x-Linie weiter (v1.0–v1.5.1 Archiv, v1.5.2 aktuell).
+> **Zur Zählung:** v1.5.3 setzt die 1.5-Linie fort. Die
+> Zählung läuft sauber als 1.x-Linie weiter (v1.0–v1.5.2 Archiv, v1.5.3 aktuell).
 
 ## Eindruck
 
@@ -133,6 +134,12 @@ Signal, Preistiefs und den Preisverlauf:
   oder bestätigendem Scan im Taktbudget; sonst steht `LETZTER STAND`. Die
   Detailansicht zeigt bis zu drei `LETZTE ERFOLGE`; die Liste nutzt denselben
   Event-Ticker wie `VERLAUF`, ohne zusätzliche Abrufe.
+* **Alltag in ERFOLGE/VERLAUF**: `AKTIVE`/`ALLE` filtert nach aktuellem Stand,
+  Tagesgruppen fassen `HEUTE`, `GESTERN` und ältere Tage zusammen. Jede Zeile
+  öffnet per Tap die Detailansicht; offene Fenster zeigen `OFFEN SEIT`, dazu
+  kommen Preis- und Deckel-Badges je Händler-Land. Ein bestätigter Wechsel
+  steht sofort im Journal; das aktuelle Fenster lässt sich direkt über
+  `BESTELLBAR · SHOP OEFFNEN` aufrufen.
 * **Auto-Scan** im Intervall (5–60 min) und **Alarm** als Android-Benachrichtigung,
   sobald ein neuer Treffer auftaucht. Ein Tap öffnet direkt den Shop; mehrere
   Treffer eines Laufs werden gruppiert.
@@ -282,7 +289,13 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.5.2** – Die aktuelle veröffentlichte Version (versionCode 10502):
+* **v1.5.3** – Die aktuelle veröffentlichte Version (versionCode 10503):
+  Der Erfolgs-Feed schreibt bestätigte Zustandswechsel sofort mit der
+  Abrufzeit ins append-only JSONL-Journal; `ERFOLGE` und `VERLAUF` bieten
+  `AKTIVE`/`ALLE`, Tagesgruppen, Abdeckungslabels, antippbare Zeilen sowie
+  Preis-, Deckel- und `OFFEN SEIT`-Badges. Ein offenes Fenster lässt sich
+  direkt über `BESTELLBAR · SHOP OEFFNEN` aufrufen. Dazu 1453 Logiktests.
+* **v1.5.2** – Vorherige Version (versionCode 10502):
   SETUP → ERFOLGE bündelt die Verfügbarkeitsfenster aus dem Verlauf: Shop,
   Preis, Dauer und Bestpreis. `OFFEN` steht nur, solange der letzte
   `verfügbar`-Wechsel innerhalb des eingestellten Scan-Takts plus zwei Minuten
