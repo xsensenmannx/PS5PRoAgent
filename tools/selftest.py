@@ -245,6 +245,35 @@ def main_tests():
     check("nur_konsole ohne product", core.pruefe_nur_konsole(
         "<html><body>PlayStation 5 Pro 2 TB Uebersicht</body></html>", {}), True)
     check("nur_konsole fremdprodukt", core.pruefe_nur_konsole("<html>xbox</html>", {}), False)
+    # Der Produktname der Seite entscheidet, nicht die Erwaehnung irgendwo im
+    # HTML. Sonst galten Zubehoer- und Suchseiten als Konsolentreffer, und der
+    # Preis kam vom ersten Euro-Betrag der Seite.
+    check("zubehoer-titel abgelehnt", core.pruefe_nur_konsole(
+        "<html><head><title>DualSense Wireless Controller</title></head>"
+        "<body>PS5 Pro 2 TB Zubehoer</body></html>", {}), False)
+    check("bundle-titel abgelehnt", core.pruefe_nur_konsole(
+        "<html><head><title>PlayStation 5 Pro 2 TB Bundle mit Controller</title>"
+        "</head></html>", {}), False)
+    check("konsolen-titel akzeptiert", core.pruefe_nur_konsole(
+        "<html><head><title>SONY PlayStation 5 Pro 2TB (E-Chassis)</title>"
+        "</head></html>", {}), True)
+    check("og-titel zaehlt", core.pruefe_nur_konsole(
+        '<html><head><meta property="og:title" '
+        'content="PlayStation 5 Pro 2 TB"></head></html>', {}), True)
+    _ld_url = ('<script type="application/ld+json">{"@type":"Product",'
+               '"name":"Sony PlayStation 5 Pro 2 TB",'
+               '"url":"https://shop.example/p/1",'
+               '"offers":{"@type":"Offer","price":"799,00",'
+               '"priceCurrency":"EUR","availability":"InStock"}}</script>')
+    check("jsonld produkt-url", core.extract_structured(_ld_url)["produkt_url"],
+          "https://shop.example/p/1")
+    check("link produktseite", core._produkt_ziel("https://shop.example/p/1",
+          "https://shop.example/suche?q=x"), "https://shop.example/p/1")
+    check("link fremder host bleibt", core._produkt_ziel(
+          "https://evil.example/p", "https://shop.example/suche"),
+          "https://shop.example/suche")
+    check("link ohne produktseite bleibt", core._produkt_ziel(
+          None, "https://shop.example/suche"), "https://shop.example/suche")
     # Ohne Android/Activity duerfen die Insets nichts verschieben.
     check("insets ohne android", main.android_insets(), (0.0, 0.0, 0.0, 0.0))
 

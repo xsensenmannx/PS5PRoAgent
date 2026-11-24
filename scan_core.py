@@ -5,6 +5,7 @@ Der Service laeuft in einem eigenen Prozess ohne UI - dort darf kein Kivy
 importiert werden, deshalb liegt diese Logik hier getrennt.
 """
 import os, sys, json, re, time, random, threading, traceback, hashlib, zlib
+import html as _html
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
@@ -608,7 +609,7 @@ def extract_structured(html):
     res={"ist_konsole":False,"preis":None,"verfuegbar":None,
          "signal":"jsonld","condition":None,"seller":None,
          "verfuegbarkeit":None,"sofort":None,"state":None,
-         "gtin":None,"sku":None,"bundle":False}
+         "gtin":None,"sku":None,"bundle":False,"produkt_url":None}
     try: jl=extract_jsonld(html)
     except Exception: jl=[]
     prods=[]
@@ -623,6 +624,11 @@ def extract_structured(html):
             res["bundle"]=True
             continue
         res["ist_konsole"]=True
+        # Eigene Produktadresse aus dem Datensatz: der Link soll auf das
+        # Angebot zeigen, nicht auf die Suchseite, ueber die gescannt wurde.
+        eigene=str(p.get("url") or "").strip()
+        if eigene.startswith("http") and not res["produkt_url"]:
+            res["produkt_url"]=eigene[:400]
         # GTIN/EAN oder SKU sind der stabilste Produktbeweis. Der Name bleibt
         # fuer Shops ohne strukturierte Daten der Fallback.
         for key in ("gtin13", "gtin12", "gtin14", "gtin", "sku", "mpn"):
@@ -780,11 +786,64 @@ def extract_meta_state(html):
 
 def detect_challenge(low): return any(p in low for p in CHALLENGE_PATTERNS)
 
+_TITEL_MUSTER = (
+    re.compile(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)', re.I),
+    re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I),
+    re.compile(r"<h1[^>]*>(.*?)</h1>", re.S | re.I),
+)
+_TAG_MUSTER = re.compile(r"<[^>]+>")
+
+
+def _titel_text(roh):
+    """Sichtbaren Text aus einem Titel-Ausschnitt machen."""
+    try: text = _html.unescape(_TAG_MUSTER.sub(" ", roh or ""))
+    except Exception: text = roh or ""
+    return " ".join(str(text).split())[:300]
+
+
+def produkt_titel(html):
+    """Produktname der Seite: og:title, title und erste h1.
+
+    Die Reihenfolge ist Absicht: og:title nennt das Produkt am zuverlaessigsten,
+    ``<title>`` haengt oft den Shopnamen an, die h1 ist der sichtbare Name.
+    """
+    kandidaten = []
+    for muster in _TITEL_MUSTER:
+        treffer = muster.search(html or "")
+        if not treffer: continue
+        text = _titel_text(treffer.group(1))
+        if text: kandidaten.append(text)
+    return kandidaten
+
+
+def titel_ist_konsole(titel):
+    """Nennt dieser Produktname die PS5 Pro 2 TB - und nichts anderes?"""
+    if not titel: return False
+    if not any(rx.search(titel) for rx in PRODUKT_MUSTER): return False
+    if not PRODUKT_2TB.search(titel): return False
+    low = titel.lower()
+    if any(a in low for a in PRODUKT_AUSSCHLUSS): return False
+    if BUNDLE_MUSTER.search(titel): return False
+    return True
+
+
 def pruefe_nur_konsole(html, st):
+    """Ist diese Seite die Konsole selbst - oder nur ein Zubehoerartikel?
+
+    Frueher genuegte es, dass die Begriffe irgendwo im HTML auftauchten. Damit
+    galten Such- und Zubehoerseiten als Treffer, die die Konsole nur in einer
+    Empfehlungsliste erwaehnen; der Preis kam dann vom ersten Euro-Betrag der
+    Seite. Jetzt muss der Produktname der Seite die Konsole bezeichnen.
+    Seiten ohne jeden Titel bleiben beim alten Seitencheck, weil synthetische
+    Testseiten keinen tragen.
+    """
     if st.get("ist_konsole"): return True
     # Nur ein Bundle erkannt: nicht ueber den HTML-Fallback doch als Konsole
     # durchwinken, sonst landet der Bundle-Preis als Konsolen-Treffer.
     if st.get("bundle"): return False
+    kandidaten = produkt_titel(html)
+    if kandidaten:
+        return any(titel_ist_konsole(t) for t in kandidaten)
     # Beide Muster sind re.I - ein zusaetzliches html.lower() wuerde nur eine
     # zweite Kopie der Seite im Speicher anlegen (bei Shops leicht 2-6 MB).
     if not any(rx.search(html) for rx in PRODUKT_MUSTER): return False
@@ -1390,10 +1449,29 @@ def fetch_html_multi(urls, cancel=None):
     h,u,_cached,_meta=fetch_mit_cache(urls, cancel=cancel)
     return h,u
 
+def _gleicher_host(a,b):
+    ha,hb=_host(a),_host(b)
+    return bool(ha) and ha==hb
+
+
+def _produkt_ziel(produkt_url,ersatz):
+    """Link auf das Angebot statt auf die Suchseite.
+
+    Viele Shops sind mit einer Suchadresse konfiguriert; der Treffer zeigte
+    deshalb bisher auf die Ergebnisliste. Nennt der Produkt-Datensatz eine
+    eigene Adresse auf demselben Host, ist das der bessere Link. Fremde Hosts
+    werden nicht uebernommen.
+    """
+    if isinstance(produkt_url,str) and produkt_url.startswith("http"):
+        if _gleicher_host(produkt_url,ersatz): return produkt_url.strip()[:400]
+    return ersatz
+
+
 def _res(h,preis,klass,dauer,err,final_url=None,signal=None,condition=None,
-         seller=None,verfuegbarkeit=None,sofort=None,**extra):
+         seller=None,verfuegbarkeit=None,sofort=None,produkt_url=None,**extra):
     jetzt=datetime.now()
-    r={"haendler":h["name"],"url":final_url or h["urls"][0],"land":h["land"],
+    r={"haendler":h["name"],"url":_produkt_ziel(produkt_url,final_url or h["urls"][0]),
+       "land":h["land"],
        "preis":preis,"klass":klass,"dauer":round(dauer,1),
        "zeit":jetzt.strftime("%H:%M:%S"),
        # Der Wechsel wird mit der Zeit des Abrufs journalisiert, nicht erst
@@ -1436,6 +1514,7 @@ def _scan_einen_json(h, cancel=None):
         p=s["preis"]; state=s.get("state") or "unknown"; v=s.get("verfuegbar")
         if state in CHANCE_STATES: v=True
         res=_res(h,p,classify(v,p,MAX_PREIS,state),time.time()-st,None,fu,
+                 produkt_url=s.get("produkt_url"),
                  signal="jsonld",condition=s.get("condition"),
                  seller=s.get("seller"),verfuegbarkeit=s.get("verfuegbarkeit"),
                  sofort=s.get("sofort"),avail_state=state,
@@ -1573,6 +1652,7 @@ def _scan_einen_html(h, cancel=None, force=False):
         if state in CHANCE_STATES: sofort=False
         if _abgebrochen(cancel): raise ScanAbgebrochen
         res=_res(h,p,classify(v,p,MAX_PREIS,state),d,None,fu,
+                 produkt_url=s.get("produkt_url"),
                  signal=signal,condition=s.get("condition"),seller=s.get("seller"),
                  verfuegbarkeit=s.get("verfuegbarkeit"),sofort=sofort,
                  avail_state=state,stock_source=quelle,gtin=s.get("gtin"),
