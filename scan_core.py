@@ -1120,6 +1120,24 @@ def preis_plausibel(preis):
     return MIN_PREIS<=p<=PREIS_PLAUSIBEL_MAX
 
 
+def preis_guard_grund(preis):
+    """Grund, warum ein Preis nicht als plausibel gilt; sonst ``ok``.
+
+    ``nicht_erkannt`` heisst: kein Preis oder kein parsebarer Preis. Die
+    Extraktoren verwerfen 0/1 EUR und >5000 EUR bereits; der Waechter zaehlt
+    diese Faelle damit trotzdem im Tagesbericht.
+    """
+    if preis is None:
+        return "nicht_erkannt"
+    try:
+        p=float(preis)
+    except (TypeError,ValueError):
+        return "nicht_erkannt"
+    if p<MIN_PREIS: return "zu_niedrig"
+    if p>PREIS_PLAUSIBEL_MAX: return "zu_hoch"
+    return "ok"
+
+
 def classify(v,p,m,state=None):
     if state in CHANCE_STATES: return "chance"
     if state=="sold_out": return "unavail"
@@ -2746,19 +2764,76 @@ def _health_verlauf(health_daten, shop):
     return []
 
 
-def lerne_drop_fenster_aus_health(health_daten, tz=None):
-    """Drop-Fenster aus dem lokalen Health-Verlauf lernen.
+def _drop_fenster_tag(zeile, tz=None):
+    """Tag eines Checks; ISO-Zeit zuerst, danach ein Zeitstempel."""
+    iso = zeile.get("iso")
+    if iso:
+        try:
+            return datetime.fromisoformat(str(iso)).date()
+        except (TypeError, ValueError):
+            pass
+    try:
+        ts = float(zeile.get("ts"))
+        return (datetime.fromtimestamp(ts, tz) if tz
+                else datetime.fromtimestamp(ts)).date()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
 
-    App und Hintergrunddienst haben keinen Zugriff auf die Waechter-Logs.
-    Sie koennen aber denselben Lernkern auf ihre eigenen letzten Scans
-    anwenden - ohne Cloud-Kopplung und ohne zusaetzliche Requests.
+
+def _drop_fenster_zeile(shop, status, ts):
+    zeile = {"shop": shop, "klass": status}
+    if isinstance(ts, str):
+        zeile["iso"] = ts
+    else:
+        zeile["ts"] = ts
+    return zeile
+
+
+def lerne_drop_fenster_aus_lokal(health_daten=None, event_liste=None, tz=None):
+    """Drop-Fenster aus eigenen Health-Scans und Verfuegbarkeits-Events.
+
+    Health liefert die breite Scan-Historie, Events die genauen Wechsel.
+    Ein Event in derselben Stunde am selben Tag wie ein Health-Hit wird nicht
+    doppelt gezaehlt; Events in anderen Stunden ergaenzen die Historie. Ohne
+    Cloud-Kopplung und ohne zusaetzliche Requests.
     """
-    checks=[]
+    health=[]
     for shop in (health_daten or {}):
         for eintrag in _health_verlauf(health_daten, shop):
-            checks.append({"shop":shop, "klass":eintrag.get("status"),
-                           "ts":eintrag.get("ts")})
-    return lerne_drop_fenster(checks, tz=tz)
+            health.append(_drop_fenster_zeile(shop, eintrag.get("status"),
+                                              eintrag.get("ts")))
+    events=[]
+    for eintrag in event_liste or []:
+        if not isinstance(eintrag, dict):
+            continue
+        if str(eintrag.get("typ") or "") != "verfuegbar":
+            continue
+        shop=str(eintrag.get("haendler") or eintrag.get("shop") or "")
+        if not shop:
+            continue
+        events.append(_drop_fenster_zeile(shop, "hit", eintrag.get("ts")))
+    health_keys=set()
+    for zeile in health:
+        if zeile.get("klass") != "hit":
+            continue
+        stunde=_drop_fenster_stunde(zeile, tz)
+        tag=_drop_fenster_tag(zeile, tz)
+        if stunde is not None and tag is not None:
+            health_keys.add((zeile["shop"], tag, stunde))
+    combined=list(health)
+    for zeile in events:
+        stunde=_drop_fenster_stunde(zeile, tz)
+        tag=_drop_fenster_tag(zeile, tz)
+        if (stunde is not None and tag is not None
+                and (zeile["shop"], tag, stunde) in health_keys):
+            continue
+        combined.append(zeile)
+    return lerne_drop_fenster(combined, tz=tz)
+
+
+def lerne_drop_fenster_aus_health(health_daten, tz=None):
+    """Kompatibilitaet: nur der lokale Health-Verlauf."""
+    return lerne_drop_fenster_aus_lokal(health_daten=health_daten, tz=tz)
 
 
 def _abdeckung_fuer_zeitraum(shop,start,ende,health_daten=None,takt=None,

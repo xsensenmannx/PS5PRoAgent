@@ -399,7 +399,9 @@ def main():
             # dieselben Fenster aus seinem eigenen Health-Verlauf; ohne
             # genug Treffer bleibt der Default 09-18 aktiv.
             try:
-                _gelernt = core.lerne_drop_fenster_aus_health(core.health().all())
+                _gelernt = core.lerne_drop_fenster_aus_lokal(
+                    health_daten=core.health().all(),
+                    event_liste=core.events().all())
                 if _gelernt.get("shops"):
                     core.setze_drop_fenster(_gelernt["shops"])
             except Exception:

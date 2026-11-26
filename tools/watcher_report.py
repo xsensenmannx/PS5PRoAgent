@@ -104,6 +104,7 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     alarme_zeilen = []
     outbox_zeilen = []
     checks_nach_shop = {}
+    konfigurierte_shops = set()
 
     for daten in zeilen:
         if not isinstance(daten, dict):
@@ -117,6 +118,10 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
             checks_nach_shop.setdefault(str(daten.get("shop") or ""), []).append(daten)
             klasse = str(daten.get("klass") or "?")
             klassen[klasse] = klassen.get(klasse, 0) + 1
+        elif typ == "start":
+            for shop in daten.get("shops") or []:
+                if shop:
+                    konfigurierte_shops.add(str(shop))
         elif typ == "alarm":
             alarme_zeilen.append(daten)
             aktion = str(daten.get("aktion") or "")
@@ -137,7 +142,8 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     alarm_latenz = _alarm_latenz(alarme_zeilen, checks_nach_shop, outbox_zeilen)
     fehlalarme = _fehlalarme(alarme_zeilen, checks_nach_shop)
     jetzt = max(zeiten) if zeiten else 0.0
-    stille_shops = _stille_shops(checks_nach_shop, jetzt)
+    stille_shops = _stille_shops(checks_nach_shop, jetzt,
+                                 konfigurierte_shops=konfigurierte_shops)
     abdeckung = _abdeckung_stunden(checks)
     preise = _preis_telemetrie(checks)
     ms = [max(0.0, _zahl(daten.get("ms"))) for daten in checks]
@@ -324,20 +330,48 @@ def _check_ts(daten):
         return None
 
 
-def _stille_shops(checks_nach_shop, jetzt, schwelle=STILLE_SHOP_S):
-    """Shops ohne Check innerhalb der Schwelle, mit plausibler Ursache."""
+def _stille_shops(checks_nach_shop, jetzt, schwelle=STILLE_SHOP_S,
+                  konfigurierte_shops=None):
+    """Shops ohne Check innerhalb der Schwelle, mit plausibler Ursache.
+
+    ``keine_checks`` ist der wichtigste Fall: Der Shop steht im Start-Log,
+    taucht aber im gesamten Zeitraum mit keinem Check auf. ``keine_daten``
+    bedeutet Check-Zeilen ohne brauchbaren Zeitstempel.
+    """
     stille = []
-    for shop, checks in checks_nach_shop.items():
+    alle = set(checks_nach_shop) | set(konfigurierte_shops or ())
+    for shop in alle:
+        checks = checks_nach_shop.get(shop, [])
+        if not checks:
+            stille.append({
+                "shop": shop,
+                "letzter_check_ts": None,
+                "letzter_check_iso": "?",
+                "alter_s": None,
+                "checks": 0,
+                "ursache": "keine_checks",
+            })
+            continue
         zeiten = [t for t in (_check_ts(c) for c in checks) if t is not None]
         if not zeiten:
+            stille.append({
+                "shop": shop,
+                "letzter_check_ts": None,
+                "letzter_check_iso": "?",
+                "alter_s": None,
+                "checks": len(checks),
+                "ursache": "keine_daten",
+            })
             continue
         letzte = max(zeiten)
         alter = max(0.0, float(jetzt) - letzte)
         if alter <= schwelle:
             continue
         letzte_klassen = [str(c.get("klass") or "") for c in checks[-5:]]
-        if letzte_klassen and all(
-            k in ("error", "parser", "challenge") for k in letzte_klassen
+        if letzte_klassen and all(k == "challenge" for k in letzte_klassen):
+            ursache = "nur_challenge"
+        elif letzte_klassen and all(
+            k in ("error", "parser") for k in letzte_klassen
         ):
             ursache = "nur_fehler"
         elif letzte_klassen and all(k == "unavail" for k in letzte_klassen):
@@ -352,10 +386,13 @@ def _stille_shops(checks_nach_shop, jetzt, schwelle=STILLE_SHOP_S):
             "checks": len(checks),
             "ursache": ursache,
         })
-    stille.sort(key=lambda e: e["alter_s"], reverse=True)
+    stille.sort(key=lambda e: (
+        0 if e["ursache"] in ("keine_checks", "keine_daten") else 1,
+        -(e["alter_s"] or 0),
+    ))
     return {
         "schwelle_s": int(schwelle),
-        "gesamt": len(checks_nach_shop),
+        "gesamt": len(alle),
         "stille": stille,
     }
 
@@ -459,9 +496,15 @@ def _text(daten):
     preise = daten.get("preis_telemetrie") or {}
     luecken = abdeckung.get("luecken") or []
     luecken_text = ", ".join("%02d" % h for h in luecken) or "keine"
+    def _stille_text(e):
+        if e.get("ursache") in ("keine_checks", "keine_daten"):
+            return "%s (ohne Check)" % e.get("shop")
+        return "%s (%dh)" % (
+            e.get("shop"), int(e.get("alter_s") or 0) // 3600
+        )
+
     stille_liste = ", ".join(
-        "%s (%dh)" % (e.get("shop"), int(e.get("alter_s") or 0) // 3600)
-        for e in (stille.get("stille") or [])[:5]
+        _stille_text(e) for e in (stille.get("stille") or [])[:5]
     ) or "keine"
     fq = daten.get("fehlalarme") or {}
     fehlalarm_text = (

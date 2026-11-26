@@ -1103,6 +1103,7 @@ def _tag_leer():
         "luecke_max": 0,
         "canary": {},
         "drift": {},
+        "preise": {},
         "ms": [],
     }
 
@@ -1127,6 +1128,18 @@ def tag_sicherstellen(zustand):
                 if isinstance(info, dict):
                     sauber[str(shop)] = info
         tag[key] = sauber
+    roh_preise = tag.get("preise")
+    sauber_preise = {}
+    if isinstance(roh_preise, dict):
+        for shop, gruende in roh_preise.items():
+            if not isinstance(gruende, dict):
+                continue
+            sauber = {}
+            for grund, anzahl in gruende.items():
+                sauber[str(grund)] = max(0, _outbox_int(anzahl, 0))
+            if sauber:
+                sauber_preise[str(shop)] = sauber
+    tag["preise"] = sauber_preise
     tag["datum"] = str(tag.get("datum") or "")
     ms = tag.get("ms")
     if not isinstance(ms, list):
@@ -1185,6 +1198,14 @@ def tag_buchen(zustand, r, jetzt, tz):
         tag["fehler"] += 1
         if klass == "parser":
             tag["parser"] += 1
+    grund = core.preis_guard_grund((r or {}).get("preis"))
+    shop = str((r or {}).get("haendler") or (r or {}).get("shop") or "")
+    if shop and (grund in ("zu_niedrig", "zu_hoch")
+                 or (grund == "nicht_erkannt"
+                     and klass in ("hit", "expensive", "unknown"))):
+        preise = tag.setdefault("preise", {})
+        gruende = preise.setdefault(shop, {})
+        gruende[grund] = gruende.get(grund, 0) + 1
     return tag
 
 
@@ -1276,6 +1297,16 @@ def tag_zusammenfassung(tag, box):
         for shop, info in sorted(roh_drift.items())
         if isinstance(info, dict)
     ]
+    roh_preise = tag.get("preise")
+    roh_preise = roh_preise if isinstance(roh_preise, dict) else {}
+    preise = [
+        {"shop": str(shop), "grund": str(grund),
+         "anzahl": _outbox_int(anzahl, 0)}
+        for shop, gruende in sorted(roh_preise.items())
+        if isinstance(gruende, dict)
+        for grund, anzahl in sorted(gruende.items())
+        if _outbox_int(anzahl, 0) > 0
+    ]
     return {
         "datum": str(tag.get("datum") or ""),
         "checks": checks,
@@ -1295,6 +1326,7 @@ def tag_zusammenfassung(tag, box):
         "luecke_max": _outbox_int(tag.get("luecke_max"), 0),
         "canary": canary,
         "drift": drift,
+        "preise": preise,
         "outbox_offen": offen,
         "outbox_failed": failed,
         "outbox_verfallen": verfallen,
@@ -1345,6 +1377,32 @@ def tag_bericht_text(zusammenfassung):
             for z in zeilen[:8] if isinstance(z, dict)
         ) or "unauffaellig"
 
+    preise = z.get("preise") if isinstance(z.get("preise"), list) else []
+    preis_gesamt = 0
+    nach_grund = {}
+    nach_shop = {}
+    for eintrag in preise:
+        if not isinstance(eintrag, dict):
+            continue
+        anzahl = _outbox_int(eintrag.get("anzahl"), 0)
+        grund = str(eintrag.get("grund") or "?")
+        shop = str(eintrag.get("shop") or "?")
+        preis_gesamt += anzahl
+        nach_grund[grund] = nach_grund.get(grund, 0) + anzahl
+        nach_shop[shop] = nach_shop.get(shop, 0) + anzahl
+    preis_text = (
+        "Preise verworfen: %d (zu niedrig %d, zu hoch %d, nicht erkannt %d)"
+        % (preis_gesamt, nach_grund.get("zu_niedrig", 0),
+           nach_grund.get("zu_hoch", 0), nach_grund.get("nicht_erkannt", 0))
+    )
+    if nach_shop:
+        preis_text += "; Shops: " + ", ".join(
+            "%s %d" % (shop, anzahl)
+            for shop, anzahl in sorted(
+                nach_shop.items(), key=lambda kv: (-kv[1], kv[0])
+            )[:5]
+        )
+
     text = (
         "Checks %d, Treffer %d, Challenges %d\n"
         "Fehler %d (davon Parser %d), Erfolgsquote %.1f %%\n"
@@ -1353,7 +1411,8 @@ def tag_bericht_text(zusammenfassung):
         "Alarme %d (%d im Schatten), Outbox %d offen / %d fehlerhaft / "
         "%d verfallen\n"
         "Canary: %s\n"
-        "Kaufbox-Drift: %s"
+        "Kaufbox-Drift: %s\n"
+        "%s"
         % (
             _outbox_int(z.get("checks"), 0),
             _outbox_int(z.get("treffer"), 0),
@@ -1376,6 +1435,7 @@ def tag_bericht_text(zusammenfassung):
                     else []),
             _drift(z.get("drift") if isinstance(z.get("drift"), list)
                    else []),
+            preis_text,
         )
     )
     return "Waechter Tagesbericht " + datum, text

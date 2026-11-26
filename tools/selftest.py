@@ -196,6 +196,11 @@ def main_tests():
     check("preis plausibel 5000", core.preis_plausibel(5000), True)
     check("preis plausibel 5000.01", core.preis_plausibel(5000.01), False)
     check("preis plausibel Text", core.preis_plausibel("kein Preis"), False)
+    check("preis guard grund None", core.preis_guard_grund(None),
+          "nicht_erkannt")
+    check("preis guard grund 1", core.preis_guard_grund(1), "zu_niedrig")
+    check("preis guard grund 5001", core.preis_guard_grund(5001), "zu_hoch")
+    check("preis guard grund 899", core.preis_guard_grund(899), "ok")
 
     # JSON-LD
     st = core.extract_structured(HTML_OK)
@@ -2412,13 +2417,43 @@ def live_tests():
                 "ts": lern_ts(16, 10 + i % 2)} for i in range(6)]
     check("Lernfenster ein Tag",
           core.lerne_drop_fenster(ein_tag)["shops"], {})
+    def lokal_iso(ts):
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts))
+
     health_daten = {}
     for zeile in lern_checks:
         health_daten.setdefault(zeile["shop"], {"verlauf": []})["verlauf"].append(
-            {"ts": zeile["ts"], "status": zeile["klass"]})
+            {"ts": lokal_iso(zeile["ts"]), "status": zeile["klass"]})
     aus_health = core.lerne_drop_fenster_aus_health(health_daten)
     check("Lernfenster aus Health",
           aus_health["shops"]["PS Direct DE"]["fenster"], [[10, 0, 12, 0]])
+
+    event_liste = []
+    for tag in (16, 17):
+        for h in (14, 14, 15, 15, 15):
+            event_liste.append({"typ": "verfuegbar",
+                                "haendler": "PS Direct AT",
+                                "ts": lokal_iso(lern_ts(tag, h))})
+    aus_events = core.lerne_drop_fenster_aus_lokal(event_liste=event_liste)
+    check("Lernfenster aus Events",
+          aus_events["shops"]["PS Direct AT"]["fenster"],
+          [[14, 0, 16, 0]])
+
+    kombi_health = {"PS Direct DE": {"verlauf": []}}
+    for tag in (16, 17):
+        for h in (10, 10, 10, 10, 10):
+            kombi_health["PS Direct DE"]["verlauf"].append(
+                {"ts": lokal_iso(lern_ts(tag, h)), "status": "hit"})
+    kombi_events = [
+        {"typ": "verfuegbar", "haendler": "PS Direct DE",
+         "ts": lokal_iso(lern_ts(16, 10, 30))},
+        {"typ": "verfuegbar", "haendler": "PS Direct DE",
+         "ts": lokal_iso(lern_ts(16, 11))},
+    ]
+    kombi = core.lerne_drop_fenster_aus_lokal(
+        health_daten=kombi_health, event_liste=kombi_events)
+    check("Lernfenster Quelle dedupe",
+          kombi["shops"]["PS Direct DE"]["hits"], 11)
 
     tmp_fenster = tempfile.mkdtemp(prefix="ps5pro-fenster-")
     try:
@@ -3353,6 +3388,38 @@ def watcher_p0_tests():
         check("p0 tag parser", tag.get("parser"), 1)
         check("p0 tag requests", tag.get("requests"), 4)
         check("p0 tag bytes", tag.get("bytes"), 2400)
+
+        # 5a. Preis-Guard-Telemetrie: Grund und Shop im Tagesbericht.
+        z_preis = cw.neuer_zustand(1000.0, 48)
+        cw.tag_buchen(z_preis, {"haendler": "PS Direct DE", "klass": "hit",
+                                "preis": 1.0, "dauer": 0.1}, 1000.0, None)
+        cw.tag_buchen(z_preis, {"haendler": "PS Direct DE", "klass": "hit",
+                                "preis": 5001.0, "dauer": 0.1}, 1001.0, None)
+        cw.tag_buchen(z_preis, {"haendler": "Alternate DE",
+                                "klass": "unknown", "preis": None,
+                                "dauer": 0.1}, 1002.0, None)
+        cw.tag_buchen(z_preis, {"haendler": "Amazon DE", "klass": "hit",
+                                "preis": 899.0, "dauer": 0.1}, 1003.0, None)
+        preis_z = cw.tag_zusammenfassung(
+            z_preis["tag"], cw.outbox_sicherstellen(z_preis))
+        preise = preis_z.get("preise") or []
+        check("p0 preis guard posten", len(preise), 3)
+        check("p0 preis guard niedrig",
+              sum(e["anzahl"] for e in preise
+                  if e["grund"] == "zu_niedrig"), 1)
+        check("p0 preis guard hoch",
+              sum(e["anzahl"] for e in preise
+                  if e["grund"] == "zu_hoch"), 1)
+        check("p0 preis guard ohne",
+              sum(e["anzahl"] for e in preise
+                  if e["grund"] == "nicht_erkannt"), 1)
+        preis_text = cw.tag_bericht_text(preis_z)[1]
+        check("p0 preis guard text",
+              "Preise verworfen: 3 (zu niedrig 1, zu hoch 1, "
+              "nicht erkannt 1)" in preis_text, True)
+        check("p0 preis guard shop",
+              "PS Direct DE 2, Alternate DE 1" in preis_text, True)
+
         cw.tag_sicherstellen(z)["alarme"] = 2
         cw.tag_sicherstellen(z)["schatten"] = 1
         box = cw.outbox_sicherstellen(z)
@@ -4200,6 +4267,8 @@ def watcher_report_tests():
         return time.mktime((2026, 11, 16, h, m, 0, 0, 0, -1))
 
     audit_zeilen = [
+        {"typ": "start", "ts": at(17, 55),
+         "shops": ["PS Direct DE", "Alternate DE", "Amazon DE", "Otto DE"]},
         {"typ": "check", "ts": at(15, 0), "shop": "PS Direct DE",
          "klass": "unavail", "preis": None},
         {"typ": "check", "ts": at(15, 5), "shop": "PS Direct DE",
@@ -4216,14 +4285,16 @@ def watcher_report_tests():
     audit = wr.bericht(audit_zeilen, 4.40)
     check("report abdeckung", audit["abdeckung_stunden"]["abgedeckt"], 5)
     check("report stille shops",
-          len(audit["stille_shops"]["stille"]), 2)
-    check("report stille gesamt", audit["stille_shops"]["gesamt"], 3)
+          len(audit["stille_shops"]["stille"]), 3)
+    check("report stille gesamt", audit["stille_shops"]["gesamt"], 4)
     ursachen = {e["shop"]: e["ursache"]
                 for e in audit["stille_shops"]["stille"]}
     check("report stille ursache PS", ursachen.get("PS Direct DE"),
           "nur_unavail")
     check("report stille ursache Alternate", ursachen.get("Alternate DE"),
           "gemischt")
+    check("report stille ohne checks", ursachen.get("Otto DE"),
+          "keine_checks")
     check("report preis gueltig", audit["preis_telemetrie"]["gueltig"], 1)
     check("report preis ohne", audit["preis_telemetrie"]["ohne_preis"], 3)
     check("report preis unplausibel",
@@ -4234,10 +4305,35 @@ def watcher_report_tests():
     check("report text abdeckung",
           "Abdeckung: 5 von 24 Stunden mit Checks" in audit_text, True)
     check("report text stille",
-          "Stille Shops: 2 von 3 (Schwelle 2h)" in audit_text, True)
+          "Stille Shops: 3 von 4 (Schwelle 2h)" in audit_text, True)
+    check("report text stille ohne check",
+          "Otto DE (ohne Check)" in audit_text, True)
     check("report text preise",
           "Preise: 1 gueltig, 3 ohne Preis, 2 unplausibel" in audit_text,
           True)
+
+    challenge_zeilen = [
+        {"typ": "check", "ts": at(10, 0), "shop": "PS Direct AT",
+         "klass": "challenge", "preis": None},
+        {"typ": "check", "ts": at(10, 5), "shop": "PS Direct AT",
+         "klass": "challenge", "preis": None},
+        {"typ": "check", "ts": at(18, 0), "shop": "Amazon DE",
+         "klass": "unavail", "preis": None},
+    ]
+    challenge = wr.bericht(challenge_zeilen, 4.40)
+    check("report stille challenge",
+          challenge["stille_shops"]["stille"][0]["ursache"],
+          "nur_challenge")
+
+    ohne_ts = wr.bericht([
+        {"typ": "check", "shop": "Kaputt DE", "klass": "unavail"},
+        {"typ": "check", "ts": at(18, 0), "shop": "Amazon DE",
+         "klass": "unavail"},
+    ], 4.40)
+    check("report stille ohne ts",
+          {e["shop"]: e["ursache"]
+           for e in ohne_ts["stille_shops"]["stille"]}.get("Kaputt DE"),
+          "keine_daten")
 
 
 if __name__ == "__main__":

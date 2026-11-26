@@ -44,7 +44,7 @@ from scan_core import (
     webhook_status_lesen, webhook_status_merken,
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
-    lerne_drop_fenster_aus_health, setze_drop_fenster,
+    lerne_drop_fenster_aus_lokal, setze_drop_fenster,
     bg_wachhund,
     kurz_zeit, kurz_tag, event_zeile,
     tages_key, tages_label, offen_seit_text,
@@ -1950,7 +1950,9 @@ class MainUI(FloatLayout):
         Default 09-18 aktiv.
         """
         try:
-            gelernt=lerne_drop_fenster_aus_health(health().all())
+            gelernt=lerne_drop_fenster_aus_lokal(
+                health_daten=health().all(),
+                event_liste=verlauf_events().all())
             if gelernt.get("shops"):
                 setze_drop_fenster(gelernt["shops"])
         except Exception:
