@@ -1864,9 +1864,8 @@ class MainUI(FloatLayout):
             if r.get("avail_state") in CHANCE_STATES:
                 r["klass"]="chance"; continue
             deckel=self._deckel(r.get("land"))
-            if r["preis"] is None: r["klass"]="unknown"
-            elif deckel is None or r["preis"]<=deckel: r["klass"]="hit"
-            else: r["klass"]="expensive"
+            r["klass"]=classify(True, r.get("preis"), deckel,
+                                r.get("avail_state"))
         nb=[]
         for b in self.radar.blips:
             n=b.get("name")

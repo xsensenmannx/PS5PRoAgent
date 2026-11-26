@@ -48,6 +48,10 @@ def _session():
     return s
 
 MAX_PREIS, MIN_PREIS, MSRP_ZIEL = 900.0, 550.0, 799.99
+# Absolute Plausibilitaetsgrenze fuer einen PS5-Pro-Preis. Der Deckel
+# (MAX_PREIS) bleibt davon getrennt: Auch bei offenem Deckel ist ein Preis
+# ausserhalb dieses Bereichs kein Treffer, sondern ein Parser-/Seitenfehler.
+PREIS_PLAUSIBEL_MAX = 5000.0
 # Grenzen fuer einen gewaehlten Deckel. 400 EUR ist unter jedem realistischen
 # Preis fuer die 2-TB-Konsole, 1500 EUR deckt die teuersten AT-Angebote ab.
 DECKEL_MIN, DECKEL_MAX = 400.0, 1500.0
@@ -172,6 +176,15 @@ DROP_FENSTER = {
     "PS Direct DE": ((9, 0, 18, 0),),
     "PS Direct AT": ((9, 0, 18, 0),),
 }
+# Gelernte Fenster aus den Check-Zeilen der Waechter-Logs. Ohne ausreichende
+# Daten bleibt der Default oben aktiv; ein einzelner Treffer um 03:00 darf
+# kein dauerhaftes Nachtband erzeugen.
+DROP_FENSTER_LERN_FILE = "ps5pro_drop_fenster.json"
+DROP_FENSTER_MIN_HITS = 6
+DROP_FENSTER_MIN_TAGE = 2
+DROP_FENSTER_MAX_BAENDER = 3
+DROP_FENSTER_STUNDE_MIN = 2
+_DROP_FENSTER_GELERNT = {}
 # ── Hintergrund-Hot-Shop ────────────────────────────────────────────
 # Im belegten PS-Direct-Fenster prueft der Dienst diese zwei Shops zusaetzlich
 # alle 45 s; die volle Runde bleibt bei 15 Minuten. Ausserhalb des Fensters
@@ -1003,7 +1016,7 @@ def berechne_konfidenz(r):
     if not isinstance(r,dict) or r.get("klass") not in ("hit","chance"):
         return 0
     p=r.get("preis")
-    if p is None: return 0
+    if p is None or not preis_plausibel(p): return 0
     punkte=0
     if r.get("verify")=="bestaetigt": punkte+=40
     try:
@@ -1093,11 +1106,28 @@ def beleg_speichern(haendler, beleg):
     try: return Evidence().put(haendler,beleg)
     except Exception: return False
 
+def preis_plausibel(preis):
+    """Nur Preise, die als PS5-Pro-Preis durchgehen koennen.
+
+    Dieselbe Grenze wie in den Extraktoren: unter ``MIN_PREIS`` ist es kein
+    Konsolenpreis, ueber ``PREIS_PLAUSIBEL_MAX`` ein Parser- oder Seitenfehler.
+    Das gilt unabhaengig vom gewaehlten Deckel.
+    """
+    try:
+        p=float(preis)
+    except (TypeError,ValueError):
+        return False
+    return MIN_PREIS<=p<=PREIS_PLAUSIBEL_MAX
+
+
 def classify(v,p,m,state=None):
     if state in CHANCE_STATES: return "chance"
     if state=="sold_out": return "unavail"
     if not v: return "unavail"
     if p is None: return "unknown"
+    try: p=float(p)
+    except (TypeError,ValueError): return "unknown"
+    if not preis_plausibel(p): return "unknown"
     if m is None or p<=m: return "hit"
     return "expensive"
 
@@ -1803,7 +1833,8 @@ def scan_alle(haendler, max_preis=None, fortschritt=None, cancel=None):
 
 def treffer_aus(results):
     return [r for r in results if r.get("klass") == "hit"
-            and r.get("preis") is not None and not ist_gebraucht(r.get("condition"))]
+            and preis_plausibel(r.get("preis"))
+            and not ist_gebraucht(r.get("condition"))]
 
 def ist_neuer_treffer(preis, letzter):
     """True, wenn es noch keinen Preis gab oder der neue niedriger ist."""
@@ -1815,7 +1846,8 @@ def alarm_ereignis(r, letzter, vorher_verfuegbar):
     ``restock`` hat Vorrang: ein wieder verfuegbarer Treffer ist auch dann
     meldenswert, wenn der Preis nicht unter dem letzten Preis liegt.
     """
-    if not isinstance(r,dict) or r.get("klass")!="hit" or r.get("preis") is None:
+    if not isinstance(r,dict) or r.get("klass")!="hit" or \
+            not preis_plausibel(r.get("preis")):
         return None
     if vorher_verfuegbar is False: return "restock"
     if ist_neuer_treffer(r["preis"],letzter): return "new"
@@ -2126,12 +2158,13 @@ def _als_datetime(jetzt=None):
 
 
 def im_drop_fenster(name, jetzt=None):
-    """True, wenn dieser Shop gerade in einem bekannten Auflegefenster liegt.
+    """True, wenn dieser Shop gerade in einem Auflegefenster liegt.
 
-    Nur Shops aus ``DROP_FENSTER`` bekommen den dichteren Takt. Ein Fenster
-    ueber Mitternacht ist erlaubt, wird hier aber nicht gebraucht.
+    Ein gelerntes Fenster ersetzt den Default, sobald es gesetzt ist. Ein
+    Fenster ueber Mitternacht ist erlaubt, wird hier aber nicht gebraucht.
     """
-    fenster = DROP_FENSTER.get(str(name or ""))
+    name = str(name or "")
+    fenster = _DROP_FENSTER_GELERNT.get(name) or DROP_FENSTER.get(name)
     if not fenster: return False
     d = _als_datetime(jetzt)
     minute = d.hour * 60 + d.minute
@@ -2159,6 +2192,146 @@ def naechste_fenster_ts(jetzt=None):
     if treffer: return min(treffer)
     # Kein Fenster konfiguriert: nicht in eine Sofortschleife laufen.
     return (time.time() if jetzt is None else float(jetzt)) + 60
+
+
+def _drop_fenster_stunde(zeile, tz=None):
+    """Stunde eines Checks: bevorzugt der ISO-Zeitstempel mit Offset."""
+    iso = zeile.get("iso")
+    if iso:
+        try:
+            return datetime.fromisoformat(str(iso)).hour
+        except (TypeError, ValueError):
+            pass
+    try:
+        ts = float(zeile.get("ts"))
+        return datetime.fromtimestamp(ts, tz).hour if tz else datetime.fromtimestamp(ts).hour
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def lerne_drop_fenster(checks, tz=None, min_hits=DROP_FENSTER_MIN_HITS,
+                       min_tage=DROP_FENSTER_MIN_TAGE,
+                       max_baender=DROP_FENSTER_MAX_BAENDER):
+    """Aus ``hit``-Checks zeitliche Baender ableiten.
+
+    Nur Shops mit einem Default-Fenster kommen infrage. Zu wenige Hits oder
+    zu wenige verschiedene Tage ergeben bewusst kein Fenster: dann bleibt der
+    Default aktiv, statt aus einem Zufallstreffer ein 03:00-Band zu machen.
+    Eine Stunde zaehlt nur mit mindestens zwei Treffern.
+    """
+    pro_shop = {}
+    for zeile in checks or []:
+        if not isinstance(zeile, dict) or zeile.get("klass") != "hit":
+            continue
+        name = str(zeile.get("shop") or "")
+        if name not in DROP_FENSTER:
+            continue
+        stunde = _drop_fenster_stunde(zeile, tz)
+        if stunde is None:
+            continue
+        eintrag = pro_shop.setdefault(name, {"stunden": {}, "tage": set()})
+        eintrag["stunden"][stunde] = eintrag["stunden"].get(stunde, 0) + 1
+        tag = None
+        iso = zeile.get("iso")
+        if iso:
+            try:
+                tag = datetime.fromisoformat(str(iso)).date()
+            except (TypeError, ValueError):
+                tag = None
+        if tag is None:
+            try:
+                ts = float(zeile.get("ts"))
+                tag = (datetime.fromtimestamp(ts, tz) if tz
+                       else datetime.fromtimestamp(ts)).date()
+            except (TypeError, ValueError, OSError, OverflowError):
+                tag = None
+        if tag is not None:
+            eintrag["tage"].add(tag)
+
+    shops = {}
+    for name, eintrag in pro_shop.items():
+        hits = sum(eintrag["stunden"].values())
+        if hits < int(min_hits) or len(eintrag["tage"]) < int(min_tage):
+            continue
+        aktiv = sorted(h for h, n in eintrag["stunden"].items()
+                       if n >= DROP_FENSTER_STUNDE_MIN)
+        if not aktiv:
+            continue
+        baender = []
+        start = prev = aktiv[0]
+        for stunde in aktiv[1:]:
+            if stunde - prev <= 1:
+                prev = stunde
+                continue
+            baender.append((start, prev + 1))
+            start = prev = stunde
+        baender.append((start, prev + 1))
+        # Die dichtesten Baender zuerst, danach wieder in Zeitreihenfolge.
+        baender.sort(
+            key=lambda b: (sum(eintrag["stunden"].get(h, 0)
+                               for h in range(b[0], b[1])), b[0]),
+            reverse=True,
+        )
+        baender = sorted(baender[:max(0, int(max_baender))])
+        shops[name] = {
+            "fenster": [[a, 0, b, 0] for a, b in baender],
+            "hits": hits,
+            "tage": len(eintrag["tage"]),
+        }
+    return {"schema": 1, "gelernt_ts": time.time(),
+            "quelle": "watcher-log", "shops": shops}
+
+
+def setze_drop_fenster(shops):
+    """Gelernte Fenster global setzen; leere Map aktiviert den Default."""
+    global _DROP_FENSTER_GELERNT
+    neu = {}
+    for name, eintrag in (shops or {}).items():
+        if not isinstance(eintrag, dict):
+            continue
+        roh = eintrag.get("fenster")
+        if not isinstance(roh, list):
+            continue
+        fenster = []
+        for band in roh:
+            if not isinstance(band, (list, tuple)) or len(band) != 4:
+                continue
+            try:
+                a, b, c, d = (int(x) for x in band)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= a <= 24 and 0 <= c <= 24:
+                fenster.append((a, b, c, d))
+        if fenster:
+            neu[str(name)] = tuple(fenster)
+    _DROP_FENSTER_GELERNT = neu
+    return dict(_DROP_FENSTER_GELERNT)
+
+
+def reset_gelernte_drop_fenster():
+    """Nur fuer Tests und einen bewussten Neustart."""
+    setze_drop_fenster({})
+
+
+def drop_fenster_laden(pfad=None):
+    pfad = pfad or os.path.join(_data_dir(), DROP_FENSTER_LERN_FILE)
+    try:
+        with open(pfad, "r", encoding="utf-8") as datei:
+            daten = json.load(datei)
+        return daten if isinstance(daten, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def drop_fenster_speichern(pfad, daten):
+    try:
+        tmp = pfad + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as datei:
+            json.dump(daten, datei, ensure_ascii=False)
+        os.replace(tmp, pfad)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def live_takt(haendler, aktiv=None, jetzt=None):

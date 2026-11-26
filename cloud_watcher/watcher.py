@@ -19,6 +19,7 @@ Sicherheitsregeln:
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import signal
@@ -971,21 +972,71 @@ def _jitter(name):
     return roh / 1000.0 * 0.1
 
 
-def takt_sekunden(name, eintrag, konfig):
+def takt_sekunden(name, eintrag, konfig, jetzt=None):
     """Naechster Abstand in Sekunden.
 
-    PS Direct laeuft im schnellen Takt (Default 15 s), alle anderen Shops im
-    Zusatztakt (Default 30 s), jeweils mit 0 bis +10 % Jitter. Kein eigenes
-    Fenster: Ein belegter PS-Direct-Drop lag um 22:49, also ausserhalb von
-    09:00-18:00. Eine Bot-Sperre haelt der Shop selbst ueber
-    ``challenge_bis`` ein; zwei Parser-/Netzfehler in Folge 12 Minuten.
+    PS Direct laeuft nur in einem belegten oder gelernten Auflegefenster im
+    schnellen Takt (Default 15 s), sonst wie alle anderen Shops im Zusatztakt
+    (Default 30 s), jeweils mit 0 bis +10 % Jitter. Die gelernten Fenster
+    kommen aus den eigenen NDJSON-Logs; ohne ausreichende Daten gilt der
+    Default aus ``scan_core.DROP_FENSTER``. Eine Bot-Sperre haelt der Shop
+    selbst ueber ``challenge_bis`` ein; zwei Parser-/Netzfehler in Folge 12
+    Minuten.
     """
     eintrag = eintrag if isinstance(eintrag, dict) else {}
     status = str(eintrag.get("status") or "")
     if status in ("error", "parser") and int(eintrag.get("fail_streak") or 0) >= 2:
         return FEHLER_TAKT
-    basis = konfig.takt if name in PRIORITY_SHOPS else konfig.takt_neben
+    im_fenster = (name in PRIORITY_SHOPS
+                  and core.im_drop_fenster(name, jetzt))
+    basis = konfig.takt if im_fenster else konfig.takt_neben
     return int(round(float(basis) * (1.0 + _jitter(name))))
+
+
+def drop_fenster_lernen(konfig, tz, jetzt=None, pfad=None):
+    """Gelernte Drop-Fenster aus den eigenen NDJSON-Logs setzen.
+
+    Ohne ausreichende Treffer bleibt ein bereits gespeicherter Stand erhalten;
+    ohne beides gilt der Default aus ``scan_core.DROP_FENSTER``. Die Datei
+    liegt im Datenverzeichnis und wird beim Tageswechsel neu geschrieben.
+    """
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    pfad = pfad or os.path.join(konfig.data_dir, core.DROP_FENSTER_LERN_FILE)
+    checks = []
+    pfade = sorted(glob.glob(os.path.join(konfig.data_dir,
+                                          "watcher-log-*.ndjson")))[-14:]
+    for log_pfad in pfade:
+        try:
+            with open(log_pfad, "r", encoding="utf-8") as datei:
+                for zeile in datei:
+                    try:
+                        daten = json.loads(zeile)
+                    except ValueError:
+                        continue
+                    if isinstance(daten, dict) and daten.get("typ") == "check":
+                        checks.append(daten)
+        except OSError:
+            continue
+    gelernt = core.lerne_drop_fenster(checks, tz=tz)
+    if not gelernt.get("shops"):
+        alt = core.drop_fenster_laden(pfad)
+        if isinstance(alt, dict) and alt.get("shops"):
+            gelernt = alt
+            gelernt["quelle"] = "datei"
+        else:
+            gelernt["quelle"] = "default"
+    if gelernt.get("shops"):
+        core.drop_fenster_speichern(pfad, gelernt)
+    core.setze_drop_fenster(gelernt.get("shops") or {})
+    log({
+        "typ": "drop_fenster",
+        "ts": round(jetzt, 3),
+        "iso": iso_ts(jetzt, tz),
+        "quelle": gelernt.get("quelle") or "default",
+        "checks": len(checks),
+        "shops": gelernt.get("shops") or {},
+    })
+    return gelernt
 
 
 def naechste_faelligkeit(eintrag, jetzt, takt):
@@ -1926,6 +1977,7 @@ def main(argv=None):
     deckel = core.preis_deckel_aus(settings)
     next_due = {h["name"]: 0.0 for h in shops}
     schatten = schatten_aktiv(zustand, jetzt, konfig.shadow)
+    drop_fenster = drop_fenster_lernen(konfig, tz, jetzt)
 
     log(
         {
@@ -1942,6 +1994,8 @@ def main(argv=None):
             "shop_config": config_anzahl,
             "takt": konfig.takt,
             "takt_neben": konfig.takt_neben,
+            "drop_fenster": drop_fenster.get("shops") or {},
+            "drop_fenster_quelle": drop_fenster.get("quelle") or "default",
             "preset": konfig.webhook_preset,
             "budget_min": konfig.max_req_min,
             "preis_toleranz": konfig.preis_toleranz,
@@ -1989,6 +2043,7 @@ def main(argv=None):
             abschluss = tageswechsel(zustand, jetzt, tz)
             if abschluss:
                 log(dict(abschluss, typ="tag", ts=round(jetzt, 3)))
+                drop_fenster_lernen(konfig, tz, jetzt)
             # Bericht nach dem Tageswechsel einreihen, danach Retries bedienen.
             tag_bericht_senden(konfig, settings, zustand, jetzt, pfad, abschluss)
             status = status_daten(
@@ -2063,7 +2118,7 @@ def main(argv=None):
                         if letzte:
                             abstand = time.time() - letzte
                             if abstand > 2 * takt_sekunden(name, eintrag,
-                                                           konfig):
+                                                           konfig, jetzt):
                                 tag_luecke(zustand, abstand, time.time(), tz)
                         event = alarm_entscheidung(eintrag, r,
                                                    konfig.preis_toleranz)
@@ -2155,7 +2210,7 @@ def main(argv=None):
                 jetzt_nach = time.time()
                 for h in faellig:
                     eintrag = zustand["shops"].get(h["name"], {})
-                    takt = takt_sekunden(h["name"], eintrag, konfig)
+                    takt = takt_sekunden(h["name"], eintrag, konfig, jetzt)
                     # Ab Rundenstart rechnen, damit die Pruefdauer den Takt
                     # nicht zusaetzlich verlaengert.
                     next_due[h["name"]] = naechste_faelligkeit(

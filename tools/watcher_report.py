@@ -22,6 +22,12 @@ LOG_MUSTER = "watcher-log-*.ndjson"
 KOSTEN_MONAT = 4.40
 TAGE_MONAT = 30.0
 STUNDEN_TAG = 24.0
+# Ein Alarm wird nur mit einem hit-Check gepaart, der hoechstens so alt ist.
+MAX_ALARM_LATENZ_S = 300.0
+ZUSTELL_AKTIONEN = ("gesendet", "retry", "fehlgeschlagen", "verworfen")
+# Ein Alarm gilt als widerlegt, wenn der naechste Check desselben Shops
+# innerhalb dieses Fensters ``unavail`` meldet.
+FEHLALARM_FENSTER_S = 600.0
 
 
 def log_dateien(daten_dir):
@@ -87,6 +93,9 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     zugestellt = 0
     klassen = {}
     zeiten = []
+    alarme_zeilen = []
+    outbox_zeilen = []
+    checks_nach_shop = {}
 
     for daten in zeilen:
         if not isinstance(daten, dict):
@@ -97,9 +106,11 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
         typ = daten.get("typ")
         if typ == "check":
             checks.append(daten)
+            checks_nach_shop.setdefault(str(daten.get("shop") or ""), []).append(daten)
             klasse = str(daten.get("klass") or "?")
             klassen[klasse] = klassen.get(klasse, 0) + 1
         elif typ == "alarm":
+            alarme_zeilen.append(daten)
             aktion = str(daten.get("aktion") or "")
             if aktion == "unterdrueckt":
                 unterdrueckt += 1
@@ -110,9 +121,13 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
                     restock += 1
                 elif event == "new":
                     neu += 1
-        elif typ == "outbox" and str(daten.get("aktion") or "") == "gesendet":
-            zugestellt += 1
+        elif typ == "outbox":
+            outbox_zeilen.append(daten)
+            if str(daten.get("aktion") or "") == "gesendet":
+                zugestellt += 1
 
+    alarm_latenz = _alarm_latenz(alarme_zeilen, checks_nach_shop, outbox_zeilen)
+    fehlalarme = _fehlalarme(alarme_zeilen, checks_nach_shop)
     ms = [max(0.0, _zahl(daten.get("ms"))) for daten in checks]
     bytes_ = [max(0.0, _zahl(daten.get("bytes"))) for daten in checks]
     frisch = sum(1 for daten in checks if daten.get("frisch") is True)
@@ -163,6 +178,8 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
         "neu": neu,
         "unterdrueckt": unterdrueckt,
         "zugestellt": zugestellt,
+        "alarm_latenz": alarm_latenz,
+        "fehlalarme": fehlalarme,
         "klassen": klassen,
         "kosten": {
             "monat": round(kosten_monat, 2),
@@ -173,6 +190,120 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
             else None,
         },
     }
+
+
+def _alarm_latenz(alarme, checks_nach_shop, outbox):
+    """Erkennung bis erster Zustellversuch, in Millisekunden.
+
+    Paart jeden Alarm mit dem letzten ``hit``-Check desselben Shops davor
+    (hoechstens ``MAX_ALARM_LATENZ_S``) und mit der ersten Outbox-Zeile seiner
+    ``outbox_id``. Im Schattenmodus gibt es keine Outbox-Zeile: Dort ist die
+    ``wuerde_senden``-Zeile selbst der simulierte Zustellversuch. So misst die
+    Kennzahl in beiden Modi denselben Weg und braucht keinen neuen Abruf.
+    """
+    outbox_nach_id = {}
+    for zeile in outbox:
+        if zeile.get("aktion") not in ZUSTELL_AKTIONEN:
+            continue
+        oid = zeile.get("id")
+        if not oid:
+            continue
+        ts = _zahl(zeile.get("ts"), 0.0)
+        if oid not in outbox_nach_id or ts < outbox_nach_id[oid]:
+            outbox_nach_id[oid] = ts
+
+    werte = []
+    ohne_check = 0
+    ohne_versuch = 0
+    for alarm in alarme:
+        if alarm.get("aktion") not in ("wuerde_senden", "eingereiht"):
+            continue
+        ts = _zahl(alarm.get("ts"), 0.0)
+        shop = str(alarm.get("shop") or "")
+        erkennung = None
+        for pruefung in checks_nach_shop.get(shop, []):
+            if pruefung.get("klass") != "hit":
+                continue
+            cts = _zahl(pruefung.get("ts"), 0.0)
+            if cts <= ts and ts - cts <= MAX_ALARM_LATENZ_S:
+                if erkennung is None or cts > erkennung:
+                    erkennung = cts
+        if erkennung is None:
+            ohne_check += 1
+            continue
+
+        oid = alarm.get("outbox_id")
+        if oid:
+            versuch = outbox_nach_id.get(oid)
+            if versuch is None:
+                ohne_versuch += 1
+                continue
+        else:
+            # Schattenmodus: die simulierte Zustellung ist der Alarm selbst.
+            versuch = ts
+        latenz = max(0.0, versuch - erkennung)
+        if latenz <= MAX_ALARM_LATENZ_S:
+            werte.append(latenz)
+        else:
+            ohne_versuch += 1
+
+    return {
+        "p50": _ms(perzentil(werte, 0.50)),
+        "p95": _ms(perzentil(werte, 0.95)),
+        "max": _ms(max(werte)) if werte else None,
+        "gemessen": len(werte),
+        "ohne_check": ohne_check,
+        "ohne_versuch": ohne_versuch,
+    }
+
+
+def _fehlalarme(alarme, checks_nach_shop):
+    """Alarme, die der naechste Check binnen zehn Minuten widerlegt.
+
+    Massgeblich ist der erste Check desselben Shops nach dem Alarm. Nur
+    ``unavail`` widerlegt; ``hit``/``expensive`` bestaetigen; ``parser``,
+    ``error``, ``challenge`` und ``chance`` sind keine Aussage und bleiben
+    unklar. Ohne Check im Fenster bleibt der Alarm offen. Die Quote bezieht
+    sich nur auf Alarme mit klarem Gegencheck, damit offene Zeilen sie nicht
+    kuenstlich druecken.
+    """
+    widerlegt = bestaetigt = unklar = offen = 0
+    for alarm in alarme:
+        if alarm.get("aktion") not in ("wuerde_senden", "eingereiht"):
+            continue
+        ts = _zahl(alarm.get("ts"), 0.0)
+        shop = str(alarm.get("shop") or "")
+        naechster = None
+        for pruefung in checks_nach_shop.get(shop, []):
+            cts = _zahl(pruefung.get("ts"), 0.0)
+            if cts <= ts or cts - ts > FEHLALARM_FENSTER_S:
+                continue
+            if naechster is None or cts < naechster[0]:
+                naechster = (cts, pruefung)
+        if naechster is None:
+            offen += 1
+            continue
+        klasse = str(naechster[1].get("klass") or "")
+        if klasse == "unavail":
+            widerlegt += 1
+        elif klasse in ("hit", "expensive"):
+            bestaetigt += 1
+        else:
+            unklar += 1
+    geprueft = widerlegt + bestaetigt
+    return {
+        "widerlegt": widerlegt,
+        "bestaetigt": bestaetigt,
+        "unklar": unklar,
+        "offen": offen,
+        "gesamt": widerlegt + bestaetigt + unklar + offen,
+        "geprueft": geprueft,
+        "quote": round(100.0 * widerlegt / geprueft, 1) if geprueft else None,
+    }
+
+
+def _ms(wert):
+    return None if wert is None else int(round(float(wert) * 1000.0))
 
 
 def _text(daten):
@@ -186,6 +317,31 @@ def _text(daten):
         "- (kein Alarm)"
         if kosten["pro_alarm"] is None
         else "%.2f EUR" % kosten["pro_alarm"]
+    )
+    lat = daten.get("alarm_latenz") or {}
+    latenz = (
+        "Alarm-Latenz: p50 %s | p95 %s | max %s "
+        "(%d gemessen, %d ohne Check, %d ohne Versuch)"
+        % (
+            "-" if lat.get("p50") is None else "%d ms" % lat["p50"],
+            "-" if lat.get("p95") is None else "%d ms" % lat["p95"],
+            "-" if lat.get("max") is None else "%d ms" % lat["max"],
+            int(lat.get("gemessen") or 0),
+            int(lat.get("ohne_check") or 0),
+            int(lat.get("ohne_versuch") or 0),
+        )
+    )
+    fq = daten.get("fehlalarme") or {}
+    fehlalarm_text = (
+        "Fehlalarme: %d von %d geprueft (%s), %d bestaetigt, %d unklar, %d offen"
+        % (
+            int(fq.get("widerlegt") or 0),
+            int(fq.get("geprueft") or 0),
+            "-" if fq.get("quote") is None else "%.1f %%" % fq["quote"],
+            int(fq.get("bestaetigt") or 0),
+            int(fq.get("unklar") or 0),
+            int(fq.get("offen") or 0),
+        )
     )
     return "\n".join(
         [
@@ -221,6 +377,8 @@ def _text(daten):
                 daten["unterdrueckt"],
                 daten["zugestellt"],
             ),
+            latenz,
+            fehlalarm_text,
             "Kosten: %.2f EUR/Monat | Zeitraum %.2f EUR | pro Alarm %s"
             % (kosten["monat"], kosten["zeitraum"], pro_alarm),
             "Hochrechnung: %.1f Alarme/Monat" % kosten["alarme_pro_monat"],

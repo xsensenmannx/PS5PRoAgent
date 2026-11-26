@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.5.3 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.5.3/ps5prosearchagent-1.5.3-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.5.5 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.5.5/ps5prosearchagent-1.5.5-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -21,10 +21,15 @@ Die Release-APK ist mit einem festen Schlüssel signiert: Ein Update legt sich
 über die bestehende Installation. Nur beim Wechsel aus der alten 5.x-Reihe ist
 einmalig eine Deinstallation nötig.
 
+Die Release-APK hat **23.099.653 Bytes**; SHA-256:
+`cb0ce858088734840efdc12f64c796e7be48088fa143211490ff71943784adaf`.
+
 | Stand | Bedeutung |
 |---|---|
-| **v1.5.3** | Die aktuelle Version (versionCode 10503). Diese APK installieren. |
-| **v1.5.2** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.5** | Die aktuelle Version (versionCode 10505). Diese APK installieren. |
+| **v1.5.4** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.3** | Ältere Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.2** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.5.1** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.5.0** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.4.0** | Ältere Version; bleibt als Archiv-Release erhalten. |
@@ -37,12 +42,12 @@ Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
 aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
-> **Eine Nummer für alles:** App, Release und Download heißen **v1.5.3**
-> (App-Version 1.5.3, versionCode 10503). Der Button oben führt immer zur
+> **Eine Nummer für alles:** App, Release und Download heißen **v1.5.5**
+> (App-Version 1.5.5, versionCode 10505). Der Button oben führt immer zur
 > aktuellen APK.
 >
-> **Zur Zählung:** v1.5.3 setzt die 1.5-Linie fort. Die
-> Zählung läuft sauber als 1.x-Linie weiter (v1.0–v1.5.2 Archiv, v1.5.3 aktuell).
+> **Zur Zählung:** v1.5.5 setzt die 1.5-Linie fort. Die
+> Zählung läuft sauber als 1.x-Linie weiter (v1.0–v1.5.4 Archiv, v1.5.5 aktuell).
 
 ## Eindruck
 
@@ -294,7 +299,16 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.5.3** – Die aktuelle veröffentlichte Version (versionCode 10503):
+* **v1.5.5** – Die aktuelle veröffentlichte Version (versionCode 10505):
+  Der Cloud-Wächter prüft PS Direct DE/AT und Alternate DE outbound-only, im
+  Schattenmodus mit Tagesbericht und Testalarm; die App startet den Schnellscan
+  in den belegten PS-Direct-Fenstern (09:00–18:00) automatisch und beendet nur
+  diesen eigenen Lauf, dazu kommen die Hintergrund-Schalter „nur WLAN“ und „nur
+  am Ladegerät“. Dazu 1579 Logiktests.
+* **v1.5.4** – Vorherige Version (versionCode 10504): Treffer zählen nur, wenn
+  der Konsolentitel zur PS5 Pro passt; die Trefferkarte verlinkt das Produkt
+  statt der Suchseite.
+* **v1.5.3** – Ältere Version (versionCode 10503):
   Der Erfolgs-Feed schreibt bestätigte Zustandswechsel sofort mit der
   Abrufzeit ins append-only JSONL-Journal; `ERFOLGE` und `VERLAUF` bieten
   `AKTIVE`/`ALLE`, Tagesgruppen, Abdeckungslabels, antippbare Zeilen sowie

@@ -182,7 +182,20 @@ def main_tests():
     check("classify unknown", core.classify(True, None, 900), "unknown")
     check("classify hit", core.classify(True, 899, 900), "hit")
     check("classify expensive", core.classify(True, 901, 900), "expensive")
-    check("classify max offen", core.classify(True, 5000, None), "hit")
+    check("classify 5000 Grenze offen", core.classify(True, 5000, None), "hit")
+    check("classify 5001 offen", core.classify(True, 5001, None), "unknown")
+    check("classify 1 unplausibel", core.classify(True, 1, 900), "unknown")
+    check("classify 550 Grenze", core.classify(True, 550, 900), "hit")
+
+    # Preis-Guard: dieselbe absolute Grenze wie in den Extraktoren.
+    check("preis plausibel None", core.preis_plausibel(None), False)
+    check("preis plausibel 0", core.preis_plausibel(0), False)
+    check("preis plausibel 1", core.preis_plausibel(1), False)
+    check("preis plausibel 549.99", core.preis_plausibel(549.99), False)
+    check("preis plausibel 550", core.preis_plausibel(550), True)
+    check("preis plausibel 5000", core.preis_plausibel(5000), True)
+    check("preis plausibel 5000.01", core.preis_plausibel(5000.01), False)
+    check("preis plausibel Text", core.preis_plausibel("kein Preis"), False)
 
     # JSON-LD
     st = core.extract_structured(HTML_OK)
@@ -696,8 +709,11 @@ def service_tests():
     roh = [{"klass": "expensive", "preis": 950.0},
            {"klass": "hit", "preis": 800.0},
            {"klass": "hit", "preis": None},
+           {"klass": "hit", "preis": 1.0},
+           {"klass": "hit", "preis": 5001.0},
            {"klass": "error"}]
-    check("treffer_aus filtert", [r["preis"] for r in core.treffer_aus(roh)], [800.0])
+    check("treffer_aus filtert",
+          [r["preis"] for r in core.treffer_aus(roh)], [800.0])
 
     # scan_alle nutzt dieselbe Klassifizierung wie die App.
     alt = core._safe_scan
@@ -1397,6 +1413,12 @@ def feature_tests():
               None)
         check("Alarm-Ereignis kein Treffer",
               core.alarm_ereignis({"klass": "unavail", "preis": None}, 799.0, False),
+              None)
+        check("Alarm-Ereignis Preis zu niedrig",
+              core.alarm_ereignis({"klass": "hit", "preis": 1.0}, None, None),
+              None)
+        check("Alarm-Ereignis Preis zu hoch",
+              core.alarm_ereignis({"klass": "hit", "preis": 5001.0}, None, None),
               None)
         check("Alarm Ruhezeit", core.alarm_erlaubt(
             neu, None, {"quiet_hours": True}, __import__("datetime").datetime(2026, 1, 1, 23, 30)), False)
@@ -2110,6 +2132,10 @@ def v14_tests():
              "stock_source": "jsonld", "condition": "new", "marketplace": False,
              "gtin": "0711719570280", "fresh": True}
     check("v1.4 Konfidenz ungeprueft", core.berechne_konfidenz(dict(basis)), 60)
+    check("v1.4 Konfidenz Preis zu niedrig",
+          core.berechne_konfidenz({**basis, "preis": 1.0}), 0)
+    check("v1.4 Konfidenz Preis zu hoch",
+          core.berechne_konfidenz({**basis, "preis": 5001.0}), 0)
     ohne_zustand={k:v for k,v in basis.items() if k!="condition"}
     check("v1.4 Konfidenz ohne Zustand",
           core.berechne_konfidenz(ohne_zustand), 50)
@@ -2350,6 +2376,102 @@ def live_tests():
         check("Fenster ueber Mitternacht aussen", core.im_drop_fenster("Nacht DE", ts(1, 0)), False)
     finally:
         core.DROP_FENSTER.pop("Nacht DE", None)
+
+    # ── Gelernte Drop-Fenster aus Waechter-Logs ─────────────────────
+    def lern_ts(tag, h, m=0):
+        return time.mktime((2026, 11, tag, h, m, 0, 0, 0, -1))
+
+    lern_checks = []
+    for tag in (16, 17):
+        for h in (10, 10, 11, 11, 11):
+            lern_checks.append({"typ": "check", "shop": "PS Direct DE",
+                                "klass": "hit", "ts": lern_ts(tag, h)})
+    # Ein einzelner Treffer um 03:00 darf kein Nachtband erzeugen.
+    lern_checks.append({"typ": "check", "shop": "PS Direct DE",
+                        "klass": "hit", "ts": lern_ts(16, 3)})
+    gelernt = core.lerne_drop_fenster(lern_checks)
+    check("Lernfenster Band",
+          gelernt["shops"]["PS Direct DE"]["fenster"], [[10, 0, 12, 0]])
+    check("Lernfenster Treffer",
+          gelernt["shops"]["PS Direct DE"]["hits"], 11)
+    check("Lernfenster Tage",
+          gelernt["shops"]["PS Direct DE"]["tage"], 2)
+    core.setze_drop_fenster(gelernt["shops"])
+    check("Lernfenster aktiv 10:30",
+          core.im_drop_fenster("PS Direct DE", lern_ts(16, 10, 30)), True)
+    check("Lernfenster zu 13:00",
+          core.im_drop_fenster("PS Direct DE", lern_ts(16, 13, 0)), False)
+    check("Lernfenster anderer Shop bleibt Default",
+          core.im_drop_fenster("PS Direct AT", lern_ts(16, 14, 0)), True)
+    core.reset_gelernte_drop_fenster()
+    check("Lernfenster Reset Default",
+          core.im_drop_fenster("PS Direct DE", lern_ts(16, 14, 0)), True)
+    check("Lernfenster zu wenig Hits",
+          core.lerne_drop_fenster(lern_checks[:5])["shops"], {})
+    ein_tag = [{"typ": "check", "shop": "PS Direct DE", "klass": "hit",
+                "ts": lern_ts(16, 10 + i % 2)} for i in range(6)]
+    check("Lernfenster ein Tag",
+          core.lerne_drop_fenster(ein_tag)["shops"], {})
+
+    tmp_fenster = tempfile.mkdtemp(prefix="ps5pro-fenster-")
+    try:
+        fenster_pfad = os.path.join(tmp_fenster, core.DROP_FENSTER_LERN_FILE)
+        check("Lernfenster speichern",
+              core.drop_fenster_speichern(fenster_pfad, gelernt), True)
+        check("Lernfenster laden",
+              core.drop_fenster_laden(fenster_pfad)["shops"],
+              gelernt["shops"])
+    finally:
+        shutil.rmtree(tmp_fenster, ignore_errors=True)
+
+    # Der Waechter nimmt PS Direct nur im gelernten Band in den dichten Takt.
+    import cloud_watcher.watcher as watcher_mod
+
+    class _TaktKonfig:
+        takt = 15
+        takt_neben = 30
+
+    alt_jitter = watcher_mod._jitter
+    watcher_mod._jitter = lambda name: 0.0
+    try:
+        core.setze_drop_fenster(gelernt["shops"])
+        check("Waechter Takt im Lernfenster",
+              watcher_mod.takt_sekunden("PS Direct DE", {}, _TaktKonfig(),
+                                        lern_ts(16, 10, 30)), 15)
+        check("Waechter Takt ausserhalb",
+              watcher_mod.takt_sekunden("PS Direct DE", {}, _TaktKonfig(),
+                                        lern_ts(16, 13, 0)), 30)
+        check("Waechter Takt Neben-Shop",
+              watcher_mod.takt_sekunden("Alternate DE", {}, _TaktKonfig(),
+                                        lern_ts(16, 10, 30)), 30)
+    finally:
+        watcher_mod._jitter = alt_jitter
+        core.reset_gelernte_drop_fenster()
+
+    tmp_logs = tempfile.mkdtemp(prefix="ps5pro-watch-fenster-")
+    alt_log = watcher_mod.log
+    watcher_mod.log = lambda daten: None
+    try:
+        with open(os.path.join(tmp_logs, "watcher-log-2026-11-16.ndjson"),
+                  "w", encoding="utf-8") as datei:
+            for tag in (16, 17):
+                for h in (10, 11, 11):
+                    datei.write(json.dumps({"typ": "check",
+                                            "shop": "PS Direct DE",
+                                            "klass": "hit",
+                                            "ts": lern_ts(tag, h)}) + "\n")
+        klasse = type("K", (), {"data_dir": tmp_logs})
+        aus_log = watcher_mod.drop_fenster_lernen(klasse, None,
+                                                 lern_ts(18, 12))
+        check("Waechter Lernfenster aus Log",
+              aus_log["shops"]["PS Direct DE"]["fenster"], [[10, 0, 12, 0]])
+        check("Waechter Lernfenster Datei",
+              os.path.exists(os.path.join(tmp_logs,
+                                          core.DROP_FENSTER_LERN_FILE)), True)
+    finally:
+        watcher_mod.log = alt_log
+        core.reset_gelernte_drop_fenster()
+        shutil.rmtree(tmp_logs, ignore_errors=True)
 
     im_fenster = {"PS Direct DE": {"last_status": "hit", "last_ts": ts(9, 59)}}
     check("Intervall im Fenster 10 s",
@@ -2857,8 +2979,14 @@ def cloud_watcher_tests():
           cw.schatten_aktiv(z, 1000.0 + 49 * 3600, True), True)
 
     ruhig = {"status": "unavail", "fail_streak": 0}
+    takt_ts = time.mktime((2026, 11, 16, 10, 0, 0, 0, 0, -1))
     check("cloud takt mit jitter",
-          15 <= cw.takt_sekunden("PS Direct DE", ruhig, k) <= 17, True)
+          15 <= cw.takt_sekunden("PS Direct DE", ruhig, k, takt_ts) <= 17,
+          True)
+    check("cloud takt ausserhalb jitter",
+          30 <= cw.takt_sekunden(
+              "PS Direct DE", ruhig, k,
+              time.mktime((2026, 11, 16, 19, 0, 0, 0, 0, -1))) <= 34, True)
     check("cloud takt neben mit jitter",
           30 <= cw.takt_sekunden("Alternate DE", ruhig, k) <= 34, True)
     check("cloud takt sperre",
@@ -3989,6 +4117,73 @@ def watcher_report_tests():
     check("report text p95", "p95 500 ms" in text, True)
     check("report text 304", "304-Quote: 66.7 %" in text, True)
     check("report perzentil", wr.perzentil([10, 20, 30, 40], 0.95), 40)
+
+    # Alarm-Latenz: Erkennung (hit-Check) bis erster Zustellversuch. Der
+    # Schattenalarm hat keine Outbox-Zeile und wird mit sich selbst gepaart;
+    # der Live-Alarm mit der ersten Outbox-Zeile seiner outbox_id.
+    lat_zeilen = [
+        {"typ": "check", "ts": 1000.0, "shop": "PS Direct DE", "klass": "hit"},
+        {"typ": "alarm", "ts": 1000.4, "shop": "PS Direct DE",
+         "aktion": "wuerde_senden", "event": "restock"},
+        {"typ": "check", "ts": 2000.0, "shop": "PS Direct DE", "klass": "hit"},
+        {"typ": "alarm", "ts": 2000.2, "shop": "PS Direct DE",
+         "aktion": "eingereiht", "event": "restock", "outbox_id": "ob1"},
+        {"typ": "outbox", "ts": 2002.2, "id": "ob1", "aktion": "retry"},
+        {"typ": "outbox", "ts": 2005.0, "id": "ob1", "aktion": "gesendet"},
+        {"typ": "check", "ts": 3000.0, "shop": "PS Direct AT", "klass": "hit"},
+        {"typ": "alarm", "ts": 3000.1, "shop": "PS Direct AT",
+         "aktion": "eingereiht", "event": "new", "outbox_id": "ob2"},
+        {"typ": "alarm", "ts": 4000.0, "shop": "PS Direct DE",
+         "aktion": "unterdrueckt"},
+        {"typ": "alarm", "ts": 5000.0, "shop": "Otto DE",
+         "aktion": "wuerde_senden"},
+    ]
+    lat = wr.bericht(lat_zeilen, 4.40)["alarm_latenz"]
+    check("report latenz gemessen", lat["gemessen"], 2)
+    check("report latenz schatten", lat["p50"], 400)
+    check("report latenz erster versuch", lat["p95"], 2200)
+    check("report latenz max", lat["max"], 2200)
+    check("report latenz ohne versuch", lat["ohne_versuch"], 1)
+    check("report latenz ohne check", lat["ohne_check"], 1)
+    lat_text = wr._text(wr.bericht(lat_zeilen, 4.40))
+    check("report text latenz",
+          "Alarm-Latenz: p50 400 ms | p95 2200 ms" in lat_text, True)
+
+    # Fehlalarm-Quote: nur der naechste Check binnen zehn Minuten zaehlt.
+    # unavail widerlegt, hit/expensive bestaetigen, parser/chance sind unklar.
+    fq_zeilen = [
+        {"typ": "alarm", "ts": 1000.0, "shop": "PS Direct DE",
+         "aktion": "wuerde_senden", "event": "restock"},
+        {"typ": "check", "ts": 1300.0, "shop": "PS Direct DE", "klass": "unavail"},
+        {"typ": "alarm", "ts": 2000.0, "shop": "PS Direct DE",
+         "aktion": "eingereiht", "event": "restock"},
+        {"typ": "check", "ts": 2100.0, "shop": "PS Direct DE", "klass": "hit"},
+        {"typ": "alarm", "ts": 3000.0, "shop": "PS Direct AT",
+         "aktion": "wuerde_senden", "event": "new"},
+        {"typ": "check", "ts": 3300.0, "shop": "PS Direct AT", "klass": "parser"},
+        {"typ": "alarm", "ts": 4000.0, "shop": "PS Direct DE",
+         "aktion": "wuerde_senden", "event": "restock"},
+        {"typ": "check", "ts": 4700.0, "shop": "PS Direct DE", "klass": "unavail"},
+        {"typ": "alarm", "ts": 5000.0, "shop": "PS Direct AT",
+         "aktion": "wuerde_senden", "event": "new"},
+        {"typ": "check", "ts": 5100.0, "shop": "PS Direct AT", "klass": "chance"},
+        {"typ": "alarm", "ts": 6000.0, "shop": "PS Direct DE",
+         "aktion": "unterdrueckt"},
+        {"typ": "alarm", "ts": 7000.0, "shop": "PS Direct DE",
+         "aktion": "wuerde_senden", "event": "restock"},
+        {"typ": "check", "ts": 7050.0, "shop": "PS Direct DE", "klass": "expensive"},
+    ]
+    fq = wr.bericht(fq_zeilen, 4.40)["fehlalarme"]
+    check("report fehlalarm gesamt", fq["gesamt"], 6)
+    check("report fehlalarm widerlegt", fq["widerlegt"], 1)
+    check("report fehlalarm bestaetigt", fq["bestaetigt"], 2)
+    check("report fehlalarm unklar", fq["unklar"], 2)
+    check("report fehlalarm offen", fq["offen"], 1)
+    check("report fehlalarm geprueft", fq["geprueft"], 3)
+    check("report fehlalarm quote", fq["quote"], 33.3)
+    fq_text = wr._text(wr.bericht(fq_zeilen, 4.40))
+    check("report text fehlalarm",
+          "Fehlalarme: 1 von 3 geprueft (33.3 %)" in fq_text, True)
 
 
 if __name__ == "__main__":
