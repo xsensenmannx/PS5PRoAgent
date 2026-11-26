@@ -1,6 +1,7 @@
 # Der Waechter braucht scan_core.py, cloud_watcher/ und das Report-Tool.
 *
 !scan_core.py
+!shop_config.json
 !cloud_watcher/
 !cloud_watcher/**
 !tools/
