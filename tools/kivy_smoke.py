@@ -157,6 +157,7 @@ class SmokeApp(App):
             self.challenge_hint()
             self.result_list()
             self.setup_center()
+            self.fenster_automatik()
             self.onboarding()
             self.detail()
             self.verlauf()
@@ -461,6 +462,39 @@ class SmokeApp(App):
               scaled_hint.width >= scaled_size[0] and
               scaled_hint.height >= scaled_size[1], True)
 
+    def fenster_automatik(self):
+        """09:00-18:00: automatisch an, am Fensterende wieder aus."""
+        ui = self.ui
+        starts = []
+        echt_start, echt_stop = ui._fast_start, ui._fast_stop
+        alt_fenster = main.im_drop_fenster
+        alt = (ui.schnellscan, ui._fast_auto, ui._fenster_im)
+        ui._fast_start = lambda: starts.append("start")
+        ui._fast_stop = lambda: starts.append("stop")
+        try:
+            main.im_drop_fenster = lambda name, jetzt=None: True
+            ui.schnellscan = False; ui._fast_auto = False; ui._fenster_im = False
+            ui._fenster_pruefen(0, erster=True)
+            check("Fenster: Schnellscan automatisch an", ui.schnellscan, True)
+            check("Fenster: Auto markiert", ui._fast_auto, True)
+            check("Fenster: Start gerufen", starts, ["start"])
+            # Handeingriff: Ausschalten im Fenster bleibt aus.
+            ui.schnellscan = False; ui._fast_auto = False
+            ui._fenster_pruefen(0)
+            check("Fenster: kein Neustart nach Handeingriff", ui.schnellscan, False)
+            # Fensterende beendet nur den automatischen Lauf.
+            main.im_drop_fenster = lambda name, jetzt=None: False
+            ui.schnellscan = True; ui._fast_auto = True; ui._fenster_im = True
+            starts.clear()
+            ui._fenster_pruefen(0)
+            check("Fenster: Automatik endet", ui.schnellscan, False)
+            check("Fenster: Stop gerufen", starts, ["stop"])
+        finally:
+            main.im_drop_fenster = alt_fenster
+            ui.schnellscan, ui._fast_auto, ui._fenster_im = alt
+            ui._fast_start, ui._fast_stop = echt_start, echt_stop
+            ui._update_radar_hud()
+
     def setup_center(self):
         # Eine gescheiterte Zustellung muss in SETUP stehen, nicht nur im Toast:
         # genau dieser Eintrag bleibt auch nach einem Neustart sichtbar.
@@ -478,6 +512,17 @@ class SmokeApp(App):
         check("Setup: Webhook-Fehlschlag sichtbar",
               "LETZTE ZUSTELLUNG" in text and "FEHLGESCHLAGEN" in text, True)
         check("Setup: Schnellscan", "SCHNELLSCAN" in text, True)
+        check("Setup: BG WLAN-Option", "BG NUR WLAN" in text, True)
+        check("Setup: BG Lade-Option", "BG NUR LADEN" in text, True)
+        # Die Option muss nicht nur da sein, sondern auch schalten.
+        self.button(p, "BG NUR WLAN   \u00b7   AUS").dispatch("on_release")
+        self.pump()
+        check("Setup: WLAN-Option an", self.ui.bg_wlan_only, True)
+        check("Setup: WLAN-Text an",
+              self.button(p, "BG NUR WLAN   \u00b7   AN") is not None, True)
+        self.button(p, "BG NUR WLAN   \u00b7   AN").dispatch("on_release")
+        self.pump()
+        check("Setup: WLAN-Option wieder aus", self.ui.bg_wlan_only, False)
         felder = [w for w in p.walk() if isinstance(w, main.TextInput)]
         check("Setup: Webhook-Feld", len(felder) >= 1, True)
         if felder:
@@ -1048,6 +1093,9 @@ def main_test():
     main.open_url = lambda url: (OPEN_URLS.append(url), True)[1]
     main.share_text = lambda *a, **k: True
     main.MainUI._shop_config_bg = lambda self, force=False: 0
+    # Sonst startet die Fenster-Automatik je nach CI-Uhrzeit einen echten
+    # Scan. Den Fensterfall prueft fenster_automatik() mit eigener Uhrzeit.
+    main.im_drop_fenster = lambda name, jetzt=None: False
 
     app = SmokeApp()
     try:
