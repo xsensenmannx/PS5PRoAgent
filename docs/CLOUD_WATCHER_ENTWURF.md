@@ -3,9 +3,10 @@
 **Stand:** 21.11.2026 · **Status:** P0 umgesetzt in `cloud_watcher/` (Schattenbetrieb)
 **Baut auf:** `docs/KONZEPT.md` §5/§6 (v1.6) und `docs/RELEASE_1_5.md` §2
 
-> **Umsetzung (21.11.2026):** Der P0-Wächter liegt in `cloud_watcher/` und
-> startet mit zwei Shops (PS Direct DE/AT), 45 s im Fenster und 48 h
-> Schattenbetrieb. Dazu sind Alarm-Outbox mit optionalem Ops-Kanal, Preflight,
+> **Umsetzung (25.11.2026):** Der P0-Wächter liegt in `cloud_watcher/` und
+> startet mit drei Shops: PS Direct DE/AT im 15-s-Takt und Alternate DE im
+> 30-s-Takt, dazu 48 h Schattenbetrieb. Die Taktzahlen weiter
+> unten sind der ursprüngliche Plan. Dazu sind Alarm-Outbox mit optionalem Ops-Kanal, Preflight,
 > Tageszusammenfassung, Preistoleranz sowie Challenge- und Request-Budget
 > umgesetzt. Der Sechs-Shop-Ausbau bleibt P1; die Grenzen in diesem Dokument
 > gelten weiter.
@@ -65,14 +66,14 @@ eine spätere Option (P2), nicht der Anfang.
 
 | Shop | Land | Takt | Warum | Stand vor Aufnahme |
 |---|---|---|---|---|
-| PS Direct DE | DE | 30 s in 09:00–18:00, sonst 180 s | Sony-Drops, in der App bereits 10-s-Fenster | URL geprüft 20.11.2026: 200 ohne Redirect, Canonical = Ziel; alte direct-URL → 301 |
+| PS Direct DE | DE | 30 s rund um die Uhr | Sony-Drops, in der App bereits 10-s-Fenster | URL geprüft 20.11.2026: 200 ohne Redirect, Canonical = Ziel; alte direct-URL → 301 |
 | Amazon DE | DE | 90 s | größter Marktplatz, Parser belegt | 2,4 MB, Kaufbox-Pfad, Messung 17.11.2026 |
 | MediaMarkt DE | DE | 60 s | Schübe, hohe Nachfrage | Parser vorhanden, Aufnahme-Gate offen |
 | Saturn DE | DE | 60 s | gleiche Plattform wie MediaMarkt | Aufnahme-Gate offen |
 | Alternate DE | DE | 120 s | Fachhändler, strukturierte Daten erwartet | Aufnahme-Gate offen |
 | Amazon AT | AT | 120 s | AT-Abdeckung ohne zweiten Parser | Produktseite belegt, 17.11.2026 |
 
-**P1, nach dem Schattenbetrieb:** PS Direct AT (30 s im Fenster) und
+**P1, nach dem Schattenbetrieb:** PS Direct AT (30 s rund um die Uhr) und
 MediaMarkt AT (120 s). Damit sind es acht Shops.
 
 ### 3.2 Bewusst nicht in der Startseite
@@ -180,6 +181,14 @@ Der Webhook-URL wird **nie** geloggt, nur über `redact_url()` als
 
 Dazu: Jitter ±15 % pro Shop (stabil über `crc32`, nicht `hash`), maximal zwei
 gleichzeitige Abrufe, keine Überlappung von Runden.
+
+> Umgesetzt ist seit 25.11.2026 ein einheitlicher 30-s-Takt rund um die Uhr
+> (`cloud_watcher/README.md`). Der öffentliche Bestell.bar-Feed belegt einen
+> PS-Direct-Drop am 20.11.2026, der im Minutenraster um 22:49 bestellbar und
+> 22:50 wieder ausverkauft war – also außerhalb des hier geplanten
+> 9–18-Fensters. Ein Poll-Takt von Bestell.bar ist daraus nicht ableitbar;
+> 30 s sind unsere Wahl, um ein Minutfenster sicher zu treffen.
+> Die 180-s-Werte in diesem Entwurf sind der ursprüngliche Plan.
 
 ### 5.2 Requests pro Tag (sechs Shops)
 

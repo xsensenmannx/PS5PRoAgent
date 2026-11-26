@@ -1,9 +1,17 @@
 # Cloud-Wächter (P0)
 
-Ein kleiner, dauerhaft laufender Prozess für **PS Direct DE** und **PS Direct
-AT**. Er prüft die öffentlichen Produktseiten im Fenster **09:00–18:00**
-(Europe/Berlin) alle **30–60 s**, außerhalb ruhiger, und meldet einen
-bestätigten Treffer über den vorhandenen Webhook-Weg (ntfy, Telegram, Discord).
+Ein kleiner, dauerhaft laufender Prozess für **PS Direct DE/AT** und **Alternate
+DE**. PS Direct prüft er rund um die Uhr alle **15 s**, Alternate DE alle
+**30 s**. Das ist eine eigene Wahl, kein
+gemessener Gleichstand: Der öffentliche Bestell.bar-Feed belegt für den
+20.11.2026 einen PS-Direct-Drop, der im Minutenraster um **22:49** bestellbar
+und **22:50** wieder ausverkauft war („1 Min. verfügbar“) – also außerhalb des
+Fensters **09:00–18:00** (Europe/Berlin). Wie Bestell.bar selbst pollt, lässt
+sich daraus nicht ableiten; 15 s halbieren die maximale Verzögerung gegenüber
+30 s und kosten mit zwei PS-Direct-Shops 8 Abrufe/Minute. Alternate DE läuft
+mit 30 s (2 Abrufe/Minute), zusammen 10 von 12.
+Er meldet einen bestätigten Treffer über den vorhandenen Webhook-Weg (ntfy,
+Telegram, Discord).
 
 Der Wächter ist **outbound-only**: kein Port, kein Konto, keine App-Änderung.
 Er nutzt `scan_core.py` aus diesem Repository, damit Preis-, JSON-LD- und
@@ -76,15 +84,15 @@ Zustand.
 
 ### Alarmweg einmal testen
 
-Der direkte Kanal-Test sendet sofort, ohne auf einen Treffer zu warten. Er
-nutzt denselben Transport und dasselbe Nachrichtenformat wie der Wächter:
+`--test-alarm` schickt eine klar markierte Testnachricht durch den echten
+Outbox-Weg und meldet das Ergebnis (Details unter „Testalarm“):
 
 ```bash
 WATCH_WEBHOOK_URL='https://ntfy.sh/<geheimer-topic>' \
-  python -c "import os,scan_core as c; u=os.environ['WATCH_WEBHOOK_URL']; print(c.webhook_senden(u,c.webhook_preset(u),'PS5 Pro Waechter','Testalarm','https://example.invalid'))"
+  python -m cloud_watcher.watcher --test-alarm
 ```
 
-`(True, 'HTTP 200')` bedeutet angekommen. Für einen kompletten Wächterlauf
+Für einen kompletten Wächterlauf
 ohne 48-h-Wartezeit kann man die Frist auf einem Wegwerf-Datenverzeichnis
 überspringen; eine Zustellung kommt dabei aber nur bei einem echten Ereignis:
 
@@ -178,26 +186,64 @@ der Container nicht.
 
 | Variable | Standard | Bedeutung |
 |---|---|---|
-| `WATCH_SHOPS` | `PS Direct DE,PS Direct AT` | Exakte Namen aus `scan_core.HAENDLER` |
-| `WATCH_WINDOW_TAKT` | `45` | Sekunden im Fenster, auf 30–60 begrenzt |
-| `WATCH_TAKT_AUSSEN` | `180` | Sekunden außerhalb, mindestens 60 |
+| `WATCH_SHOPS` | `PS Direct DE,PS Direct AT,Alternate DE` | Exakte Namen aus `scan_core.HAENDLER` |
+| `WATCH_TAKT` | `15` | Sekunden für PS Direct, auf 15–3600 begrenzt |
+| `WATCH_TAKT_NEBEN` | `30` | Sekunden für die Zusatzshops, auf 30–3600 begrenzt |
 | `WATCH_SHADOW` | `1` | `0` erst nach dem Schattenlauf |
 | `WATCH_SHADOW_HOURS` | `48` | Frist beim ersten Start; wird nie verkürzt |
 | `WATCH_MAX_PREIS` | `900` | Preisdeckel in Euro; AT erbt DE |
 | `WATCH_PREIS_TOLERANZ` | `1` | Neupreis-Alarm erst ab dieser Senkung in Euro gegenüber dem letzten Alarm; Restock bleibt unberührt |
 | `WATCH_MAX_REQ_MIN` | `12` | Globales Request-Budget pro Minute; PS Direct zuerst |
-| `WATCH_TZ` | `Europe/Berlin` | Fenster und Log-Zeit |
+| `WATCH_TZ` | `Europe/Berlin` | Log-Zeit und Tagesgrenze |
 | `WATCH_DATA_DIR` | `/data` | Zustand, Health, HTTP-Cache, NDJSON-Logs |
 | `WATCH_WEBHOOK_URL` | leer | **Geheim.** ntfy-/Telegram-/Discord-URL |
 | `WATCH_WEBHOOK_PRESET` | automatisch | `ntfy`, `telegram`, `discord`, `generisch` |
 | `WATCH_OPS_WEBHOOK_URL` | leer | Optionaler Kanal nur für den Systemalarm; nur HTTPS, sonst Produkt-Webhook; geheim |
 | `WATCH_HEARTBEAT_URL` | leer | Optionaler Lebenszeichen-Ping alle 60 s, geheim |
 
+PS Direct läuft mit 15 s (**8 Abrufe/Minute** für zwei Shops), Alternate DE mit
+30 s (**2**). Das sind **10 von 12** Abrufen pro Minute; bei knappem Budget bedient der Wächter zuerst PS Direct.
+Die früheren Variablen `WATCH_WINDOW_TAKT` und `WATCH_TAKT_AUSSEN` entfallen;
+`WATCH_TAKT` gilt rund um die Uhr, `WATCH_TAKT_NEBEN` für alle Shops außerhalb
+von PS Direct.
+
 `WATCH_MAX_REQ_MIN` zählt echte Abrufe im gleitenden 60-Sekunden-Fenster; ist
 es erschöpft, wartet der Wächter kurz, statt heiß zu drehen, und bedient bei
 knappem Budget zuerst PS Direct DE/AT. `WATCH_PREIS_TOLERANZ` gilt nur für
 neue Preise und misst gegen den Preis des letzten Alarms: Mehrere kleine
 Senkungen summieren sich, ein Restock meldet immer.
+
+### Tagesbericht
+
+Zum lokalen Tageswechsel (00:00 `WATCH_TZ`) schickt der Wächter **einmal pro
+Tag** eine Zusammenfassung über den Ops-Kanal (`WATCH_OPS_WEBHOOK_URL`); ohne
+Ops-Kanal geht sie an den Produkt-Webhook. Inhalt: Checks, Treffer,
+Challenges, Parser-/Netzfehler, Erfolgsquote, Anfragen, **p50/p95** der
+Abrufdauer, **Lücken über zwei Takte** (Anzahl, Summe, längste), Alarme,
+Outbox-Stand sowie die Canary-Zeilen (Fehlerserien, Kaufbox-Drift). Das ist
+eine Statusmeldung, kein Alarm — sie geht auch im Schattenmodus raus.
+
+Eine **Lücke** ist der Abstand zwischen zwei Prüfungen desselben Shops, der
+über dem Doppelten seines Takts liegt. Geplante Pausen zählen mit; ihre
+Ursache steht in den Zählern `challenge`, `fehler` und `parser`. Schlägt der
+Versand fehl, versucht es der Wächter dreimal im Abstand von fünf Minuten und
+vermerkt danach `tag_bericht` mit `aufgegeben` im NDJSON-Log.
+
+### Parser-Canary
+
+Zwei stille Ausfälle sollen auffallen, ohne einen einzigen Extra-Abruf:
+
+- **Fehlerserie:** Drei Parser- oder Netzfehler in Folge (`error`/`parser`,
+  ohne Challenge dazwischen) tragen den Shop als `Canary: …` in den
+  Tagesbericht. Gemeldet wird gesammelt einmal pro Tag über den Ops-Kanal;
+  ein erfolgreicher Abruf setzt die Serie zurück.
+- **Kaufbox-Fingerprint:** Aus der ohnehin geladenen Seite hasht der Scan die
+  Reihenfolge der Preis-Marker (`corePrice_feature_div`, `a-price-whole`,
+  `a-offscreen`, `availability`, JSON-LD …) — ohne Preise, Bestand oder
+  Tokens. Ändert sich der Hash, steht `markup_drift` mit altem und neuem
+  Fingerprint im NDJSON-Log und der Shop erscheint unter `Kaufbox-Drift`.
+  Fortgeschrieben wird der Fingerprint nur bei einem Abruf mit Preis; eine
+  gesperrte oder kaputte Seite erzeugt keinen Drift.
 
 ### ntfy
 
@@ -253,6 +299,7 @@ Beispiele (eine Zeile pro Ereignis):
   Folge für 60 Minuten pausiert.
 - `runde` nennt `budget_verbraucht` und `budget_max`.
 - `heartbeat` zeigt nur `ok`/`info`, nie die URL.
+- `testalarm` zeigt `ok` und den Grund eines fehlgeschlagenen Testalarms.
 
 Die Zeilen werden zusätzlich im Datenverzeichnis gespeichert:
 `watcher-log-YYYY-MM-DD.ndjson`, Tagesgrenze nach `WATCH_TZ`. Pro Tag sind
@@ -276,16 +323,23 @@ Budgetverbrauch. Der Docker-Healthcheck liest nur diese Datei und meldet den
 Container nach 180 s ohne frische Wachzeit als unhealthy. Damit ist ein
 hängender Loop von einer gewollten Challenge-Pause unterscheidbar: Der
 Heartbeat pingt alle 60 s unabhängig von fälligen Shops, die Statusdatei
-bleibt frisch.
+bleibt frisch. Der Ping meldet `ok runden=… offen=… fehler=… verfallen=…
+budget=…/…`, damit ein kaputter Alarmweg nicht als „ok“ durchgeht.
 
 ### Ausfallsicherung der Live-Alarme
 
 Ein Live-Alarm wird zuerst als Outbox-Eintrag im Zustand gespeichert und erst
 dann gesendet. Schlägt die Zustellung fehl, versucht der Wächter es nach
-**30 s, 2 min, 10 min, 30 min und 2 h** erneut. Nach **sechs Versuchen** bleibt
-der Eintrag als `failed` sichtbar und es wird einmalig ein Systemalarm über den
-konfigurierten Webhook versucht. HTTP-4xx (außer 408/425/429) beendet die
-Zustellung sofort. Im Schattenmodus entstehen keine Outbox-Einträge.
+**30 s, 2 min und 10 min** erneut.
+
+Ein Treffer-Alarm **verfällt nach 10 Minuten**: Ein „verfügbar“, das eine
+Stunde später ankommt, ist bei einem Fenster von einer Minute eine
+Falschmeldung. Solche Einträge werden als `expired` mit Grund `zu_alt`
+markiert, nicht mehr gesendet und im Tagesbericht als „verfallen“ gezählt.
+Die Frist gilt nur für `new`/`restock`; Testalarm und Systemalarm sind
+ausgenommen. HTTP-4xx (außer 408/425/429) beendet die Zustellung sofort als
+`failed`, und es wird einmalig ein Systemalarm über den konfigurierten
+Webhook versucht. Im Schattenmodus entstehen keine Outbox-Einträge.
 
 Ist zusätzlich `WATCH_OPS_WEBHOOK_URL` gesetzt, geht **nur** dieser
 Systemalarm an den Ops-Kanal. Ein endgültig fehlgeschlagener Produkt-Webhook
@@ -295,6 +349,27 @@ Produkt-Webhook. Eine Ops-URL ohne vollständiges HTTPS gilt als nicht gesetzt,
 dann greift der Produkt-Webhook. Schlägt der Systemalarm fehl, wird er bis zu
 dreimal versucht (nach 2 und 10 Minuten) und erst danach endgültig als
 fehlgeschlagen markiert. Auch die Ops-URL wird nie geloggt.
+
+### Testalarm
+
+Der erste echte Alarm soll nicht der Test sein. Dieses Kommando schickt eine
+klar markierte Nachricht (`Waechter Testalarm (kein Treffer)`) durch denselben
+Weg wie ein Treffer: vormerken, im Zustand persistieren, senden, Ergebnis
+melden. Es funktioniert auch im Schattenmodus, weil es kein Produkttreffer ist.
+
+```bash
+python -m cloud_watcher.watcher --test-alarm
+docker compose exec watcher python -m cloud_watcher.watcher --test-alarm
+```
+
+Exit-Code 0 heißt zugestellt, 1 heißt fehlgeschlagen; der Grund steht auf
+stderr, ohne URL. Ein Fehlschlag bleibt nicht als Retry in der Outbox, ein
+erfolgreicher Test bleibt als `sent` sichtbar und wird später aufgeräumt.
+
+```
+testalarm: {"typ": "testalarm", "ok": true, "info": "gesendet"}
+outbox:    {"aktion": "gesendet", "shop": "Testalarm", ...}
+```
 
 ### Schattenlauf auswerten
 

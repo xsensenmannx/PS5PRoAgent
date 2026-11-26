@@ -66,10 +66,10 @@ Signal, Preistiefs und den Preisverlauf:
 * **Parallel-Scan** über 42 Shops (DE + AT) mit 6 Threads, Retry und wechselnden
   User-Agents.
 * **Preis-Erkennung** über JSON-LD (`schema.org/Product`, auch verschachtelte
-  `priceSpecification` und Angebotslisten), Meta-Tags/Microdata und Text-Fallback —
+  `priceSpecification` und Angebotslisten), das Produkt-Meta der Seite (`product:price:amount` / `og:price:amount`; die Amazon-Kaufbox hat einen eigenen Pfad) —
   inklusive GTIN/EAN, Bundle-Filter und Marketplace-Kennzeichnung —
   inklusive Filter gegen Zubehör (DualSense Edge, Portal, Laufwerk …) und gegen alles,
-  was nicht die 2-TB-Konsole ist. Bei mehreren Angeboten gewinnt das günstigste
+  was nicht die 2-TB-Konsole ist. Eine Euro-Zahl aus dem sichtbaren Text oder aus Produktkarten-Markup zählt bewusst nicht als Preis: sie gehörte auf den geprüften Seiten nie zur Konsole. Bei mehreren Angeboten gewinnt das günstigste
   neue Angebot vor Gebrauchtware; Fremdwährungen werden nicht als Euro gezählt.
 * **Treffer-Logik**: „VERFÜGBAR" nur unter deiner Preisgrenze (700/800/900 €/offen
   für Deutschland, eigener Deckel für Österreich, der sonst den DE-Wert erbt),
@@ -264,11 +264,16 @@ xvfb-run -a python3 tools/kivy_smoke.py
 Für jeden der 42 Shops liegt eine kleine Fixture in `tools/fixtures/`; die
 Suite prüft damit Preis, Produkt, Zustand, Verfügbarkeit und Lieferstatus,
 ohne eine Shop-Seite zu laden. Zusätzlich decken die Fixtures JSON-LD, Meta-Tags,
-Text-Fallback, Vorbestellung, Gebrauchtware und Ausverkauf ab. Fehlt ein Shop
+Amazon-Kaufbox, Vorbestellung, Gebrauchtware und Ausverkauf ab. Fehlt ein Shop
 oder ändert sich ein Parser unerwartet, schlägt `tools/selftest.py` vor dem
 Build fehl.
 
 Die eingecheckten Fixtures sind bewusst kleine, lizenzfreie Vertragsausschnitte.
+Ihre Herkunft steht in der Datei, und beides schließt sich aus: eine echte Aufnahme
+trägt `captured` mit Datum, ein von Hand gebauter Ausschnitt `"synthetisch": true`
+und kein Datum. Nur `shop-e-tec-at`, `shop-ps-direct-de` und `shop-ps-direct-at`
+sind echte Aufnahmen; alle übrigen, auch die 649-€-Platzhalter für Gebrauchtware,
+sind synthetisch. Deren Preise sind Testwerte, keine Shop-Preise.
 Eine echte Seite lässt sich jederzeit manuell aufnehmen:
 
 ```bash

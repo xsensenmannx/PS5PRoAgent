@@ -34,7 +34,7 @@ source.exclude_dirs = bin, .buildozer, __pycache__, _verify, .github, .git, .ven
 source.exclude_patterns = ps5pro_settings.json, ps5pro_history.json, *.md, *.log
 
 # (str) Application versioning (method 1)
-version = 1.5.4
+version = 1.5.5
 
 # (str) Application versioning (method 2)
 # version.regex = __version__ = ['"](.*)['"]
@@ -344,7 +344,7 @@ android.archs = arm64-v8a
 # v1.1 ergibt also 10100. Der Wert muss bei jedem Update steigen; aus dem Tag
 # abgeleitet kann er nicht mehr vergessen werden. Der lokale Wert muss zur
 # Version passen; der Workflow ueberschreibt ihn vor dem Build.
-android.numeric_version = 10504
+android.numeric_version = 10505
 
 
 # (bool) enables Android auto backup feature (Android API >=23)

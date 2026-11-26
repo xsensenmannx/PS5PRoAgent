@@ -6,6 +6,10 @@ Vertrag festhaelt, den scan_einen spaeter auswertet. Er speichert nur Titel,
 relevante Meta-Tags, JSON-LD und Text-/Attribut-Ausschnitte, nicht die komplette
 Shop-Seite.
 
+Neu geschriebene Fixtures tragen `captured` mit Datum; von Hand
+gepflegte Vertragsausschnitte tragen stattdessen `"synthetisch": true` und kein
+Datum. Der Selftest laesst nur eines von beidem zu.
+
 Beispiele:
 
     python3 tools/capture_fixture.py --shop "Amazon DE"
@@ -48,6 +52,8 @@ JSONLD_RE = re.compile(
     re.I | re.S)
 META_RE = re.compile(r"<meta\b[^>]*>", re.I)
 TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.I | re.S)
+H1_RE = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.I | re.S)
+TAG_RE = re.compile(r"<[^>]+>")
 RELEVANT_META_RE = re.compile(
     r"(?:price|preis|product|availability|og:title|og:type|twitter:title)", re.I)
 RELEVANT_TAG_RE = re.compile(
@@ -139,11 +145,19 @@ def minimiere_html(html, full=False):
         return html[:MAX_FULL_BYTES]
 
     parts = []
+    titel = ""
     m = TITLE_RE.search(html)
     if m:
         titel = re.sub(r"\s+", " ", html_lib.unescape(m.group(1))).strip()
         if titel:
             parts.append("<title>%s</title>" % html_lib.escape(titel))
+    # Die h1 entscheidet mit, wenn <title> nur den Shop nennt; sie muss in
+    # der Fixture stehen, sonst weicht der Offline-Test von der echten Seite ab.
+    m = H1_RE.search(html)
+    if m:
+        h1 = " ".join(html_lib.unescape(TAG_RE.sub(" ", m.group(1))).split())
+        if h1 and h1 != titel:
+            parts.append("<h1>%s</h1>" % html_lib.escape(h1))
 
     meta_count = 0
     for m in META_RE.finditer(html):

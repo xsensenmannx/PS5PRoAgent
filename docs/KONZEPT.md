@@ -63,7 +63,7 @@ Verlauf-Ticker und Erfolge (v1.5).
 Bereits gebaut und getestet:
 
 * 42 Shops (DE + AT), 6 Threads, Retry mit wechselnden User-Agents, ETag/304-Cache.
-* Preis-Erkennung über JSON-LD, Meta/Microdata und Text-Fallback, inklusive
+* Preis-Erkennung über JSON-LD und das Produkt-Meta der Seite (`product:price:amount`/`og:price:amount`; kein Preis aus Seitentext oder Kartenmarkup), inklusive
   Zubehör-Filter und Fremdwährungs-Schutz.
 * Treffer-Logik mit Preisgrenze, Zustand (neu/gebraucht), Vorbestellung, Bot-Schutz.
 * Preisverlauf, 30-Tage-Tief, Sparkline, Shop-Health.

@@ -9,6 +9,8 @@ Exit-Code 0 = alles gruen. Wird im Release-Workflow als Gate vor dem
 APK-Build ausgefuehrt, damit ein kaputtes Parsing nie in die APK geht.
 """
 import configparser
+import contextlib
+import io
 import json
 import math
 import os
@@ -227,8 +229,8 @@ def main_tests():
     _usd = HTML_OK.replace('"799,99"', '"799,99"').replace(
         '"priceCurrency":"EUR"', '"priceCurrency":"USD"')
     check("jsonld fremdwaehrung ignoriert", core.extract_structured(_usd)["preis"], None)
-    check("jsonld marke erkannt", core.pruefe_nur_konsole(
-        "<html>PlayStation®5 Pro 2 TB</html>", {}), True)
+    check("marke mit zeichen erkannt", core.pruefe_nur_konsole(
+        "<html><head><title>PlayStation®5 Pro 2 TB</title></head></html>", {}), True)
 
     # urllib-Fallback: HTTPError muss als "HTTP 404" ankommen, sonst greift
     # die Schnellabschaltung fuer umgezogene Haendler nicht.
@@ -242,8 +244,9 @@ def main_tests():
         check("urllib 404 normalisiert", core._try_url("http://x", 0)[1], "HTTP 404")
     finally:
         core.urlopen = _alt_urlopen; core._RQ, core._RQ_TRIED = _alt_rq, _alt_tried
-    check("nur_konsole ohne product", core.pruefe_nur_konsole(
-        "<html><body>PlayStation 5 Pro 2 TB Uebersicht</body></html>", {}), True)
+    # Ohne Seitennamen laesst sich das Produkt nicht bestaetigen: kein Treffer.
+    check("seite ohne titel kein treffer", core.pruefe_nur_konsole(
+        "<html><body>PlayStation 5 Pro 2 TB Uebersicht</body></html>", {}), False)
     check("nur_konsole fremdprodukt", core.pruefe_nur_konsole("<html>xbox</html>", {}), False)
     # Der Produktname der Seite entscheidet, nicht die Erwaehnung irgendwo im
     # HTML. Sonst galten Zubehoer- und Suchseiten als Konsolentreffer, und der
@@ -251,6 +254,14 @@ def main_tests():
     check("zubehoer-titel abgelehnt", core.pruefe_nur_konsole(
         "<html><head><title>DualSense Wireless Controller</title></head>"
         "<body>PS5 Pro 2 TB Zubehoer</body></html>", {}), False)
+    # Kategorieseiten tragen den Konsolennamen im Titel, verkaufen aber
+    # Zubehoer - der Preis kaeme sonst vom ersten Euro-Betrag der Liste.
+    check("zubehoer-kategorie abgelehnt", core.pruefe_nur_konsole(
+        "<html><head><title>Zubehör für PlayStation 5 Pro 2 TB</title>"
+        "</head></html>", {}), False)
+    check("zubehoer-kategorie ascii abgelehnt", core.pruefe_nur_konsole(
+        "<html><head><title>Zubehoer fuer PlayStation 5 Pro 2 TB</title>"
+        "</head></html>", {}), False)
     check("bundle-titel abgelehnt", core.pruefe_nur_konsole(
         "<html><head><title>PlayStation 5 Pro 2 TB Bundle mit Controller</title>"
         "</head></html>", {}), False)
@@ -260,6 +271,9 @@ def main_tests():
     check("og-titel zaehlt", core.pruefe_nur_konsole(
         '<html><head><meta property="og:title" '
         'content="PlayStation 5 Pro 2 TB"></head></html>', {}), True)
+    # Remote-Parser-Seiten haben oft keinen head, nur eine h1.
+    check("h1-name zaehlt", core.pruefe_nur_konsole(
+        "<html><body><h1>PlayStation 5 Pro 2 TB</h1></body></html>", {}), True)
     _ld_url = ('<script type="application/ld+json">{"@type":"Product",'
                '"name":"Sony PlayStation 5 Pro 2 TB",'
                '"url":"https://shop.example/p/1",'
@@ -269,6 +283,13 @@ def main_tests():
           "https://shop.example/p/1")
     check("link produktseite", core._produkt_ziel("https://shop.example/p/1",
           "https://shop.example/suche?q=x"), "https://shop.example/p/1")
+    # Der Link muss auch wirklich im Ergebnis landen, nicht nur berechnet werden.
+    _h = {"name": "Testshop", "land": "DE",
+          "urls": ["https://shop.example/suche?q=x"]}
+    check("ergebnis nutzt produktlink", core._res(
+        _h, 799.0, "hit", 0.1, None, "https://shop.example/suche?q=x",
+        produkt_url="https://shop.example/p/1")["url"],
+        "https://shop.example/p/1")
     check("link fremder host bleibt", core._produkt_ziel(
           "https://evil.example/p", "https://shop.example/suche"),
           "https://shop.example/suche")
@@ -277,21 +298,35 @@ def main_tests():
     # Ohne Android/Activity duerfen die Insets nichts verschieben.
     check("insets ohne android", main.android_insets(), (0.0, 0.0, 0.0, 0.0))
 
-    # Meta-Preis-Fallback
+    # Preis nur aus dem Produkt-Meta der Seite. Alles andere kann zu einer
+    # Produktkarte auf einer Ergebnisseite gehoeren; gemessen am 25.11.2026
+    # lieferte keine erreichbare Ergebnisseite dieses Meta, und die falschen
+    # Preise kamen aus dem Seitentext (Amazon, Geizhals, Proshop).
     check("meta preis", core.extract_meta_preis(
         '<meta property="product:price:amount" content="899,00">'), 899.0)
-    check("meta preis im text", core.extract_meta_preis("<p>Preis: 1.049,00 €</p>"), 1049.0)
-    check("meta preis unter minimum", core.extract_meta_preis("<p>Preis: 99,00 €</p>"), None)
-    check("meta preis vierstellig", core.extract_meta_preis(
-        "<p>Preis: 1099,00 €</p>"), 1099.0)
     check("meta preis attributreihenfolge", core.extract_meta_preis(
         '<meta content="899,00" property="product:price:amount">'), 899.0)
-    check("meta preis microdata", core.extract_meta_preis(
-        '<span itemprop="price" content="849,00"></span>'), 849.0)
-    check("meta preis microdata text", core.extract_meta_preis(
-        '<span itemprop="price">799,00 €</span>'), 799.0)
+    check("meta preis og", core.extract_meta_preis(
+        '<meta property="og:price:amount" content="849,00">'), 849.0)
+    check("meta preis auch fern", core.extract_meta_preis(
+        "<h1>PlayStation 5 Pro 2 TB</h1>" + "x" * 6000
+        + '<meta property="product:price:amount" content="899,00">'), 899.0)
+    check("kein preis aus seiten text", core.extract_meta_preis(
+        "<p>Preis: 1.049,00 €</p>"), None)
+    check("kein preis aus euro liste", core.extract_meta_preis(
+        "<h1>PlayStation 5 Pro 2 TB</h1>" + "x" * 6000
+        + "<p>625,20 €</p>"), None)
+    # Produktkarten-Markup einer Ergebnisseite ist kein Produktpreis.
+    check("kein preis aus kartenmarkup", core.extract_meta_preis(
+        '<div itemprop="price" content="649,00"></div>'
+        '<div data-price="699,00"></div>'
+        '<span itemprop="price">749,00 €</span>'), None)
+    check("meta preis unter minimum", core.extract_meta_preis(
+        '<meta property="product:price:amount" content="99,00">'), None)
+    check("meta preis vierstellig", core.extract_meta_preis(
+        '<meta property="product:price:amount" content="1.099,00">'), 1099.0)
     check("meta preis punktdezimal", core.extract_meta_preis(
-        '<p>Preis: 799.00 €</p>'), 799.0)
+        '<meta property="product:price:amount" content="799.00">'), 799.0)
     check("meta verfuegbar", core.extract_meta_verfuegbarkeit(
         '<meta property="og:availability" content="https://schema.org/InStock">'),
         (True, True))
@@ -1272,6 +1307,28 @@ def feature_tests():
             finally:
                 core.fetch_mit_cache = alt_fetch
             check("JSON-LD vor Meta-Verfuegbarkeit", r_meta.get("klass"), "unavail")
+            # Ergebnisseite, die die Konsole im Titel nennt: 649 EUR stehen nur
+            # im Kartenmarkup. Der Preis gehoert zu irgendeinem Artikel der
+            # Liste, also gibt es keinen belegbaren Treffer.
+            html_liste = ('<html><head><title>PlayStation 5 Pro 2 TB - '
+                          'Angebote</title></head><body>'
+                          '<h1>PlayStation 5 Pro 2 TB</h1>'
+                          '<div itemprop="price" content="649,00"></div>'
+                          '<div data-price="699,00"></div>'
+                          '<span>Auf Lager</span></body></html>')
+            alt_fetch = core.fetch_mit_cache
+            try:
+                core.fetch_mit_cache = lambda urls, cancel=None, force=False: (
+                    html_liste, urls[0], None, {})
+                core.reset_http_cache()
+                r_liste = core.scan_einen({
+                    "name": "Kaufland", "land": "DE",
+                    "urls": ["https://www.kaufland.de/s/?search_value=playstation+5+pro+2tb"]})
+            finally:
+                core.fetch_mit_cache = alt_fetch
+            check("liste ohne produktpreis kein treffer",
+                  r_liste.get("klass"), "parser")
+            check("liste ohne produktpreis kein preis", r_liste.get("preis"), None)
             check("Remote-Parser Scan-Signal", srr.get("signal"), "remote")
             check("Remote-Parser Scan-Treffer", srr.get("klass"), "hit")
 
@@ -1378,6 +1435,11 @@ def fixture_tests():
                 or not isinstance(fx.get("expect"), dict):
             check("fixture %s schema" % name, False, True)
             continue
+        # Herkunft eindeutig: echter Abruf mit Datum oder synthetischer
+        # Vertragsausschnitt - nie beides, nie keins. Sonst haelt jemand einen
+        # 300-Byte-Platzhalter fuer eine Aufnahme.
+        check("fixture %s herkunft" % name,
+              [bool(fx.get("captured")), fx.get("synthetisch") is True].count(True), 1)
         html, exp = fx["html"], fx["expect"]
         if fx.get("shop") is not None:
             check("fixture %s shop bekannt" % name,
@@ -1395,7 +1457,7 @@ def fixture_tests():
         st = core.extract_structured(html)
         check("fixture %s ist konsole" % name, core.pruefe_nur_konsole(html, st), True)
         # Amazon hat kein JSON-LD; dort prueft die Fixture denselben Pfad wie
-        # der Scan (extract_amazon), nicht den generischen Preis-Regex.
+        # der Scan (extract_amazon), nicht den Meta-Preis.
         amz = (core.extract_amazon(html)
                if core.ist_amazon(fx.get("url") or "") else {})
         for feld in ("preis", "condition", "seller", "verfuegbar", "sofort"):
@@ -1434,6 +1496,11 @@ def capture_helper_tests():
     check("Capture URL fremd", helper.url_erlaubt("https://evil.example/x"), False)
 
     mini = helper.minimiere_html(HTML_OK)
+    # Die h1 entscheidet mit; ohne sie wuerde die Fixture anders parsen als die
+    # echte Seite.
+    check("Capture behaelt h1", "<h1>" in helper.minimiere_html(
+        "<html><head><title>Shop</title></head>"
+        "<body><h1>PlayStation 5 Pro 2 TB</h1></body></html>"), True)
     check("Capture minimiert JSON-LD", "application/ld+json" in mini, True)
     check("Capture minimiert Preis", helper.erwartung(mini).get("preis"), 799.99)
     fixture = helper.baue_fixture(shop, HTML_OK, shop["urls"][0],
@@ -2541,6 +2608,20 @@ def amazon_tests():
                '<span class="a-price-fraction">98</span></div>')
     check("Amazon geteilter Preis", core.extract_amazon(geteilt)["preis"], 1469.98)
 
+    # Ein Preis ueber 1.500 EUR ist kein Parserfehler: Amazon listet die
+    # Konsole bei Drittanbietern auch hoeher (26.11.2026: 1.837,99 EUR).
+    # Ueber dem Deckel entscheidet classify() als "expensive", nicht der Scan.
+    teuer = ('<div id="corePrice_feature_div"><span class="a-price">'
+             '<span class="a-offscreen">1.837,99 €</span></span></div>')
+    check("Amazon Preis ueber altem Deckel",
+          core.extract_amazon(teuer)["preis"], 1837.99)
+    check("Amazon Preis bleibt expensive",
+          core.classify(True, 1837.99, core.MAX_PREIS), "expensive")
+    unsinn = ('<div id="corePrice_feature_div"><span class="a-price">'
+              '<span class="a-offscreen">18.379,00 €</span></span></div>')
+    check("Amazon unsinniger Preis offen",
+          core.extract_amazon(unsinn)["preis"], None)
+
     aus = (kaufbox + '<div id="availability">Derzeit nicht verfügbar</div>')
     check("Amazon ausverkauft", core.extract_amazon(aus)["verfuegbar"], False)
     check("Amazon ausverkauft Zustand", core.extract_amazon(aus)["state"], "sold_out")
@@ -2553,6 +2634,46 @@ def amazon_tests():
     check("Amazon Host erkannt", core.ist_amazon("https://www.amazon.de/dp/B0FRYBZR91"), True)
     check("Amazon AT Host erkannt", core.ist_amazon("https://www.amazon.at/dp/B0FRYBZR91"), True)
     check("Amazon Fremdhost", core.ist_amazon("https://amazon.de.evil.example/x"), False)
+
+    # Kaufbox-Fingerprint: Preise und Bestand wechseln, die Struktur nicht.
+    fp_seite = ('<div id="corePrice_feature_div"><span class="a-offscreen">'
+                '899,99 €</span><span class="a-price-whole">899</span>'
+                '<span class="a-price-fraction">99</span></div>'
+                '<div id="availability">Auf Lager</div>')
+    fp_preis = fp_seite.replace("899,99", "1.099,00").replace(
+        "Auf Lager", "Derzeit nicht verfügbar")
+    check("Fingerprint stabil", core.kaufbox_fingerprint(fp_seite),
+          core.kaufbox_fingerprint(fp_preis))
+    check("Fingerprint vorhanden", bool(core.kaufbox_fingerprint(fp_seite)), True)
+    fp_umbau = ('<div id="availability">Auf Lager</div>'
+                '<div id="corePrice_feature_div"><span class="a-offscreen">'
+                '899,99 €</span></div>')
+    check("Fingerprint Umbau erkannt",
+          core.kaufbox_fingerprint(fp_umbau)
+          != core.kaufbox_fingerprint(fp_seite), True)
+    check("Fingerprint ohne Marker",
+          core.kaufbox_fingerprint("<html>nichts</html>"), None)
+
+    # Der Scan haengt den Fingerprint an das Ergebnis - ohne Extra-Abruf.
+    ruhig_seite = ('<html><head><title>Playstation 5 Pro 2 TB</title></head>'
+                   '<body><div id="corePrice_feature_div">'
+                   '<span class="a-offscreen">1.469,98 €</span></div>'
+                   '<div id="availability">Derzeit nicht verfügbar</div>'
+                   '</body></html>')
+    alt_scan_fetch = core.fetch_mit_cache
+    abrufe = []
+    core.fetch_mit_cache = lambda urls, cancel=None, force=False, limit=None: (
+        abrufe.append(urls)
+        or (ruhig_seite, urls[0], None, {"bytes": len(ruhig_seite)}))
+    try:
+        h_amz = next(h for h in core.HAENDLER if h["name"] == "Amazon DE")
+        r_scan = core._scan_einen_html(h_amz)
+        check("Scan Fingerprint gesetzt", bool((r_scan or {}).get("kaufbox")), True)
+        check("Scan Fingerprint stabil", (r_scan or {}).get("kaufbox"),
+              core.kaufbox_fingerprint(ruhig_seite))
+        check("Scan nur ein Abruf", len(abrufe), 1)
+    finally:
+        core.fetch_mit_cache = alt_scan_fetch
 
     # Bot-Schutz im 4xx-Body: Otto (Kasada) und Cloudflare antworten nicht mit
     # einer Produktseite, sondern mit einem kurzen Schutz-Script.
@@ -2687,17 +2808,36 @@ def cloud_watcher_tests():
 
     k = cw.Konfig.aus_env({})
     check("cloud shops standard", list(k.shops),
-          ["PS Direct DE", "PS Direct AT"])
-    check("cloud fenstertakt standard", 30 <= k.window_takt <= 60, True)
-    check("cloud takt aussen standard", k.aussen_takt >= 60, True)
+          ["PS Direct DE", "PS Direct AT", "Alternate DE"])
+    check("cloud takt standard", k.takt, 15)
+    check("cloud takt neben standard", k.takt_neben, 30)
+    # 2 Shops im 15-s-Takt + 1 Zusatzshop im 30-s-Takt = 10 von 12 Abrufen.
+    check("cloud budget aus takt", 2 * (60 // k.takt) + (60 // k.takt_neben), 10)
+    alt_urls = {h["name"]: list(h["urls"]) for h in core.HAENDLER}
+    try:
+        cfg_dir = tempfile.mkdtemp(prefix="ps5pro-cfg-")
+        cfg_pfad = os.path.join(cfg_dir, "shop_config.json")
+        cfg_url = ("https://aetka.de/shop/de/sony-playstation-5-pro-digital-"
+                   "e-chassis-schwarz-weiss-2tb-40-62-4697/0")
+        with open(cfg_pfad, "w", encoding="utf-8") as f:
+            json.dump({"schema": 1, "shops": {"Aetka DE": {"urls": [cfg_url]}}}, f)
+        check("cloud shop-config datei", core.lade_shop_config_datei(cfg_pfad), 1)
+        check("cloud shop-config url",
+              next(h for h in core.HAENDLER if h["name"] == "Aetka DE")["urls"][0],
+              cfg_url)
+    finally:
+        for h in core.HAENDLER:
+            h["urls"] = alt_urls[h["name"]]
     check("cloud schatten standard", k.shadow, True)
     check("cloud schattenstunden", k.shadow_hours, 48.0)
 
-    k2 = cw.Konfig.aus_env({"WATCH_SHADOW": "0", "WATCH_WINDOW_TAKT": "5",
-                            "WATCH_TAKT_AUSSEN": "10",
+    k2 = cw.Konfig.aus_env({"WATCH_SHADOW": "0", "WATCH_TAKT": "10",
+                            "WATCH_TAKT_NEBEN": "10",
                             "WATCH_SHOPS": " PS Direct DE "})
-    check("cloud fenstertakt geklemmt", k2.window_takt, 30)
-    check("cloud takt aussen geklemmt", k2.aussen_takt, 60)
+    check("cloud takt geklemmt", k2.takt, 15)
+    check("cloud takt neben geklemmt", k2.takt_neben, 30)
+    check("cloud takt oben geklemmt",
+          cw.Konfig.aus_env({"WATCH_TAKT": "5000"}).takt, 3600)
     check("cloud scharf", k2.shadow, False)
     check("cloud shop getrimmt", list(k2.shops), ["PS Direct DE"])
     unbekannt = False
@@ -2716,24 +2856,20 @@ def cloud_watcher_tests():
     check("cloud schatten erzwungen",
           cw.schatten_aktiv(z, 1000.0 + 49 * 3600, True), True)
 
-    dt_fenster = core._als_datetime(
-        time.mktime((2026, 11, 16, 10, 0, 0, 0, 0, -1)))
-    dt_aussen = core._als_datetime(
-        time.mktime((2026, 11, 16, 19, 0, 0, 0, 0, -1)))
     ruhig = {"status": "unavail", "fail_streak": 0}
-    check("cloud takt im fenster",
-          30 <= cw.takt_sekunden("PS Direct DE", ruhig, dt_fenster, k) <= 60,
-          True)
-    check("cloud takt ausserhalb",
-          cw.takt_sekunden("PS Direct DE", ruhig, dt_aussen, k) >= 150, True)
+    check("cloud takt mit jitter",
+          15 <= cw.takt_sekunden("PS Direct DE", ruhig, k) <= 17, True)
+    check("cloud takt neben mit jitter",
+          30 <= cw.takt_sekunden("Alternate DE", ruhig, k) <= 34, True)
     check("cloud takt sperre",
-          cw.takt_sekunden("PS Direct DE",
-                           {"status": "challenge", "fail_streak": 1},
-                           dt_fenster, k), cw.CHALLENGE_TAKT)
+          cw.naechste_faelligkeit(
+              {"status": "challenge", "challenge_bis": 2000.0}, 1000.0,
+              cw.takt_sekunden("PS Direct DE", {"status": "challenge"}, k)),
+          2000.0)
     check("cloud takt fehler",
           cw.takt_sekunden("PS Direct DE",
-                           {"status": "parser", "fail_streak": 2},
-                           dt_fenster, k), cw.FEHLER_TAKT)
+                           {"status": "parser", "fail_streak": 2}, k),
+          cw.FEHLER_TAKT)
 
     tmp = tempfile.mkdtemp(prefix="ps5pro-cloud-")
     alt_dir = core.data_dir()
@@ -3052,9 +3188,10 @@ def watcher_p0_tests():
         check("p0 challenge lang 60 min",
               eintrag.get("challenge_bis"), now + 30 + cw.CHALLENGE_LANG)
         check("p0 challenge takt lang",
-              cw.takt_sekunden("Amazon DE", eintrag,
-                               core._als_datetime(now + 100),
-                               cw.Konfig.aus_env({})), cw.CHALLENGE_LANG)
+              cw.naechste_faelligkeit(
+                  eintrag, now + 30,
+                  cw.takt_sekunden("Amazon DE", eintrag, cw.Konfig.aus_env({}))),
+              now + 30 + cw.CHALLENGE_LANG)
         cw.aktualisiere(eintrag, dict(heraus, klass="unavail", preis=799.0,
                                       verfuegbar=False), now + 5000, None)
         check("p0 challenge serie zurueck",
@@ -3113,6 +3250,142 @@ def watcher_p0_tests():
         geladen = cw.zustand_laden(pfad, frueh, 48)
         check("p0 tag persistiert", geladen["tag"].get("datum"), "2026-11-22")
 
+        # 5b. Tagesbericht: Luecken, p95 und Zustellung ueber den Ops-Kanal.
+        z = cw.neuer_zustand(spaet, 0)
+        cw.tag_buchen(z, {"klass": "unavail", "dauer": 1.2}, spaet, tz)
+        cw.tag_luecke(z, 95.0, spaet, tz)
+        cw.tag_luecke(z, 130.0, spaet + 1, tz)
+        check("p0 luecken zaehler", z["tag"].get("luecken"), 2)
+        check("p0 luecken summe", z["tag"].get("luecke_s"), 225)
+        check("p0 luecken max", z["tag"].get("luecke_max"), 130)
+        zusammen = cw.tag_zusammenfassung(z["tag"], cw.outbox_sicherstellen(z))
+        check("p0 bericht luecken", zusammen.get("luecken"), 2)
+        check("p0 bericht p95", zusammen.get("ms_p95"), 1200)
+        titel, text = cw.tag_bericht_text(zusammen)
+        check("p0 bericht titel", titel,
+              "Waechter Tagesbericht " + cw._tag_datum(spaet, tz))
+        check("p0 bericht text p95", "p95 1200 ms" in text, True)
+        check("p0 bericht text luecken", "Luecken >2 Takt: 2" in text, True)
+
+        z2 = cw.neuer_zustand(spaet, 0)
+        naechster = _dt(2026, 11, 22, 0, 5, tzinfo=tz).timestamp()
+        cw.tag_luecke(z2, 10.0, spaet, tz)
+        cw.tag_luecke(z2, 61.0, naechster, tz)
+        check("p0 luecken tag neu", z2["tag"].get("luecken"), 1)
+        check("p0 luecken tag neu summe", z2["tag"].get("luecke_s"), 61)
+
+        gesendet = []
+        alt_send = core.webhook_senden
+        alt_log = cw.log
+        try:
+            core.webhook_senden = lambda url, preset=None, titel="", text="", \
+                timeout=5, **rest: (gesendet.append((url, titel, text))
+                                    or (True, "HTTP 200"))
+            cw.log = lambda d: None
+            k_ops = cw.Konfig.aus_env({
+                "WATCH_OPS_WEBHOOK_URL": "https://ops.example/hook"})
+            s_ops = cw.settings_aus(k_ops)
+            z = cw.neuer_zustand(spaet, 0)
+            cw.tag_buchen(z, {"klass": "unavail", "dauer": 1.2}, spaet, tz)
+            zusammen = cw.tag_zusammenfassung(
+                z["tag"], cw.outbox_sicherstellen(z))
+            check("p0 bericht gesendet",
+                  cw.tag_bericht_senden(k_ops, s_ops, z, spaet, None, zusammen),
+                  True)
+            check("p0 bericht ziel",
+                  gesendet[0][0] if gesendet else None,
+                  "https://ops.example/hook")
+            check("p0 bericht einmal", len(gesendet), 1)
+            check("p0 bericht kein zweiter",
+                  cw.tag_bericht_senden(k_ops, s_ops, z, spaet, None), False)
+            check("p0 bericht aufgeraeumt", z.get("tag_bericht"), None)
+
+            core.webhook_senden = lambda *a, **k: (False, "HTTP 500")
+            z = cw.neuer_zustand(spaet, 0)
+            zusammen = cw.tag_zusammenfassung(
+                z["tag"], cw.outbox_sicherstellen(z))
+            check("p0 bericht fehler",
+                  cw.tag_bericht_senden(k_ops, s_ops, z, spaet, None, zusammen),
+                  False)
+            check("p0 bericht gemerkt", isinstance(z.get("tag_bericht"), dict),
+                  True)
+            check("p0 bericht versuch 1",
+                  z["tag_bericht"].get("versuche"), 1)
+            check("p0 bericht gesperrt",
+                  cw.tag_bericht_senden(k_ops, s_ops, z, spaet + 10, None),
+                  False)
+            termin = z["tag_bericht"]["next_ts"]
+            cw.tag_bericht_senden(k_ops, s_ops, z, termin, None)
+            check("p0 bericht versuch 2",
+                  z["tag_bericht"].get("versuche"), 2)
+            termin = z["tag_bericht"]["next_ts"]
+            cw.tag_bericht_senden(k_ops, s_ops, z, termin, None)
+            check("p0 bericht aufgegeben", z.get("tag_bericht"), None)
+
+            core.webhook_senden = lambda *a, **k: (True, "HTTP 200")
+            k_leer = cw.Konfig.aus_env({})
+            z = cw.neuer_zustand(spaet, 0)
+            vorher = len(gesendet)
+            check("p0 bericht ohne kanal",
+                  cw.tag_bericht_senden(k_leer, cw.settings_aus(k_leer), z,
+                                        spaet, None,
+                                        cw.tag_zusammenfassung(
+                                            z["tag"],
+                                            cw.outbox_sicherstellen(z))),
+                  False)
+            check("p0 bericht ohne kanal weg", z.get("tag_bericht"), None)
+            check("p0 bericht ohne kanal kein send", len(gesendet), vorher)
+        finally:
+            core.webhook_senden = alt_send
+            cw.log = alt_log
+
+        # 5c. Parser-Canary: drei Fehler in Folge und Kaufbox-Drift.
+        z = cw.neuer_zustand(spaet, 0)
+        eintrag = {}
+        for i in range(3):
+            cw.aktualisiere(eintrag, {"klass": "parser", "preis": None},
+                            spaet + i, tz)
+        check("p0 canary serie", eintrag.get("fehler_serie"), 3)
+        cw.canary_buchen(z, "Amazon DE", eintrag,
+                         {"klass": "parser", "preis": None}, spaet + 3, tz)
+        check("p0 canary gemerkt",
+              z["tag"]["canary"].get("Amazon DE", {}).get("serie"), 3)
+        zusammen = cw.tag_zusammenfassung(z["tag"], cw.outbox_sicherstellen(z))
+        check("p0 canary zusammenfassung",
+              (zusammen.get("canary") or [{}])[0].get("shop"), "Amazon DE")
+        cw.aktualisiere(eintrag, {"klass": "unavail", "preis": 899.0},
+                        spaet + 4, tz)
+        check("p0 canary serie zurueck", eintrag.get("fehler_serie"), 0)
+        cw.aktualisiere(eintrag, {"klass": "challenge"}, spaet + 4, tz)
+        check("p0 canary challenge reisst", eintrag.get("fehler_serie"), 0)
+
+        gut = {"klass": "unavail", "preis": 899.99, "kaufbox": "aaa111"}
+        check("p0 drift start",
+              cw.canary_buchen(z, "Amazon DE", eintrag, gut,
+                               spaet + 5, tz).get("drift"), None)
+        info = cw.canary_buchen(z, "Amazon DE", eintrag,
+                                dict(gut, kaufbox="bbb222"), spaet + 6, tz)
+        check("p0 drift erkannt", info.get("drift"), ("aaa111", "bbb222"))
+        check("p0 drift gemerkt",
+              z["tag"]["drift"].get("Amazon DE", {}).get("neu"), "bbb222")
+        wieder = cw.canary_buchen(z, "Amazon DE", eintrag,
+                                  dict(gut, kaufbox="ccc333"), spaet + 7, tz)
+        check("p0 drift einmal pro tag", wieder.get("drift_neu"), False)
+        vorher_fp = eintrag.get("kaufbox")
+        kaputt = {"klass": "parser", "preis": None, "kaufbox": "zzz999"}
+        info = cw.canary_buchen(z, "Amazon DE", eintrag, kaputt, spaet + 8, tz)
+        check("p0 drift kein parser", info.get("drift"), None)
+        check("p0 drift unveraendert", eintrag.get("kaufbox"), vorher_fp)
+
+        _, text_canary = cw.tag_bericht_text(
+            cw.tag_zusammenfassung(z["tag"], cw.outbox_sicherstellen(z)))
+        check("p0 bericht canary text", "Canary: Amazon DE" in text_canary, True)
+        check("p0 bericht drift text",
+              "Kaufbox-Drift: Amazon DE" in text_canary, True)
+        cw.tag_luecke(z, 1.0, naechster, tz)
+        check("p0 canary tag neu", z["tag"]["canary"], {})
+        check("p0 drift tag neu", z["tag"]["drift"], {})
+
         # 6. Lokaler Status: Wachzeit, Runden, Outbox, Budget und Heartbeat.
         z = cw.neuer_zustand(3000.0, 48)
         z["runden"] = 7
@@ -3130,7 +3403,7 @@ def watcher_p0_tests():
         check("p0 status wach", status.get("wach_ts"), 3000.0)
         check("p0 status runden", status.get("runden"), 7)
         check("p0 status outbox", status.get("outbox"),
-              {"offen": 2, "failed": 1, "gesamt": 4})
+              {"offen": 2, "failed": 1, "verfallen": 0, "gesamt": 4})
         check("p0 status budget", status.get("budget"),
               {"max": 9, "verbraucht": 3})
         status_pfad = os.path.join(tmp, cw.STATUS_FILE)
@@ -3158,9 +3431,69 @@ def watcher_p0_tests():
             cw.log = alt_log
         check("p0 heartbeat text", "runden=7" in pings[0][1], True)
         check("p0 heartbeat outbox", "offen=2" in pings[0][1], True)
+        check("p0 heartbeat fehler", "fehler=1" in pings[0][1], True)
+        check("p0 heartbeat verfallen", "verfallen=0" in pings[0][1], True)
         check("p0 heartbeat budget", "budget=3/9" in pings[0][1], True)
         check("p0 heartbeat url nicht im text",
               "secret-hb" not in pings[0][1], True)
+
+        # 6b. Testalarm: klarer Text durch den echten Outbox-Weg, ohne Reste.
+        calls_test = []
+        alt_alarm_send = core.sende_webhook_alarm
+        core.sende_webhook_alarm = lambda r, s, titel, text, dedupe=True, **k: (
+            calls_test.append((titel, text)) or (True, "HTTP 200"))
+        try:
+            tdir = tempfile.mkdtemp(prefix="ps5pro-testalarm-")
+            tpfad = os.path.join(tdir, cw.STATE_FILE)
+            k_test = cw.Konfig.aus_env({
+                "WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-testalarm"})
+            s_test = cw.settings_aus(k_test)
+            ok, info = cw.testalarm_senden(k_test, s_test, tpfad, 1000.0)
+            check("testalarm ok", ok, True)
+            check("testalarm info", info, "zugestellt")
+            check("testalarm gesendet", len(calls_test), 1)
+            titel_test, text_test = calls_test[0]
+            check("testalarm titel markiert", "Testalarm" in titel_test, True)
+            check("testalarm text markiert", "Test" in text_test, True)
+            check("testalarm klar als test markiert",
+                  "keine ps5 pro verfuegbarkeit" in text_test.lower(), True)
+            geladen = cw.zustand_laden(tpfad, 1100.0, 48)
+            check("testalarm in outbox",
+                  [i.get("status") for i in geladen["outbox"]["items"]],
+                  ["sent"])
+
+            # Fehlschlag hinterlaesst keinen Retry in der Outbox.
+            core.sende_webhook_alarm = lambda *a, **k: (False, "HTTP 500")
+            tpfad2 = os.path.join(tdir, "state2.json")
+            ok, _info = cw.testalarm_senden(k_test, s_test, tpfad2, 2000.0)
+            check("testalarm fehler", ok, False)
+            geladen = cw.zustand_laden(tpfad2, 2100.0, 48)
+            check("testalarm kein rest", geladen["outbox"]["items"], [])
+
+            # --test-alarm laeuft als Kommando durch und meldet das Ergebnis.
+            core.sende_webhook_alarm = lambda *a, **k: (True, "HTTP 200")
+            alt_env = dict(os.environ)
+            alt_daten = core.data_dir()
+            puffer = io.StringIO()
+            try:
+                os.environ.update({
+                    "WATCH_DATA_DIR": os.path.join(tdir, "cli"),
+                    "WATCH_WEBHOOK_URL": "https://ntfy.sh/secret-testalarm",
+                    "WATCH_SHADOW": "1",
+                    "WATCH_TZ": "Europe/Berlin",
+                })
+                with contextlib.redirect_stdout(puffer):
+                    rc = cw.main(["--test-alarm"])
+            finally:
+                os.environ.clear()
+                os.environ.update(alt_env)
+                core.set_data_dir(alt_daten)
+            check("testalarm cli rc", rc, 0)
+            check("testalarm cli meldung",
+                  "Testalarm: zugestellt" in puffer.getvalue(), True)
+            shutil.rmtree(tdir, ignore_errors=True)
+        finally:
+            core.sende_webhook_alarm = alt_alarm_send
 
         # 7. Der Container-Healthcheck prueft die Statusdatei.
         with open(os.path.join(ROOT, "Dockerfile.watcher"), encoding="utf-8") as f:
@@ -3257,30 +3590,47 @@ def outbox_tests():
         check("outbox sent persistiert",
               gespeichert["outbox"]["items"][0]["status"], "sent")
 
-        # 2. Retry-Backoff 30 s, 2 min, 10 min, 30 min, 2 h; nach sechs
-        #    Versuchen failed plus einmaliger Systemalarm.
+        # 2. Retry-Backoff 30 s, 2 min, 10 min. Ein Treffer ueber zehn Minuten
+        #    verfaellt, statt spaeter zugestellt zu werden.
         z = _neu(2000.0)
         cw.outbox_enqueue(r, "restock", z, 2000.0, "Titel", "Text")
         cw.zustand_speichern(pfad, z)
         antwort.update(ok=False, info="HTTP 500")
         erwartet = [(2000.0, 1, 2030.0), (2030.0, 2, 2150.0),
-                    (2150.0, 3, 2750.0), (2750.0, 4, 4550.0),
-                    (4550.0, 5, 11750.0)]
+                    (2150.0, 3, 2750.0)]
         for zeit, versuch, naechste in erwartet:
             cw.outbox_drain(z, k, settings, None, jetzt=zeit, pfad=pfad)
             item = z["outbox"]["items"][0]
             check("outbox versuch %d" % versuch, item.get("attempts"), versuch)
             check("outbox backoff %d" % versuch, item.get("next_ts"), naechste)
             check("outbox pending %d" % versuch, item.get("status"), "pending")
-        cw.outbox_drain(z, k, settings, None, jetzt=11750.0, pfad=pfad)
+        cw.outbox_drain(z, k, settings, None, jetzt=2750.0, pfad=pfad)
         item = z["outbox"]["items"][0]
-        check("outbox cap versuche", item.get("attempts"), 6)
-        check("outbox cap status", item.get("status"), "failed")
-        check("outbox cap grund", item.get("failed_grund"), "max_attempts")
-        check("outbox systemalarm gesetzt", item.get("system_alarm_ts") is not None, True)
-        check("outbox systemalarm einmal",
-              sum(1 for c in calls if str(c["titel"]).startswith("Waechter:")), 1)
-        check("outbox kein erfolgszaehler", z.get("alarme_gesendet"), 0)
+        check("outbox frist status", item.get("status"), "expired")
+        check("outbox frist grund", item.get("failed_grund"), "zu_alt")
+        check("outbox frist versuche", item.get("attempts"), 3)
+        check("outbox frist kein versand", len(calls), 3)
+
+        # 2b. Die Frist gilt nur fuer Treffer, nicht fuer Test oder System.
+        z = _neu(12000.0)
+        box = cw.outbox_sicherstellen(z)
+        box["items"] = [
+            {"id": "alt", "status": "pending", "event": "restock",
+             "created": 11000.0},
+            {"id": "neu", "status": "pending", "event": "restock",
+             "created": 11950.0},
+            {"id": "test", "status": "pending", "event": "test",
+             "created": 11000.0, "test": True},
+        ]
+        verf = cw.outbox_verfallen(box, 12000.0)
+        check("outbox frist nur treffer", [x["id"] for x in verf], ["alt"])
+        check("outbox frist verfallen", box["items"][0].get("status"),
+              "expired")
+        check("outbox frist test bleibt", box["items"][2].get("status"),
+              "pending")
+        check("outbox frist grenze",
+              cw._outbox_zu_alt({"event": "restock", "created": 0.0}, 600.0),
+              False)
 
         # 3. 4xx ist endgueltig: kein sechsfacher Backoff.
         z = _neu(3000.0)

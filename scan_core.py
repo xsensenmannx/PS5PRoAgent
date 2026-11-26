@@ -395,6 +395,15 @@ def wende_shop_config(shops):
             _cache_fuer_urls_loeschen(set(alt_urls)|set(h["urls"]))
     return n
 
+def lade_shop_config_datei(pfad):
+    """Explizite Konfigurationsdatei laden (z. B. die mitgelieferte)."""
+    try:
+        with open(pfad,"r",encoding="utf-8") as f:
+            d=json.load(f)
+        shops=validiere_shop_config(d)
+        return wende_shop_config(shops) if shops is not None else 0
+    except Exception: return 0
+
 def lade_shop_config():
     """Lokalen Cache laden; ohne Cache bleibt die eingebaute Liste aktiv."""
     try:
@@ -457,11 +466,19 @@ PRODUKT_MUSTER = [re.compile(r"playstation[\s\-®™]*5[\s\-®™]*pro\b",re.I),
 PRODUKT_2TB = re.compile(r"\b2\s*(?:tb|terabyte)\b",re.I)
 PRODUKT_AUSSCHLUSS = ["dualsense edge","edge controller","ps portal","portal remote",
     "pulse headset","pulse explore","psvr2","vr2 headset","faceplate","face plate",
-    "disc drive","laufwerk"]
+    "disc drive","laufwerk","zubehör","zubehoer"]
 VORBESTELL_MUSTER = ["vorbestell","vorbestellung","preorder","pre-order","backorder",
                      "back-order","reservier"]
 GEBRAUCHT_MUSTER = ["usedcondition","used condition","refurbished","refurb",
                     "gebraucht","generalüberholt","generalueberholt","b-ware","b ware"]
+
+
+def _name_ist_konsole(name):
+    """Nennt dieser Produktname die PS5 Pro 2 TB - ohne Zubehoermarker?"""
+    if not any(rx.search(name) for rx in PRODUKT_MUSTER): return False
+    if not PRODUKT_2TB.search(name): return False
+    low = name.lower()
+    return not any(a in low for a in PRODUKT_AUSSCHLUSS)
 
 def format_preis(p):
     return "{:,.2f}".format(p).replace(",","X").replace(".",",").replace("X",".")+" €"
@@ -616,10 +633,7 @@ def extract_structured(html):
     for j in jl: walk_products(j,prods)
     for p in prods:
         name=str(p.get("name",""))
-        if not any(rx.search(name) for rx in PRODUKT_MUSTER): continue
-        if not PRODUKT_2TB.search(name): continue
-        low=name.lower()
-        if any(ex in low for ex in PRODUKT_AUSSCHLUSS): continue
+        if not _name_ist_konsole(name): continue
         if BUNDLE_MUSTER.search(name):
             res["bundle"]=True
             continue
@@ -679,27 +693,64 @@ def extract_structured(html):
         if res["preis"] is not None and not ist_gebraucht(res.get("condition")): break
     return res
 
+# Nur diese beiden Meta-Felder beschreiben laut Spezifikation das Produkt
+# *dieser* Seite. `itemprop=price`, `data-price` und ein beliebiges
+# `"price":` im Skript stehen dagegen auch auf jeder Produktkarte einer
+# Ergebnisseite und sind ohne DOM-Bereich keinem Angebot zuzuordnen.
+# Gemessen am 25.11.2026 lieferte keine erreichbare Ergebnisseite ein
+# Produkt-Meta; die falschen Preise kamen aus dem Seitentext (Amazon 625,20
+# EUR, Geizhals 799,00 EUR, Proshop 702,44 EUR).
+META_PREIS_FELDER = (
+    r'<meta[^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\'][^>]+content=["\']([^"\']+)',
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\']',
+)
+
+
 def extract_meta_preis(html):
-    pats = [
-        r'<meta[^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\'][^>]+content=["\']([^"\']+)',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:product:price:amount|og:price:amount)["\']',
-        r'<meta[^>]+itemprop=["\']price["\'][^>]+content=["\']([^"\']+)',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+itemprop=["\']price["\']',
-        r'<[^>]+itemprop=["\']price["\'][^>]+(?:content|data-price)=["\']([^"\']+)',
-        r'<[^>]+(?:content|data-price)=["\']([^"\']+)["\'][^>]+itemprop=["\']price["\']',
-        r'<[^>]+itemprop=["\'](?:price|lowPrice)["\'][^>]*>([^<]{1,40})</',
-        r'data-price=["\']([^"\']+)["\']',
-        r'"(?:price|priceValue)"\s*:\s*"?((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})"?',
-        r'((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})\s*(?:€|EUR|&euro;|&#8364;)',
-        r'(?:€|EUR|&euro;|&#8364;)\s*((?:\d{1,3}(?:\.\d{3})+|\d+)[.,]\d{2})'
-    ]
-    for pat in pats:
+    """Preis aus dem Produkt-Meta der Seite (product:price / og:price).
+
+    Eine Euro-Zahl aus dem sichtbaren Text oder aus Kartenmarkup wird bewusst
+    nicht genommen: sie gehoerte auf den geprueften Seiten nie zur Konsole,
+    sondern zu irgendeinem Artikel der Seite. Fehlt das Feld, bleibt der Preis
+    offen und der Scan meldet "Parser: kein Preis".
+    """
+    for pat in META_PREIS_FELDER:
         try:
-            for m in re.finditer(pat,html,re.I):
-                p=parse_preis_str(m.group(1))
-                if p is not None and MIN_PREIS<=p<=1500: return p
+            for m in re.finditer(pat, html or "", re.I):
+                p = parse_preis_str(m.group(1))
+                if p is not None and MIN_PREIS <= p <= 5000: return p
         except re.error: continue
     return None
+# Kaufbox-/Preisstruktur als Fingerprint: nur die Reihenfolge der Marker,
+# keine Preise, Tokens oder Textinhalte. Aendert ein Shop sein Markup, aendert
+# sich der Hash auch dann, wenn der Parser noch einen Preis findet.
+KAUFBOX_MARKER = (
+    "corePrice_feature_div", "corePriceDisplay_desktop_feature_div",
+    "apex_desktop", "priceToPay", "a-price-whole", "a-price-fraction",
+    "a-price-symbol", "a-offscreen", "availability", "addToCart",
+    "ld+json", 'itemprop="price"', "og:price:amount",
+)
+
+
+def kaufbox_fingerprint(html):
+    """Kurzer Hash der Preisstruktur einer bereits geladenen Seite.
+
+    Bewusst nur die Reihenfolge der Marker: Preise, Bestand und Tokens
+    wechseln staendig und wuerden jeden Vergleich unbrauchbar machen.
+    """
+    text = html or ""
+    treffer = []
+    for marker in KAUFBOX_MARKER:
+        pos = text.find(marker)
+        if pos >= 0:
+            treffer.append((pos, marker))
+    if not treffer:
+        return None
+    treffer.sort()
+    roh = "|".join(marker for _, marker in treffer)
+    return hashlib.sha1(roh.encode("utf-8")).hexdigest()[:12]
+
+
 # ── Amazon ───────────────────────────────────────────────────────────
 # Amazon liefert kein Product-JSON-LD: gemessen am 17.11.2026 auf amazon.de
 # und amazon.at jeweils 0 ld+json-Bloecke, dafuer 2,4 MB HTML. Preis und
@@ -712,7 +763,11 @@ AMAZON_PREIS_ANKER = ('id="corePrice_feature_div"',
                       'id="corePriceDisplay_desktop_feature_div"',
                       'id="apex_desktop"', 'id="buybox"')
 AMAZON_BESTAND_ANKER = 'id="availability"'
-AMAZON_PREIS_MAX = 1500
+# Gleiche Plausibilitaetsgrenze wie extract_meta_preis. Der Preisdeckel des
+# Scans (default 900 EUR) entscheidet danach ueber hit/expensive; ein eigener
+# Amazon-Deckel von 1500 EUR machte aus einem echten 1.837,99-EUR-Angebot
+# (26.11.2026) einen Parserfehler ohne Preis.
+AMAZON_PREIS_MAX = 5000
 
 
 def ist_amazon(url):
@@ -786,6 +841,9 @@ def extract_meta_state(html):
 
 def detect_challenge(low): return any(p in low for p in CHALLENGE_PATTERNS)
 
+# Drei Namen, die eine Seite fuer ihr Produkt traegt; einer mit
+# Konsolennamen genuegt. Die h1 ist noetig fuer Shops, deren <title> nur
+# den Shop nennt - und fuer Remote-Parser-Seiten ohne head.
 _TITEL_MUSTER = (
     re.compile(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)', re.I),
     re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I),
@@ -794,60 +852,41 @@ _TITEL_MUSTER = (
 _TAG_MUSTER = re.compile(r"<[^>]+>")
 
 
-def _titel_text(roh):
-    """Sichtbaren Text aus einem Titel-Ausschnitt machen."""
-    try: text = _html.unescape(_TAG_MUSTER.sub(" ", roh or ""))
-    except Exception: text = roh or ""
-    return " ".join(str(text).split())[:300]
-
-
 def produkt_titel(html):
-    """Produktname der Seite: og:title, title und erste h1.
-
-    Die Reihenfolge ist Absicht: og:title nennt das Produkt am zuverlaessigsten,
-    ``<title>`` haengt oft den Shopnamen an, die h1 ist der sichtbare Name.
-    """
-    kandidaten = []
+    """Seitenname aus og:title, <title> und erster h1, entitaetenaufgeloest."""
+    namen = []
     for muster in _TITEL_MUSTER:
         treffer = muster.search(html or "")
         if not treffer: continue
-        text = _titel_text(treffer.group(1))
-        if text: kandidaten.append(text)
-    return kandidaten
+        roh = _TAG_MUSTER.sub(" ", treffer.group(1))
+        name = " ".join(_html.unescape(roh).split())[:300]
+        if name: namen.append(name)
+    return namen
 
 
 def titel_ist_konsole(titel):
-    """Nennt dieser Produktname die PS5 Pro 2 TB - und nichts anderes?"""
-    if not titel: return False
-    if not any(rx.search(titel) for rx in PRODUKT_MUSTER): return False
-    if not PRODUKT_2TB.search(titel): return False
-    low = titel.lower()
-    if any(a in low for a in PRODUKT_AUSSCHLUSS): return False
-    if BUNDLE_MUSTER.search(titel): return False
-    return True
+    """Nennt dieser Seitenname die PS5 Pro 2 TB - und kein Bundle?"""
+    return bool(titel) and _name_ist_konsole(titel) and not BUNDLE_MUSTER.search(titel)
 
 
 def pruefe_nur_konsole(html, st):
     """Ist diese Seite die Konsole selbst - oder nur ein Zubehoerartikel?
 
-    Frueher genuegte es, dass die Begriffe irgendwo im HTML auftauchten. Damit
-    galten Such- und Zubehoerseiten als Treffer, die die Konsole nur in einer
-    Empfehlungsliste erwaehnen; der Preis kam dann vom ersten Euro-Betrag der
-    Seite. Jetzt muss der Produktname der Seite die Konsole bezeichnen.
-    Seiten ohne jeden Titel bleiben beim alten Seitencheck, weil synthetische
-    Testseiten keinen tragen.
+    Frueher genuegte ein Begriff irgendwo im HTML. Damit galten Such- und
+    Zubehoerseiten als Treffer, die die Konsole nur erwaehnen; der Preis kam
+    dann vom ersten Euro-Betrag der Seite. Jetzt muss ein Seitenname
+    (og:title, <title> oder erste h1) die Konsole nennen; ohne Namen bleibt
+    die Seite unbestaetigt - lieber ein Treffer weniger als ein Alarm fuer
+    den falschen Artikel.
     """
     if st.get("ist_konsole"): return True
     # Nur ein Bundle erkannt: nicht ueber den HTML-Fallback doch als Konsole
     # durchwinken, sonst landet der Bundle-Preis als Konsolen-Treffer.
     if st.get("bundle"): return False
-    kandidaten = produkt_titel(html)
-    if kandidaten:
-        return any(titel_ist_konsole(t) for t in kandidaten)
-    # Beide Muster sind re.I - ein zusaetzliches html.lower() wuerde nur eine
-    # zweite Kopie der Seite im Speicher anlegen (bei Shops leicht 2-6 MB).
-    if not any(rx.search(html) for rx in PRODUKT_MUSTER): return False
-    return bool(PRODUKT_2TB.search(html))
+    return any(titel_ist_konsole(t) for t in produkt_titel(html))
+
+
+
 
 def _verfuegbarkeit_aus_text(html):
     """(verfuegbar, explizit) aus sichtbaren Stock-Markern.
@@ -1449,21 +1488,17 @@ def fetch_html_multi(urls, cancel=None):
     h,u,_cached,_meta=fetch_mit_cache(urls, cancel=cancel)
     return h,u
 
-def _gleicher_host(a,b):
-    ha,hb=_host(a),_host(b)
-    return bool(ha) and ha==hb
-
-
 def _produkt_ziel(produkt_url,ersatz):
     """Link auf das Angebot statt auf die Suchseite.
 
     Viele Shops sind mit einer Suchadresse konfiguriert; der Treffer zeigte
     deshalb bisher auf die Ergebnisliste. Nennt der Produkt-Datensatz eine
-    eigene Adresse auf demselben Host, ist das der bessere Link. Fremde Hosts
-    werden nicht uebernommen.
+    Adresse auf demselben Host, ist das der bessere Link. Fremde Hosts werden
+    nicht uebernommen.
     """
     if isinstance(produkt_url,str) and produkt_url.startswith("http"):
-        if _gleicher_host(produkt_url,ersatz): return produkt_url.strip()[:400]
+        host=_host(produkt_url)
+        if host and host==_host(ersatz): return produkt_url
     return ersatz
 
 
@@ -1578,6 +1613,7 @@ def _scan_einen_html(h, cancel=None, force=False):
             res["not_modified"]=True
             res["confidence"]=berechne_konfidenz(res)
             res["bytes"]=int(meta.get("bytes") or 0)
+            if cached.get("kaufbox"): res["kaufbox"]=cached.get("kaufbox")
             res["_cache"]=True
             return res
         if detect_challenge(html[:3000].lower()):
@@ -1628,7 +1664,10 @@ def _scan_einen_html(h, cancel=None, force=False):
         p=remote.get("preis")
         if p is None: p=s.get("preis")
         if p is None: p=amz.get("preis")
-        if p is None: p=extract_meta_preis(html)
+        if p is None:
+            # Nur das Produkt-Meta der Seite; eine Euro-Zahl aus dem Seitentext
+            # oder aus Kartenmarkup gehoert zu keinem bestimmten Artikel.
+            p=extract_meta_preis(html)
         # HTTP 200, Produkt erkannt, aber kein Preis: Das ist ein Parserfehler,
         # solange die Seite nicht ausdruecklich "nicht verfuegbar" sagt. Eine
         # ausverkaufte Produktseite bleibt damit unavail und wird nicht als
@@ -1662,6 +1701,9 @@ def _scan_einen_html(h, cancel=None, force=False):
         res["not_modified"]=bool(meta.get("not_modified_gesehen"))
         res["confidence"]=berechne_konfidenz(res)
         res["bytes"]=int(meta.get("bytes") or 0)
+        # Fingerprint der Preisstruktur aus derselben Antwort: kein Extra-Abruf.
+        fp=kaufbox_fingerprint(html)
+        if fp: res["kaufbox"]=fp
         # Ein Beleg entsteht nur fuer echte Treffer/Chancen, nicht fuer jede
         # der 42 Seiten. Der Ausschnitt ist klein und enthaelt keine Tokens.
         if res["klass"] in ("hit","chance"):
@@ -1684,6 +1726,7 @@ def _scan_einen_html(h, cancel=None, force=False):
                               "gtin":s.get("gtin"),"sku":s.get("sku"),
                               "bundle":bool(s.get("bundle")),
                               "marketplace":_marketplace(s.get("seller"),h["name"]),
+                              "kaufbox":res.get("kaufbox"),
                               "beleg":res.get("beleg")},
                              meta.get("etag"),meta.get("last_modified"),persist=False)
         except Exception: pass
@@ -2874,8 +2917,14 @@ class Events:
                 except OSError: pass
                 if time.time()>=ende: return False
                 time.sleep(0.01)
-            except OSError:
-                return False
+            except OSError as e:
+                # Windows meldet beim gleichzeitigen Anlegen/Loeschen der
+                # Lock-Datei sporadisch eine Sharing Violation (32/33). Nur
+                # dieser Race wird wiederholt; ein echter Rechte- oder
+                # Pfadfehler scheitert sofort statt 10 s zu blockieren.
+                if getattr(e,"winerror",None) not in (32,33): return False
+                if time.time()>=ende: return False
+                time.sleep(0.01)
     def _mit_lock(self,aktion):
         if not self._lock_erwerben(): return None
         try: return aktion()

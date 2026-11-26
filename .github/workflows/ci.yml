@@ -80,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --network none --rm ps5pro-watcher:ci python -c \
-            'import os; import cloud_watcher.watcher as watcher; konfig = watcher.Konfig.aus_env({}); assert os.getuid() == 10001, os.getuid(); assert "WATCH_WEBHOOK_URL" not in os.environ; assert konfig.shops == ("PS Direct DE", "PS Direct AT"), konfig.shops; assert konfig.shadow is True, konfig.shadow; assert 30 <= konfig.window_takt <= 60, konfig.window_takt; assert konfig.webhook_url == "", konfig.webhook_url; print("watcher import ok:", konfig.shops, konfig.window_takt)'
+            'import os; import cloud_watcher.watcher as watcher; konfig = watcher.Konfig.aus_env({}); assert os.getuid() == 10001, os.getuid(); assert "WATCH_WEBHOOK_URL" not in os.environ; assert konfig.shops == ("PS Direct DE", "PS Direct AT", "Alternate DE"), konfig.shops; assert konfig.shadow is True, konfig.shadow; assert konfig.takt == 15, konfig.takt; assert konfig.takt_neben == 30, konfig.takt_neben; assert konfig.webhook_url == "", konfig.webhook_url; print("watcher import ok:", konfig.shops, konfig.takt)'
 
   layout:
     name: Kivy-Smoke ${{ matrix.name }}

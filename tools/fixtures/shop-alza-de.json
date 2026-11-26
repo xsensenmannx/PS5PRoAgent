@@ -3,7 +3,7 @@
   "name": "shop-alza-de",
   "shop": "Alza DE",
   "url": "https://www.alza.de/search.htm?exps=playstation+5+pro+2tb",
-  "captured": "2026-11-12",
+  "synthetisch": true,
   "format": "jsonld_new",
   "html": "<script type=\"application/ld+json\">{\"@type\":\"Product\",\"name\":\"PlayStation 5 Pro 2 TB — Alza DE\",\"offers\":{\"@type\":\"Offer\",\"price\":\"799.00\",\"priceCurrency\":\"EUR\",\"availability\":\"https://schema.org/InStock\",\"itemCondition\":\"https://schema.org/NewCondition\",\"seller\":{\"name\":\"Alza DE\"}}}</script>",
   "expect": {

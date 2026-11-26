@@ -1,5 +1,26 @@
 {
   "schema": 1,
-  "updated": "2026-11-12",
-  "shops": {}
+  "updated": "2026-11-25",
+  "shops": {
+    "Aetka DE": {
+      "urls": [
+        "https://aetka.de/shop/de/sony-playstation-5-pro-digital-e-chassis-schwarz-weiss-2tb-40-62-4697/0"
+      ]
+    },
+    "Coolblue DE": {
+      "urls": [
+        "https://www.coolblue.de/produkt/954519/playstation-5-pro-digital-edition.html"
+      ]
+    },
+    "Euronics": {
+      "urls": [
+        "https://www.euronics.de/spiele-und-konsolen-film-und-musik/playstation-5/spielekonsole/playstation-5-pro-konsole-4065465245393"
+      ]
+    },
+    "Gameware AT": {
+      "urls": [
+        "https://www.gameware.at/info/space/PlayStation+5+Pro+Digital?emphasize=P5H-PLA5PD"
+      ]
+    }
+  }
 }
