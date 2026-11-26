@@ -1184,6 +1184,55 @@ def preis_deckel_aus(settings):
     at=deckel_wert(_setting(settings,"max_preis_at"),de)
     return {"DE":de,"AT":de if at is None else at}
 
+# Toleranz, um die ein beobachteter Regalpreis den Deckel anhebt. PS Direct
+# listet die Konsole mit 899,99 EUR; bei Deckel 900 wuerde jede kleine
+# Preiserhoehung verfuegbaren Bestand still als "expensive" durchfallen lassen.
+SHOP_DECKEL_TOLERANZ = 0.02
+
+
+def shop_deckel(deckel, beobachtet, toleranz=SHOP_DECKEL_TOLERANZ,
+                maximum=DECKEL_MAX):
+    """Deckel eines Shops, verankert an seinem beobachteten Regalpreis.
+
+    ``deckel`` bleibt die Untergrenze. Liegt der Shop mit seinem eigenen Preis
+    darueber, hebt dieser Preis den Deckel um ``toleranz`` an. ``maximum``
+    (``DECKEL_MAX``) verhindert, dass ein Marktplatz-Aufschlag den Deckel
+    beliebig hoch zieht; ``None`` (offener Deckel) bleibt offen.
+    """
+    if deckel is None:
+        return None
+    basis = deckel_wert(deckel)
+    if basis is None:
+        return None
+    try:
+        preis = float(beobachtet)
+    except (TypeError, ValueError):
+        return basis
+    if not preis_plausibel(preis):
+        return basis
+    try:
+        faktor = 1.0 + max(0.0, float(toleranz))
+    except (TypeError, ValueError):
+        faktor = 1.0
+    return min(float(maximum), max(basis, preis * faktor))
+
+
+def shop_deckel_fuer(land, deckel, eintrag):
+    """Deckel fuer einen Shop aus seinem beobachteten Regalpreis.
+
+    Regalpreis ist der Preis, den der Shop selbst fuer die Konsole nennt,
+    waehrend sie nicht kaufbar ist (``status == unavail``). Ein
+    ``in_stock``-Preis kann einen Marktplatz-Aufschlag tragen und darf den
+    Deckel nicht heben, sonst wuerden Scalper-Angebote zu Treffern.
+    """
+    grenze = preis_deckel(land, deckel)
+    if not isinstance(eintrag, dict):
+        return grenze
+    regal = eintrag.get("regal_preis")
+    if regal is None and str(eintrag.get("status") or "") == "unavail":
+        regal = eintrag.get("preis")
+    return shop_deckel(grenze, regal)
+
 def _read_capped(resp):
     """Liest hoechstens MAX_HTML_BYTES und meldet, ob die Antwort zu gross war."""
     stuecke=[]; gesamt=0

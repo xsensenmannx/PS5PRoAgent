@@ -32,6 +32,10 @@ FEHLALARM_FENSTER_S = 600.0
 # mehr hatte. Der Waechter prueft im 15-/30-s-Takt; zwei Stunden sind ein
 # echter Ausfall, keine normale Taktluecke.
 STILLE_SHOP_S = 2 * 3600.0
+# Abstand, ab dem eine Beobachtung endet. Der Waechter prueft im 15-/30-s-Takt;
+# zehn Minuten ohne Check sind eine Luecke (Prozess weg, Rechner aus) und keine
+# Beobachtungszeit.
+ABDECKUNG_SITZUNG_S = 600.0
 # Muss zu scan_core.preis_plausibel passen. Der Report bleibt bewusst
 # eigenstaendig und importiert den Scan-Kern nicht.
 MIN_PREIS = 550.0
@@ -86,6 +90,85 @@ def _iso(ts):
         return "?"
 
 
+def _takt_je_shop(checks_nach_shop, runde_zeilen, budget_zeilen):
+    """Erreichter Takt und verhungerte Runden je Shop.
+
+    ``faellig`` steht in jeder Runde, ``uebersprungen`` sind die Shops, die das
+    Minutenbudget nicht mehr bedient hat. Ohne diese Zahl sieht ein volles
+    Budget wie ein stiller Shop aus. Eine Runde mit vollem Budget zaehlt auf
+    beiden Seiten gleich: Die Shops waren faellig und wurden nicht bedient.
+    """
+    def _leer():
+        return {"checks": 0, "p50_s": None, "p95_s": None, "max_s": None,
+                "faellig": 0, "uebersprungen": 0, "budget_voll": 0}
+
+    daten = {}
+    for shop, checks in checks_nach_shop.items():
+        eintrag = _leer()
+        eintrag["checks"] = len(checks)
+        zeiten = sorted(t for t in (_check_ts(c) for c in checks) if t is not None)
+        abstaende = [b - a for a, b in zip(zeiten, zeiten[1:]) if b >= a]
+        if abstaende:
+            eintrag["p50_s"] = round(perzentil(abstaende, 0.50), 1)
+            eintrag["p95_s"] = round(perzentil(abstaende, 0.95), 1)
+            eintrag["max_s"] = round(max(abstaende), 1)
+        daten[shop] = eintrag
+
+    def _zaehle(zeilen, feld, ziel):
+        for zeile in zeilen:
+            namen = zeile.get(feld)
+            if not isinstance(namen, list):
+                continue
+            for name in namen:
+                daten.setdefault(str(name), _leer())[ziel] += 1
+
+    # Eine Runde mit vollem Budget hat die Shops faellig gemacht und nicht
+    # bedient: Sie zaehlt auf beiden Seiten gleich, sonst schoent sie die Quote.
+    _zaehle(runde_zeilen, "faellig", "faellig")
+    _zaehle(budget_zeilen, "faellig", "faellig")
+    _zaehle(runde_zeilen, "uebersprungen", "uebersprungen")
+    _zaehle(budget_zeilen, "faellig", "uebersprungen")
+    _zaehle(budget_zeilen, "faellig", "budget_voll")
+    return {name: daten[name] for name in sorted(daten)}
+
+
+def _wechsel_uebersicht(wechsel_zeilen):
+    """Zustandswechsel je Paar, plus die letzten Eintraege im Klartext."""
+    paare = {}
+    liste = []
+    for zeile in wechsel_zeilen:
+        von = str(zeile.get("von") or "?")
+        nach = str(zeile.get("nach") or "?")
+        paar = "%s->%s" % (von, nach)
+        paare[paar] = paare.get(paar, 0) + 1
+        liste.append({
+            "ts": round(_zahl(zeile.get("ts")), 3),
+            "iso": _iso(zeile.get("ts")),
+            "shop": str(zeile.get("shop") or ""),
+            "von": von,
+            "nach": nach,
+            "von_preis": zeile.get("von_preis"),
+            "nach_preis": zeile.get("nach_preis"),
+        })
+    return {"gesamt": len(liste), "paare": paare, "liste": liste[-20:]}
+
+
+def _alarm_canary(zeilen):
+    """Ergebnis des synthetischen Alarmtests, getrennt von echten Alarmen."""
+    ok = sum(1 for z in zeilen if z.get("ok") is True)
+    letzte = [
+        {"iso": str(z.get("iso") or ""), "ok": z.get("ok") is True,
+         "event": z.get("event")}
+        for z in zeilen[-5:]
+    ]
+    return {
+        "gesamt": len(zeilen),
+        "ok": ok,
+        "fehlgeschlagen": len(zeilen) - ok,
+        "letzte": letzte,
+    }
+
+
 def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     """Kennzahlen aus den Logzeilen berechnen.
 
@@ -105,6 +188,10 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     outbox_zeilen = []
     checks_nach_shop = {}
     konfigurierte_shops = set()
+    runde_zeilen = []
+    budget_zeilen = []
+    wechsel_zeilen = []
+    alarm_canary_zeilen = []
 
     for daten in zeilen:
         if not isinstance(daten, dict):
@@ -122,7 +209,19 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
             for shop in daten.get("shops") or []:
                 if shop:
                     konfigurierte_shops.add(str(shop))
+        elif typ == "runde":
+            runde_zeilen.append(daten)
+        elif typ == "budget":
+            budget_zeilen.append(daten)
+        elif typ == "wechsel":
+            wechsel_zeilen.append(daten)
+        elif typ == "alarm_canary":
+            alarm_canary_zeilen.append(daten)
         elif typ == "alarm":
+            # Der synthetische Canary laeuft durch dieselbe melde()-Kette,
+            # darf aber keine echte Alarmquote verfaelschen.
+            if daten.get("canary") is True:
+                continue
             alarme_zeilen.append(daten)
             aktion = str(daten.get("aktion") or "")
             if aktion == "unterdrueckt":
@@ -145,6 +244,8 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     stille_shops = _stille_shops(checks_nach_shop, jetzt,
                                  konfigurierte_shops=konfigurierte_shops)
     abdeckung = _abdeckung_stunden(checks)
+    shop_takt = _takt_je_shop(checks_nach_shop, runde_zeilen, budget_zeilen)
+    wechsel = _wechsel_uebersicht(wechsel_zeilen)
     preise = _preis_telemetrie(checks)
     ms = [max(0.0, _zahl(daten.get("ms"))) for daten in checks]
     bytes_ = [max(0.0, _zahl(daten.get("bytes"))) for daten in checks]
@@ -200,6 +301,9 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
         "fehlalarme": fehlalarme,
         "stille_shops": stille_shops,
         "abdeckung_stunden": abdeckung,
+        "shop_takt": shop_takt,
+        "wechsel": wechsel,
+        "alarm_canary": _alarm_canary(alarm_canary_zeilen),
         "preis_telemetrie": preise,
         "klassen": klassen,
         "kosten": {
@@ -413,19 +517,93 @@ def _check_stunde(daten):
         return None
 
 
+def _check_tag(daten):
+    iso = daten.get("iso")
+    if iso:
+        try:
+            return datetime.fromisoformat(str(iso)).date().isoformat()
+        except (TypeError, ValueError):
+            pass
+    ts = _check_ts(daten)
+    if ts is None:
+        return None
+    try:
+        return datetime.fromtimestamp(ts).date().isoformat()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _beobachtete_sekunden(zeiten):
+    """Summe der Abstaende, die innerhalb einer Sitzung liegen.
+
+    Eine Stunde zwischen zwei Checks ist keine Beobachtungszeit, sondern eine
+    Luecke. Gezaehlt wird nur, was im Takt liegt (``ABDECKUNG_SITZUNG_S``).
+    """
+    zeiten = sorted(zeiten)
+    return float(sum(
+        b - a for a, b in zip(zeiten, zeiten[1:])
+        if 0.0 <= b - a <= ABDECKUNG_SITZUNG_S
+    ))
+
+
 def _abdeckung_stunden(checks):
-    """Verteilung der Checks auf 24 Stunden; zeigt Luecken wie 09-12 Uhr."""
+    """Stunden-Buckets plus Abdeckung je Tag und beobachtete Zeit.
+
+    Die 24 Stunden zaehlen ueber alle Tage. Ohne die Tageswerte liest sich
+    "6 von 24" wie ein Polling-Fehler, obwohl in Wahrheit nur 5 Stunden lang
+    ein Prozess lief. ``beobachtet_s`` summiert deshalb nur Abstaende im Takt
+    und ``sitzungen`` zaehlt die zusammenhaengenden Laeufe.
+    """
     stunden = [0] * 24
+    tage = {}
+    zeitpunkte = []
     for daten in checks:
         stunde = _check_stunde(daten)
-        if stunde is not None and 0 <= stunde < 24:
-            stunden[stunde] += 1
+        if stunde is None or not 0 <= stunde < 24:
+            continue
+        stunden[stunde] += 1
+        tag = _check_tag(daten) or "?"
+        eintrag = tage.setdefault(
+            tag, {"datum": tag, "stunden": [0] * 24, "checks": 0, "zeiten": []}
+        )
+        eintrag["stunden"][stunde] += 1
+        eintrag["checks"] += 1
+        ts = _check_ts(daten)
+        if ts is not None:
+            eintrag["zeiten"].append(ts)
+            zeitpunkte.append(ts)
+
+    pro_tag = []
+    for datum in sorted(tage):
+        eintrag = tage[datum]
+        sekunden = _beobachtete_sekunden(eintrag["zeiten"])
+        tag_luecken = [h for h, n in enumerate(eintrag["stunden"]) if n == 0]
+        pro_tag.append({
+            "datum": datum,
+            "abgedeckt": 24 - len(tag_luecken),
+            "luecken": tag_luecken,
+            "checks": eintrag["checks"],
+            "beobachtet_s": int(round(sekunden)),
+            "beobachtet_h": round(sekunden / 3600.0, 2),
+        })
+
+    beobachtet = _beobachtete_sekunden(zeitpunkte)
+    zeiten = sorted(zeitpunkte)
+    sitzungen = 1 if zeiten else 0
+    for a, b in zip(zeiten, zeiten[1:]):
+        if b - a > ABDECKUNG_SITZUNG_S:
+            sitzungen += 1
     luecken = [h for h, n in enumerate(stunden) if n == 0]
     return {
         "stunden": stunden,
         "abgedeckt": 24 - len(luecken),
         "luecken": luecken,
         "checks": sum(stunden),
+        "beobachtet_s": int(round(beobachtet)),
+        "beobachtet_h": round(beobachtet / 3600.0, 2),
+        "sitzungen": sitzungen,
+        "schwelle_s": int(ABDECKUNG_SITZUNG_S),
+        "tage": pro_tag,
     }
 
 
@@ -496,6 +674,43 @@ def _text(daten):
     preise = daten.get("preis_telemetrie") or {}
     luecken = abdeckung.get("luecken") or []
     luecken_text = ", ".join("%02d" % h for h in luecken) or "keine"
+    tage_text = " | ".join(
+        "%s %d/24 Std, %.2f h, %d Checks"
+        % (
+            str(t.get("datum") or "?"),
+            int(t.get("abgedeckt") or 0),
+            float(t.get("beobachtet_h") or 0.0),
+            int(t.get("checks") or 0),
+        )
+        for t in (abdeckung.get("tage") or [])
+    ) or "keine"
+    takt = daten.get("shop_takt") or {}
+    takt_text = " | ".join(
+        "%s p95 %s, %d von %d Runden uebersprungen"
+        % (
+            name,
+            "-" if e.get("p95_s") is None else "%d s" % int(round(e["p95_s"])),
+            int(e.get("uebersprungen") or 0),
+            int(e.get("faellig") or 0),
+        )
+        for name, e in takt.items()
+    ) or "keine"
+    wechsel_daten = daten.get("wechsel") or {}
+    wechsel_text = ", ".join(
+        "%s %d" % (paar, anzahl)
+        for paar, anzahl in sorted((wechsel_daten.get("paare") or {}).items())
+    ) or "keine"
+    canary_daten = daten.get("alarm_canary") or {}
+    canary_text = "Alarm-Canary: %d/%d ok" % (
+        int(canary_daten.get("ok") or 0),
+        int(canary_daten.get("gesamt") or 0),
+    )
+    if canary_daten.get("gesamt"):
+        letzter = (canary_daten.get("letzte") or [{}])[-1]
+        canary_text += " (zuletzt %s: %s)" % (
+            str(letzter.get("iso") or "?"),
+            "ok" if letzter.get("ok") else "kein Ereignis",
+        )
     def _stille_text(e):
         if e.get("ursache") in ("keine_checks", "keine_daten"):
             return "%s (ohne Check)" % e.get("shop")
@@ -556,6 +771,17 @@ def _text(daten):
             fehlalarm_text,
             "Abdeckung: %d von 24 Stunden mit Checks; Luecken: %s"
             % (int(abdeckung.get("abgedeckt") or 0), luecken_text),
+            "Beobachtet: %.2f h in %d Sitzungen (Abstand > %d min gilt als Luecke)"
+            % (
+                float(abdeckung.get("beobachtet_h") or 0.0),
+                int(abdeckung.get("sitzungen") or 0),
+                int(abdeckung.get("schwelle_s") or 0) // 60,
+            ),
+            "Abdeckung je Tag: %s" % tage_text,
+            "Shop-Takt: %s" % takt_text,
+            canary_text,
+            "Zustandswechsel: %d (%s)"
+            % (int(wechsel_daten.get("gesamt") or 0), wechsel_text),
             "Stille Shops: %d von %d (Schwelle %dh): %s"
             % (
                 len(stille.get("stille") or []),

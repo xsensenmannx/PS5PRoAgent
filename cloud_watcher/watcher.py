@@ -895,6 +895,37 @@ def alarm_entscheidung(eintrag, r, toleranz=0.0):
     return event
 
 
+# Klassen, die eine Marktbeobachtung sind. Fehler, Parser und Challenge
+# sagen nichts ueber den Bestand und loesen deshalb keinen Wechsel aus.
+BEOBACHTBARE_KLASSEN = ("hit", "expensive", "unavail", "unknown")
+
+
+def zustands_wechsel(alt, neu):
+    """Wechsel von Klasse oder Verfuegbarkeit fuer das Log.
+
+    Der erste Check eines Shops ist die Basislinie und kein Wechsel. Preisaenderungen
+    allein zaehlen nicht; sie stehen in den Check-Zeilen und in ``new``-Alarmen.
+    """
+    alt = alt if isinstance(alt, dict) else {}
+    neu = neu if isinstance(neu, dict) else {}
+    von = str(alt.get("status") or "")
+    nach = str(neu.get("klass") or "")
+    if von not in BEOBACHTBARE_KLASSEN or nach not in BEOBACHTBARE_KLASSEN:
+        return None
+    von_verf = bool(alt.get("verfuegbar"))
+    nach_verf = bool(neu.get("verfuegbar"))
+    if von == nach and von_verf == nach_verf:
+        return None
+    return {
+        "von": von,
+        "nach": nach,
+        "von_preis": alt.get("preis"),
+        "nach_preis": neu.get("preis"),
+        "von_verfuegbar": von_verf,
+        "nach_verfuegbar": nach_verf,
+    }
+
+
 def aktualisiere(eintrag, r, jetzt, tz=None):
     """Shop-Zustand fortschreiben. Fehler ueberschreiben keinen Preis."""
     if not isinstance(eintrag, dict):
@@ -962,6 +993,11 @@ def aktualisiere(eintrag, r, jetzt, tz=None):
         if eintrag.get("alarm_preis") is None:
             eintrag["alarm_preis"] = preis
         eintrag["preis"] = preis
+        if status == "unavail":
+            # Regalpreis: der Preis, den der Shop selbst fuer die Konsole
+            # nennt, waehrend sie nicht kaufbar ist. Er hebt den Deckel
+            # (shop_deckel_fuer) und bleibt stehen, wenn Bestand kommt.
+            eintrag["regal_preis"] = preis
         tief = eintrag.get("tief")
         try:
             eintrag["tief"] = preis if tief is None else min(float(tief), preis)
@@ -1056,16 +1092,18 @@ def naechste_faelligkeit(eintrag, jetzt, takt):
 
 
 def pruefe_shop(h, deckel, stop):
-    """Einen Shop abrufen, Treffer zweitpruefen und Health fortschreiben."""
+    """Einen Shop abrufen, Treffer zweitpruefen und Health fortschreiben.
+
+    ``deckel`` ist der bereits auf den Shop abgestimmte Deckel (Zahl oder
+    ``None`` fuer offen) aus ``core.shop_deckel_fuer``.
+    """
     r = core.scan_einen(h, cancel=stop)
     if not isinstance(r, dict):
         return None
     # scan_einen klassifiziert mit MAX_PREIS. Nur hit/expensive haengen vom
     # Preisdeckel ab; alle anderen Klassen bleiben unveraendert.
     if r.get("klass") in ("hit", "expensive"):
-        r["klass"] = core.classify(
-            True, r.get("preis"), core.preis_deckel(r.get("land"), deckel)
-        )
+        r["klass"] = core.classify(True, r.get("preis"), deckel)
     if r.get("klass") == "hit" and not core.ist_gebraucht(r.get("condition")):
         r = core.verify_treffer(h, r, cancel=stop)
     # JSON-LD liefert nicht immer ein eigenes "verfuegbar"-Feld. Der Zustand
@@ -1766,8 +1804,95 @@ def iso_ts(ts, tz):
         return ""
 
 
-def melde(r, event, konfig, zustand, schatten, settings, tz, pfad=None):
-    """Alarm im Schatten protokollieren oder live persistent einreihen."""
+CANARY_SHOP = "CANARY (Synthetik)"
+CANARY_PREIS = 899.99
+
+
+def canary_preis(deckel):
+    """Preis, der unter dem wirksamen Deckel liegt und plausibel bleibt."""
+    if deckel is None:
+        return CANARY_PREIS
+    try:
+        grenze = float(deckel)
+    except (TypeError, ValueError):
+        return CANARY_PREIS
+    return round(max(core.MIN_PREIS + 0.01, min(CANARY_PREIS, grenze - 0.01)), 2)
+
+
+def canary_verify(r):
+    """Synthetische Zweitpruefung: derselbe Zustand wie ein echter Abruf,
+    aber ohne Netz. Ausschliesslich fuer den Canary."""
+    r["verify"] = "bestaetigt"
+    r["verify_ts"] = round(time.time(), 3)
+    return r
+
+
+def canary_faellig(zustand, jetzt, tz):
+    """True, wenn fuer den lokalen Tag noch kein Canary lief."""
+    datum = _tag_datum(jetzt, tz)
+    info = (zustand or {}).get("canary")
+    return not (isinstance(info, dict)
+                and str(info.get("datum") or "") == datum)
+
+
+def canary_tag(konfig, zustand, jetzt, tz, settings, pfad=None, deckel=None):
+    """Einmal pro Tag einen kuenstlichen Treffer durch die Alarmkette schicken.
+
+    classify -> synthetische verify -> alarm_entscheidung -> melde, immer im
+    Schatten, ohne Netz und ohne Zaehlung als echter Alarm. Damit testet ein
+    Lauf ohne echte Treffer trotzdem die ganze Kette.
+    """
+    datum = _tag_datum(jetzt, tz)
+    grenze = core.preis_deckel("DE", deckel)
+    preis = canary_preis(grenze)
+    r = {
+        "haendler": CANARY_SHOP,
+        "land": "DE",
+        "preis": preis,
+        "klass": core.classify(True, preis, grenze),
+        "sofort": True,
+        "condition": "neu",
+        "marketplace": False,
+        "url": "",
+        "dauer": 0.0,
+        "canary": True,
+    }
+    canary_verify(r)
+    # Frischer Basis-Zustand: der Canary ist immer ein Restock und haengt
+    # nicht an echten Shop- oder Alarm-Zustaenden.
+    eintrag = {"initialisiert": True, "verfuegbar": False,
+               "preis": preis, "status": "unavail"}
+    event = alarm_entscheidung(eintrag, r, konfig.preis_toleranz)
+    ok = bool(event)
+    if ok:
+        melde(r, event, konfig, zustand, True, settings, tz, pfad, canary=True)
+    log({
+        "typ": "alarm_canary",
+        "ts": round(jetzt, 3),
+        "iso": iso_ts(jetzt, tz),
+        "shop": CANARY_SHOP,
+        "ok": ok,
+        "event": event,
+        "klass": r.get("klass"),
+        "preis": preis,
+        "verify": r.get("verify"),
+        "info": "Synthetischer Treffer, kein Versand" if ok
+                else "kein Ereignis ausgeloest",
+    })
+    zustand["canary"] = {"datum": datum, "ts": round(float(jetzt), 3),
+                         "ok": ok, "event": event}
+    return zustand["canary"]
+
+
+def melde(r, event, konfig, zustand, schatten, settings, tz, pfad=None,
+          canary=False):
+    """Alarm im Schatten protokollieren oder live persistent einreihen.
+
+    ``canary`` markiert den synthetischen Testtreffer: Er wird nie gesendet,
+    nie als echter Alarm gezaehlt und nie dedupliziert.
+    """
+    if canary:
+        schatten = True
     restock = event == "restock"
     titel = (
         "PS5 Pro 2 TB: wieder verfuegbar"
@@ -1781,9 +1906,10 @@ def melde(r, event, konfig, zustand, schatten, settings, tz, pfad=None):
     r["_restock"] = restock
     jetzt = time.time()
     tag = tag_sicherstellen(zustand)
-    tag["alarme"] += 1
-    if schatten:
-        tag["schatten"] += 1
+    if not canary:
+        tag["alarme"] += 1
+        if schatten:
+            tag["schatten"] += 1
     basis = {
         "typ": "alarm",
         "ts": round(jetzt, 3),
@@ -1798,8 +1924,12 @@ def melde(r, event, konfig, zustand, schatten, settings, tz, pfad=None):
         "preset": konfig.webhook_preset,
     }
 
+    if canary:
+        basis["canary"] = True
+
     if schatten:
-        if not core.webhook_dedupe(r.get("haendler"), r.get("preis"), restock):
+        if not canary and not core.webhook_dedupe(
+                r.get("haendler"), r.get("preis"), restock):
             basis.update(
                 {
                     "aktion": "unterdrueckt",
@@ -1810,7 +1940,9 @@ def melde(r, event, konfig, zustand, schatten, settings, tz, pfad=None):
             )
             log(basis)
             return
-        zustand["alarme_schatten"] = int(zustand.get("alarme_schatten") or 0) + 1
+        if not canary:
+            zustand["alarme_schatten"] = int(
+                zustand.get("alarme_schatten") or 0) + 1
         basis.update(
             {
                 "aktion": "wuerde_senden",
@@ -2102,6 +2234,9 @@ def main(argv=None):
     status_pfad = os.path.join(konfig.data_dir, STATUS_FILE)
     letzte_status = 0.0
     letzte_heartbeat = 0.0
+    # Ein volles Minutenbudget wird alle 2 s erneut geprueft. Ohne Drossel
+    # schriebe das pro Tag ueber 40.000 Zeilen; eine Meldung je Minute reicht.
+    letzte_budget_meldung = 0.0
     # Sofort eine frische Datei, damit der Healthcheck nicht auf den ersten
     # Loop warten muss.
     status_schreiben(status_daten(zustand, konfig, jetzt, tz, 0), status_pfad)
@@ -2115,6 +2250,14 @@ def main(argv=None):
                 drop_fenster_lernen(konfig, tz, jetzt)
             # Bericht nach dem Tageswechsel einreihen, danach Retries bedienen.
             tag_bericht_senden(konfig, settings, zustand, jetzt, pfad, abschluss)
+            if canary_faellig(zustand, jetzt, tz):
+                # Einmal pro Tag die Alarmkette testen, auch wenn der Lauf
+                # keinen einzigen echten Treffer hat.
+                canary_tag(konfig, zustand, jetzt, tz, settings, pfad, deckel)
+                try:
+                    zustand_speichern(pfad, zustand)
+                except Exception:
+                    pass
             status = status_daten(
                 zustand, konfig, jetzt, tz, len(request_verlauf)
             )
@@ -2142,21 +2285,46 @@ def main(argv=None):
                     float(next_due.get(h["name"], 0.0)),
                 )
             )
+            angefragt = [h["name"] for h in faellig]
             rest = budget_rest(request_verlauf, jetzt, konfig.max_req_min)
             if faellig and rest <= 0:
-                # Minutenbudget voll: kurz warten statt heiss zu drehen.
+                # Minutenbudget voll: die faelligen Shops verhungern in dieser
+                # Runde. Das wird geloggt, damit der Report "kein Check" von
+                # "nicht geprueft" unterscheiden kann.
+                if jetzt - letzte_budget_meldung >= 60.0:
+                    letzte_budget_meldung = jetzt
+                    log({
+                        "typ": "budget",
+                        "ts": round(jetzt, 3),
+                        "iso": iso_ts(jetzt, tz),
+                        "faellig": angefragt,
+                    })
                 STOP.wait(2.0)
                 continue
             faellig = faellig[:rest]
+            geprueft_jetzt = {h["name"] for h in faellig}
+            uebersprungen = [n for n in angefragt if n not in geprueft_jetzt]
             if faellig:
                 runde_start = time.time()
                 for h in faellig:
                     request_verlauf.append(runde_start)
                 ergebnisse = []
                 ex = ThreadPoolExecutor(max_workers=max(1, min(2, len(faellig))))
+                # Deckel je Shop: der beobachtete Regalpreis hebt den Deckel
+                # an, damit verfuegbarer Bestand nicht still als "expensive"
+                # durchfaellt (PS Direct 899,99 bei Deckel 900).
+                deckel_je_shop = {
+                    h["name"]: core.shop_deckel_fuer(
+                        h.get("land"), deckel,
+                        zustand["shops"].get(h["name"]) or {},
+                    )
+                    for h in faellig
+                }
                 try:
                     futures = {
-                        ex.submit(pruefe_shop, h, deckel, STOP): h for h in faellig
+                        ex.submit(pruefe_shop, h, deckel_je_shop.get(h["name"]),
+                                  STOP): h
+                        for h in faellig
                     }
                     for fut in as_completed(futures):
                         h = futures[fut]
@@ -2193,6 +2361,12 @@ def main(argv=None):
                                                            konfig, jetzt,
                                                            ketten_bis):
                                 tag_luecke(zustand, abstand, time.time(), tz)
+                        wechsel = zustands_wechsel(eintrag, r)
+                        if wechsel:
+                            log(dict(wechsel, typ="wechsel",
+                                     ts=round(time.time(), 3),
+                                     iso=iso_ts(time.time(), tz),
+                                     shop=name))
                         event = alarm_entscheidung(eintrag, r,
                                                    konfig.preis_toleranz)
                         aktualisiere(eintrag, r, time.time(), tz)
@@ -2255,6 +2429,7 @@ def main(argv=None):
                                 "ts": round(time.time(), 3),
                                 "iso": iso_ts(time.time(), tz),
                                 "shop": name,
+                                "deckel": deckel_je_shop.get(name),
                                 "klass": r.get("klass"),
                                 "preis": r.get("preis"),
                                 "verfuegbar": r.get("verfuegbar"),
@@ -2314,6 +2489,8 @@ def main(argv=None):
                         "typ": "runde",
                         "ts": round(jetzt_nach, 3),
                         "geprueft": len(ergebnisse),
+                        "faellig": angefragt,
+                        "uebersprungen": uebersprungen,
                         "treffer": sum(
                             1 for x in ergebnisse if x.get("klass") == "hit"
                         ),

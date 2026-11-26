@@ -2694,6 +2694,47 @@ def deckel_tests():
     check("Deckel ausserhalb", core.deckel_wert(core.DECKEL_MAX + 1), core.MAX_PREIS)
     check("Deckel Ersatzwert", core.deckel_wert("x", None), None)
 
+    # Preis-Klippe: PS Direct listet 899,99 bei Deckel 900. Der beobachtete
+    # Regalpreis hebt den Deckel um die Toleranz, damit verfuegbarer Bestand
+    # nicht still als "expensive" durchfaellt.
+    klippe = core.shop_deckel(900.0, 899.99)
+    check("Klippe Deckel angehoben", round(klippe, 2), 917.99)
+    check("Klippe Treffer bleibt Treffer",
+          core.classify(True, 899.99, klippe), "hit")
+    check("Klippe kleine Erhoehung", core.classify(True, 910.0, klippe), "hit")
+    check("Klippe deutlich teurer",
+          core.classify(True, 950.0, klippe), "expensive")
+    check("Klippe ohne Beobachtung", core.shop_deckel(900.0, None), 900.0)
+    check("Klippe Toleranz null", core.shop_deckel(900.0, 899.99, 0.0), 900.0)
+    check("Klippe offen bleibt offen", core.shop_deckel(None, 899.99), None)
+    check("Klippe Unsinn", core.shop_deckel(900.0, "x"), 900.0)
+    check("Klippe unplausibel", core.shop_deckel(900.0, 10.0), 900.0)
+    check("Klippe Deckel hoch", core.shop_deckel(900.0, 1698.98),
+          core.DECKEL_MAX)
+    check("Klippe Scalper bleibt teuer",
+          core.classify(True, 1698.98, core.shop_deckel(900.0, 1698.98)),
+          "expensive")
+    check("Klippe Shop sold_out",
+          round(core.shop_deckel_fuer("DE", {"DE": 900.0},
+                                      {"status": "unavail", "preis": 899.99}), 2),
+          917.99)
+    check("Klippe Shop in_stock verankert nicht",
+          core.shop_deckel_fuer("DE", {"DE": 900.0},
+                                {"status": "expensive", "preis": 1698.98}),
+          900.0)
+    check("Klippe Shop Regalpreis bleibt",
+          round(core.shop_deckel_fuer("DE", {"DE": 900.0},
+                                      {"status": "hit",
+                                       "regal_preis": 899.99}), 2),
+          917.99)
+    check("Klippe Shop AT",
+          round(core.shop_deckel_fuer("AT", {"DE": 900.0, "AT": 1000.0},
+                                      {"status": "unavail", "preis": 999.0}), 2),
+          1018.98)
+    check("Klippe Shop offen",
+          core.shop_deckel_fuer("DE", {"DE": None},
+                                {"status": "unavail", "preis": 899.99}), None)
+
     class _S:
         def __init__(self, d): self.d = d
         def get(self, k, d=None): return self.d.get(k, d)
@@ -3067,11 +3108,15 @@ def cloud_watcher_tests():
         cw.aktualisiere(eintrag, unavail, 1000.0, None)
         check("cloud baseline gesetzt", eintrag.get("initialisiert"), True)
         check("cloud baseline preis", eintrag.get("preis"), 899.99)
+        check("cloud regalpreis aus sold_out", eintrag.get("regal_preis"),
+              899.99)
         hit = dict(unavail, klass="hit", verfuegbar=True,
                    verify="bestaetigt", sofort=True)
         check("cloud restock erkannt", cw.ereignis(eintrag, hit), "restock")
         cw.aktualisiere(eintrag, hit, 1060.0, None)
         check("cloud bestand", eintrag.get("verfuegbar"), True)
+        check("cloud regalpreis bleibt beim treffer",
+              eintrag.get("regal_preis"), 899.99)
         check("cloud kein doppelalarm", cw.ereignis(eintrag, hit), None)
         check("cloud neuer preis",
               cw.ereignis(eintrag, dict(hit, preis=849.0)), "new")
@@ -3079,6 +3124,28 @@ def cloud_watcher_tests():
         ohne_flag.pop("verfuegbar")
         cw.aktualisiere(eintrag, ohne_flag, 1240.0, None)
         check("cloud treffer ohne flag", eintrag.get("verfuegbar"), True)
+        # Ein teurer in_stock-Preis darf den Regalpreis nicht ueberschreiben.
+        cw.aktualisiere(eintrag, dict(hit, preis=955.0), 1500.0, None)
+        check("cloud regalpreis bleibt beim teuren bestand",
+              eintrag.get("regal_preis"), 899.99)
+        check("cloud wechsel basislinie", cw.zustands_wechsel({}, hit), None)
+        wechsel = cw.zustands_wechsel(
+            {"status": "unavail", "verfuegbar": False, "preis": 899.99},
+            dict(hit, klass="expensive"))
+        check("cloud wechsel von unavail",
+              (wechsel or {}).get("von"), "unavail")
+        check("cloud wechsel nach expensive",
+              (wechsel or {}).get("nach"), "expensive")
+        check("cloud wechsel gleicher zustand",
+              cw.zustands_wechsel({"status": "hit", "verfuegbar": True}, hit),
+              None)
+        check("cloud wechsel ignoriert fehler",
+              cw.zustands_wechsel({"status": "parser"}, hit), None)
+        check("cloud wechsel preis allein",
+              cw.zustands_wechsel(
+                  {"status": "unavail", "verfuegbar": False,
+                   "preis": 899.99},
+                  dict(unavail, preis=879.0)), None)
 
         # Unbestaetigt, Vorbestellung und Gebrauchtware duerfen den Bestand
         # nicht setzen; der spaetere bestaetigte Treffer muss Restock sein.
@@ -3136,7 +3203,7 @@ def cloud_watcher_tests():
         core.reset_health()
         shop = {"name": "PS Direct DE", "land": "DE",
                 "urls": ["https://example.invalid/ps5"]}
-        deckel = core.preis_deckel_aus({"max_preis": 900})
+        deckel = 900.0
         core.scan_einen = lambda h, cancel=None, force=False: {
             "haendler": h["name"], "land": h["land"], "preis": 1500.0,
             "klass": "hit", "verfuegbar": True, "dauer": 0.01,
@@ -4165,6 +4232,91 @@ def watcher_log_tests():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def alarm_canary_tests():
+    """Synthetischer Alarmtest: Kette laeuft, sendet nie, zaehlt nicht."""
+    import cloud_watcher.watcher as cw
+
+    check("canary preis offen", cw.canary_preis(None), 899.99)
+    check("canary preis deckel 900", cw.canary_preis(900.0), 899.99)
+    check("canary preis deckel 700", cw.canary_preis(700.0), 699.99)
+    check("canary preis unter minimum", cw.canary_preis(100.0),
+          round(cw.core.MIN_PREIS + 0.01, 2))
+
+    k = cw.Konfig.aus_env({})
+    tz = k.zeitzone()
+    jetzt = 1800000000.0
+    z = cw.neuer_zustand(jetzt, 24)
+
+    gerufen = []
+    zeilen = []
+    alt_melde, alt_log = cw.melde, cw.log
+    cw.melde = lambda *a, **kw: gerufen.append((a, kw))
+    cw.log = lambda d: zeilen.append(d)
+    try:
+        ergebnis = cw.canary_tag(k, z, jetzt, tz, {}, None)
+    finally:
+        cw.melde, cw.log = alt_melde, alt_log
+
+    check("canary ereignis", ergebnis.get("event"), "restock")
+    check("canary ok", ergebnis.get("ok"), True)
+    check("canary melde einmal", len(gerufen), 1)
+    args, kwargs = gerufen[0]
+    r = args[0]
+    check("canary schatten erzwungen", args[4], True)
+    check("canary markiert", kwargs.get("canary"), True)
+    check("canary klassifikation", r.get("klass"), "hit")
+    check("canary verify", r.get("verify"), "bestaetigt")
+    check("canary flag", r.get("canary"), True)
+    check("canary shop", r.get("haendler"), cw.CANARY_SHOP)
+    check("canary kein echter alarm", z["tag"]["alarme"], 0)
+    check("canary log typ", zeilen[-1].get("typ"), "alarm_canary")
+    check("canary einmal pro tag", cw.canary_faellig(z, jetzt, tz), False)
+    check("canary naechster tag", cw.canary_faellig(z, jetzt + 86400, tz), True)
+
+    # melde darf den Canary auch bei schatten=False nie einreihen.
+    z2 = cw.neuer_zustand(jetzt, 24)
+    zeilen2 = []
+    alt_log = cw.log
+    cw.log = lambda d: zeilen2.append(d)
+    try:
+        cw.melde({"haendler": cw.CANARY_SHOP, "preis": 899.99, "url": ""},
+                 "restock", k, z2, False, {}, tz, None, canary=True)
+    finally:
+        cw.log = alt_log
+    check("canary melde kein versand", zeilen2[0].get("aktion"), "wuerde_senden")
+    check("canary melde markiert", zeilen2[0].get("canary"), True)
+    check("canary melde nicht gezaehlt", z2["tag"]["alarme"], 0)
+    check("canary melde schatten nicht gezaehlt", z2["alarme_schatten"], 0)
+    check("canary melde outbox leer",
+          len((z2.get("outbox") or {}).get("items") or []), 0)
+
+
+def alarm_canary_report_tests():
+    """Report zeigt den Canary getrennt von echten Alarmen."""
+    import watcher_report as wr
+
+    r = wr.bericht([
+        {"typ": "alarm_canary", "ts": 100.0,
+         "iso": "2026-11-26T08:00:00", "ok": True, "event": "restock"},
+        {"typ": "alarm_canary", "ts": 200.0,
+         "iso": "2026-11-27T08:00:00", "ok": False},
+        {"typ": "alarm", "ts": 150.0, "aktion": "wuerde_senden",
+         "canary": True, "event": "restock",
+         "shop": "CANARY (Synthetik)"},
+    ])
+    check("report canary gesamt", r["alarm_canary"]["gesamt"], 2)
+    check("report canary kein echter alarm", r["alarme"], 0)
+    check("report canary keine fehlalarme", r["fehlalarme"]["offen"], 0)
+    check("report canary ok", r["alarm_canary"]["ok"], 1)
+    check("report canary fehlgeschlagen",
+          r["alarm_canary"]["fehlgeschlagen"], 1)
+    check("report canary letzte",
+          r["alarm_canary"]["letzte"][-1]["ok"], False)
+    check("report canary text", "Alarm-Canary: 1/2 ok" in wr._text(r), True)
+    check("report canary text zuletzt",
+          "2026-11-27T08:00:00: kein Ereignis" in wr._text(r), True)
+
+
 def watcher_report_tests():
     """Report-Tool: Kennzahlen aus NDJSON-Zeilen."""
     if os.path.join(ROOT, "tools") not in sys.path:
@@ -4312,6 +4464,91 @@ def watcher_report_tests():
           "Preise: 1 gueltig, 3 ohne Preis, 2 unplausibel" in audit_text,
           True)
 
+    # Abdeckung je Tag und beobachtete Zeit: "6 von 24" ist Laufzeit, kein
+    # Polling-Fehler. Drei Sitzungen an drei Tagen, dazwischen grosse Luecken.
+    from datetime import datetime as _dt
+
+    def ck(iso):
+        return {"typ": "check", "iso": iso,
+                "ts": _dt.fromisoformat(iso).timestamp(),
+                "shop": "PS Direct DE", "klass": "unavail",
+                "preis": 899.99}
+
+    tag_zeilen = [
+        ck("2026-11-23T22:54:00+01:00"),
+        ck("2026-11-23T22:55:00+01:00"),
+        ck("2026-11-23T23:00:00+01:00"),
+        ck("2026-11-24T13:52:00+01:00"),
+        ck("2026-11-24T13:53:00+01:00"),
+        ck("2026-11-25T13:18:00+01:00"),
+        ck("2026-11-25T13:19:00+01:00"),
+        ck("2026-11-25T16:37:00+01:00"),
+        ck("2026-11-25T16:38:00+01:00"),
+    ]
+    tag_bericht = wr.bericht(tag_zeilen, 4.40)
+    ab = tag_bericht["abdeckung_stunden"]
+    check("report abdeckung tage",
+          [t["datum"] for t in ab["tage"]],
+          ["2026-11-23", "2026-11-24", "2026-11-25"])
+    check("report abdeckung tag1 stunden", ab["tage"][0]["abgedeckt"], 2)
+    check("report abdeckung tag1 zeit", ab["tage"][0]["beobachtet_s"], 360)
+    check("report abdeckung tag2 zeit", ab["tage"][1]["beobachtet_s"], 60)
+    check("report abdeckung tag3 stunden", ab["tage"][2]["abgedeckt"], 2)
+    check("report abdeckung tag3 zeit", ab["tage"][2]["beobachtet_s"], 120)
+    check("report abdeckung gesamt zeit", ab["beobachtet_s"], 540)
+    check("report abdeckung beobachtet h", ab["beobachtet_h"], 0.15)
+    check("report abdeckung sitzungen", ab["sitzungen"], 4)
+    check("report abdeckung stunden unveraendert", ab["abgedeckt"], 4)
+    ab_text = wr._text(tag_bericht)
+    check("report text beobachtet",
+          "Beobachtet: 0.15 h in 4 Sitzungen" in ab_text, True)
+    check("report text je tag",
+          "2026-11-23 2/24 Std, 0.10 h, 3 Checks" in ab_text, True)
+
+    # Verhungern und Zustandswechsel: eine Runde kann Shops faellig lassen,
+    # ohne dass Budget oder Schleife sie bedienen.
+    takt_zeilen = [
+        {"typ": "runde", "ts": 1000.0, "geprueft": 1,
+         "faellig": ["Shop A", "Shop B"], "uebersprungen": ["Shop B"]},
+        {"typ": "runde", "ts": 1030.0, "geprueft": 2,
+         "faellig": ["Shop A", "Shop B"], "uebersprungen": []},
+        {"typ": "budget", "ts": 1060.0,
+         "faellig": ["Shop A", "Shop B", "Shop C"]},
+        {"typ": "check", "ts": 1000.0, "shop": "Shop A", "klass": "unavail"},
+        {"typ": "check", "ts": 1030.0, "shop": "Shop A", "klass": "unavail"},
+        {"typ": "check", "ts": 1060.0, "shop": "Shop A", "klass": "unavail"},
+        {"typ": "wechsel", "ts": 1070.0, "shop": "Shop A",
+         "von": "unavail", "nach": "hit", "von_preis": 899.99,
+         "nach_preis": 899.99},
+    ]
+    takt_bericht = wr.bericht(takt_zeilen, 4.40)
+    st = takt_bericht["shop_takt"]
+    check("report takt A faellig", st["Shop A"]["faellig"], 3)
+    # Budget-Runden zaehlen auf beiden Seiten: B war zweimal faellig und
+    # wurde zweimal nicht bedient (einmal knapp, einmal ohne Budget).
+    check("report takt B uebersprungen", st["Shop B"]["uebersprungen"], 2)
+    check("report takt B budget", st["Shop B"]["budget_voll"], 1)
+    check("report takt A nur budget uebersprungen",
+          st["Shop A"]["uebersprungen"], 1)
+    # Ein Shop, der ausschliesslich in Budget-Runden faellig war, ist zu
+    # 100 % verhungert - nicht zu 0 %.
+    check("report takt C faellig", st["Shop C"]["faellig"], 1)
+    check("report takt C uebersprungen", st["Shop C"]["uebersprungen"], 1)
+    check("report takt nie mehr uebersprungen als faellig",
+          all(e["uebersprungen"] <= e["faellig"] for e in st.values()), True)
+    check("report takt A p50", st["Shop A"]["p50_s"], 30.0)
+    check("report wechsel gesamt", takt_bericht["wechsel"]["gesamt"], 1)
+    check("report wechsel paar",
+          takt_bericht["wechsel"]["paare"].get("unavail->hit"), 1)
+    takt_text = wr._text(takt_bericht)
+    check("report text takt", "Shop B p95" in takt_text, True)
+    check("report text uebersprungen",
+          "2 von 3 Runden uebersprungen" in takt_text, True)
+    check("report text budget allein",
+          "Shop C p95 -, 1 von 1 Runden uebersprungen" in takt_text, True)
+    check("report text wechsel",
+          "Zustandswechsel: 1 (unavail->hit 1)" in takt_text, True)
+
     challenge_zeilen = [
         {"typ": "check", "ts": at(10, 0), "shop": "PS Direct AT",
          "klass": "challenge", "preis": None},
@@ -4366,6 +4603,8 @@ if __name__ == "__main__":
         outbox_tests()
         watcher_log_tests()
         watcher_report_tests()
+        alarm_canary_tests()
+        alarm_canary_report_tests()
     finally:
         # main.py legt beim Import einen fonts/-Ordner an; im Test nicht noetig.
         try:
