@@ -44,6 +44,7 @@ from scan_core import (
     webhook_status_lesen, webhook_status_merken,
     verify_treffer, CHANCE_STATES, faellige_haendler, meldebereit,
     live_takt, live_runden_max, im_drop_fenster, LIVE_TAKT, LIVE_TAKT_MOBIL,
+    lerne_drop_fenster_aus_health, setze_drop_fenster,
     bg_wachhund,
     kurz_zeit, kurz_tag, event_zeile,
     tages_key, tages_label, offen_seit_text,
@@ -1503,6 +1504,7 @@ class MainUI(FloatLayout):
         self._insets=(0.0,0.0,0.0,0.0)
         self._wide=False; self._results_mode_set=False
         self._scan_token=0; self._scan_cancel_event=None
+        self._drop_fenster_lernen()
         self.history=History(); self._scan_t0=0.0; self._scan_done=0
         self._scan_total=0; self._rerender_event=None; self._drain_event=None
         self._resize_event=None; self._placeholder=None; self._last_sig=None
@@ -1940,6 +1942,20 @@ class MainUI(FloatLayout):
         if self._fast_event is not None:
             Clock.unschedule(self._fast_event); self._fast_event=None
         self._fast_next=0.0
+    def _drop_fenster_lernen(self):
+        """Gelernte Fenster aus den eigenen Health-Scans setzen.
+
+        Die App hat keinen Zugriff auf die Waechter-Logs; dieselbe Lernlogik
+        laeuft deshalb auf dem lokalen Verlauf. Ohne genug Treffer bleibt der
+        Default 09-18 aktiv.
+        """
+        try:
+            gelernt=lerne_drop_fenster_aus_health(health().all())
+            if gelernt.get("shops"):
+                setze_drop_fenster(gelernt["shops"])
+        except Exception:
+            pass
+
     def _fenster_pruefen(self,dt=0,erster=False):
         """09:00-18:00: Schnellscan automatisch an, am Fensterende wieder aus.
 

@@ -62,6 +62,9 @@ FEHLER_TAKT = 720
 CANARY_FEHLER_SERIE = 3
 # PS Direct wird bei knappem Minutenbudget zuerst bedient.
 PRIORITY_SHOPS = ("PS Direct DE", "PS Direct AT")
+# Nach einem bestaetigten Treffer alle Shops kurz in den schnellen Takt
+# nehmen: Drops treten oft geclustert auf. Bewusst kurz und gedeckelt.
+KETTEN_DROP_S = 600
 # Die Tageszeile braucht nur die letzten Pruefungen fuer p50/p95.
 TAG_MS_MAX = 500
 # Outbox: Ereignisse werden vor dem ersten Versand im Zustand abgelegt.
@@ -972,7 +975,7 @@ def _jitter(name):
     return roh / 1000.0 * 0.1
 
 
-def takt_sekunden(name, eintrag, konfig, jetzt=None):
+def takt_sekunden(name, eintrag, konfig, jetzt=None, ketten_bis=0.0):
     """Naechster Abstand in Sekunden.
 
     PS Direct laeuft nur in einem belegten oder gelernten Auflegefenster im
@@ -989,6 +992,11 @@ def takt_sekunden(name, eintrag, konfig, jetzt=None):
         return FEHLER_TAKT
     im_fenster = (name in PRIORITY_SHOPS
                   and core.im_drop_fenster(name, jetzt))
+    try:
+        if jetzt is not None and float(ketten_bis or 0.0) > float(jetzt):
+            im_fenster = True
+    except (TypeError, ValueError):
+        pass
     basis = konfig.takt if im_fenster else konfig.takt_neben
     return int(round(float(basis) * (1.0 + _jitter(name))))
 
@@ -2030,6 +2038,7 @@ def main(argv=None):
             pass
 
     request_verlauf = []
+    ketten_bis = 0.0
     status_pfad = os.path.join(konfig.data_dir, STATUS_FILE)
     letzte_status = 0.0
     letzte_heartbeat = 0.0
@@ -2107,6 +2116,9 @@ def main(argv=None):
                         if not isinstance(r, dict):
                             continue
                         ergebnisse.append(r)
+                        if r.get("klass") == "hit":
+                            ketten_bis = max(ketten_bis,
+                                             time.time() + KETTEN_DROP_S)
                         if r.get("verify"):
                             # Der zweite Abruf zaehlt ebenfalls als Request.
                             request_verlauf.append(time.time())
@@ -2118,7 +2130,8 @@ def main(argv=None):
                         if letzte:
                             abstand = time.time() - letzte
                             if abstand > 2 * takt_sekunden(name, eintrag,
-                                                           konfig, jetzt):
+                                                           konfig, jetzt,
+                                                           ketten_bis):
                                 tag_luecke(zustand, abstand, time.time(), tz)
                         event = alarm_entscheidung(eintrag, r,
                                                    konfig.preis_toleranz)
@@ -2210,7 +2223,8 @@ def main(argv=None):
                 jetzt_nach = time.time()
                 for h in faellig:
                     eintrag = zustand["shops"].get(h["name"], {})
-                    takt = takt_sekunden(h["name"], eintrag, konfig, jetzt)
+                    takt = takt_sekunden(h["name"], eintrag, konfig, jetzt,
+                                         ketten_bis)
                     # Ab Rundenstart rechnen, damit die Pruefdauer den Takt
                     # nicht zusaetzlich verlaengert.
                     next_due[h["name"]] = naechste_faelligkeit(

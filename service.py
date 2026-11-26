@@ -395,6 +395,15 @@ def main():
             if not ergebnisse and not fehler:
                 fehler = "keine Ergebnisse"
             _status_schreiben(ergebnisse, neu, fehler=fehler, intervall=intervall)
+            # Der Dienst hat keinen Zugriff auf die Waechter-Logs. Er lernt
+            # dieselben Fenster aus seinem eigenen Health-Verlauf; ohne
+            # genug Treffer bleibt der Default 09-18 aktiv.
+            try:
+                _gelernt = core.lerne_drop_fenster_aus_health(core.health().all())
+                if _gelernt.get("shops"):
+                    core.setze_drop_fenster(_gelernt["shops"])
+            except Exception:
+                pass
             naechste_voll = jetzt + intervall
             # Ausserhalb des Fensters nicht alle 45 s aufwachen: die volle
             # Runde hat PS Direct gerade mitgeprueft, der naechste Hot-Lauf

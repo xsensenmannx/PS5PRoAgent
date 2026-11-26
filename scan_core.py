@@ -2746,6 +2746,21 @@ def _health_verlauf(health_daten, shop):
     return []
 
 
+def lerne_drop_fenster_aus_health(health_daten, tz=None):
+    """Drop-Fenster aus dem lokalen Health-Verlauf lernen.
+
+    App und Hintergrunddienst haben keinen Zugriff auf die Waechter-Logs.
+    Sie koennen aber denselben Lernkern auf ihre eigenen letzten Scans
+    anwenden - ohne Cloud-Kopplung und ohne zusaetzliche Requests.
+    """
+    checks=[]
+    for shop in (health_daten or {}):
+        for eintrag in _health_verlauf(health_daten, shop):
+            checks.append({"shop":shop, "klass":eintrag.get("status"),
+                           "ts":eintrag.get("ts")})
+    return lerne_drop_fenster(checks, tz=tz)
+
+
 def _abdeckung_fuer_zeitraum(shop,start,ende,health_daten=None,takt=None,
                              dauer=None,offen=False,jetzt=None):
     """Abdeckung und Herkunft aus den Health-Scans im Zeitraum.

@@ -28,6 +28,14 @@ ZUSTELL_AKTIONEN = ("gesendet", "retry", "fehlgeschlagen", "verworfen")
 # Ein Alarm gilt als widerlegt, wenn der naechste Check desselben Shops
 # innerhalb dieses Fensters ``unavail`` meldet.
 FEHLALARM_FENSTER_S = 600.0
+# Ein Shop gilt als still, wenn er laenger als zwei Stunden keinen Check
+# mehr hatte. Der Waechter prueft im 15-/30-s-Takt; zwei Stunden sind ein
+# echter Ausfall, keine normale Taktluecke.
+STILLE_SHOP_S = 2 * 3600.0
+# Muss zu scan_core.preis_plausibel passen. Der Report bleibt bewusst
+# eigenstaendig und importiert den Scan-Kern nicht.
+MIN_PREIS = 550.0
+PREIS_PLAUSIBEL_MAX = 5000.0
 
 
 def log_dateien(daten_dir):
@@ -128,6 +136,10 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
 
     alarm_latenz = _alarm_latenz(alarme_zeilen, checks_nach_shop, outbox_zeilen)
     fehlalarme = _fehlalarme(alarme_zeilen, checks_nach_shop)
+    jetzt = max(zeiten) if zeiten else 0.0
+    stille_shops = _stille_shops(checks_nach_shop, jetzt)
+    abdeckung = _abdeckung_stunden(checks)
+    preise = _preis_telemetrie(checks)
     ms = [max(0.0, _zahl(daten.get("ms"))) for daten in checks]
     bytes_ = [max(0.0, _zahl(daten.get("bytes"))) for daten in checks]
     frisch = sum(1 for daten in checks if daten.get("frisch") is True)
@@ -180,6 +192,9 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
         "zugestellt": zugestellt,
         "alarm_latenz": alarm_latenz,
         "fehlalarme": fehlalarme,
+        "stille_shops": stille_shops,
+        "abdeckung_stunden": abdeckung,
+        "preis_telemetrie": preise,
         "klassen": klassen,
         "kosten": {
             "monat": round(kosten_monat, 2),
@@ -302,6 +317,114 @@ def _fehlalarme(alarme, checks_nach_shop):
     }
 
 
+def _check_ts(daten):
+    try:
+        return float(daten.get("ts"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _stille_shops(checks_nach_shop, jetzt, schwelle=STILLE_SHOP_S):
+    """Shops ohne Check innerhalb der Schwelle, mit plausibler Ursache."""
+    stille = []
+    for shop, checks in checks_nach_shop.items():
+        zeiten = [t for t in (_check_ts(c) for c in checks) if t is not None]
+        if not zeiten:
+            continue
+        letzte = max(zeiten)
+        alter = max(0.0, float(jetzt) - letzte)
+        if alter <= schwelle:
+            continue
+        letzte_klassen = [str(c.get("klass") or "") for c in checks[-5:]]
+        if letzte_klassen and all(
+            k in ("error", "parser", "challenge") for k in letzte_klassen
+        ):
+            ursache = "nur_fehler"
+        elif letzte_klassen and all(k == "unavail" for k in letzte_klassen):
+            ursache = "nur_unavail"
+        else:
+            ursache = "gemischt"
+        stille.append({
+            "shop": shop,
+            "letzter_check_ts": round(letzte, 3),
+            "letzter_check_iso": _iso(letzte),
+            "alter_s": int(alter),
+            "checks": len(checks),
+            "ursache": ursache,
+        })
+    stille.sort(key=lambda e: e["alter_s"], reverse=True)
+    return {
+        "schwelle_s": int(schwelle),
+        "gesamt": len(checks_nach_shop),
+        "stille": stille,
+    }
+
+
+def _check_stunde(daten):
+    iso = daten.get("iso")
+    if iso:
+        try:
+            return datetime.fromisoformat(str(iso)).hour
+        except (TypeError, ValueError):
+            pass
+    ts = _check_ts(daten)
+    if ts is None:
+        return None
+    try:
+        return datetime.fromtimestamp(ts).hour
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _abdeckung_stunden(checks):
+    """Verteilung der Checks auf 24 Stunden; zeigt Luecken wie 09-12 Uhr."""
+    stunden = [0] * 24
+    for daten in checks:
+        stunde = _check_stunde(daten)
+        if stunde is not None and 0 <= stunde < 24:
+            stunden[stunde] += 1
+    luecken = [h for h, n in enumerate(stunden) if n == 0]
+    return {
+        "stunden": stunden,
+        "abgedeckt": 24 - len(luecken),
+        "luecken": luecken,
+        "checks": sum(stunden),
+    }
+
+
+def _preis_telemetrie(checks):
+    """Wie oft ein Check einen plausiblen Preis hatte.
+
+    Die Extraktoren verwerfen 0/1 EUR und >5000 EUR bereits; sie landen
+    als ``preis=None`` im Log. Diese Zahl macht den stillen Verlust sichtbar.
+    """
+    gueltig = ohne = unplausibel = 0
+    for daten in checks:
+        preis = daten.get("preis")
+        if preis is None:
+            ohne += 1
+            continue
+        try:
+            preis = float(preis)
+        except (TypeError, ValueError):
+            ohne += 1
+            continue
+        if MIN_PREIS <= preis <= PREIS_PLAUSIBEL_MAX:
+            gueltig += 1
+        else:
+            unplausibel += 1
+    gesamt = gueltig + ohne + unplausibel
+    return {
+        "gueltig": gueltig,
+        "ohne_preis": ohne,
+        "unplausibel": unplausibel,
+        "gesamt": gesamt,
+        "anteil_ohne": round(
+            100.0 * (ohne + unplausibel) / gesamt, 1
+        ) if gesamt else 0.0,
+    }
+
+
 def _ms(wert):
     return None if wert is None else int(round(float(wert) * 1000.0))
 
@@ -331,6 +454,15 @@ def _text(daten):
             int(lat.get("ohne_versuch") or 0),
         )
     )
+    abdeckung = daten.get("abdeckung_stunden") or {}
+    stille = daten.get("stille_shops") or {}
+    preise = daten.get("preis_telemetrie") or {}
+    luecken = abdeckung.get("luecken") or []
+    luecken_text = ", ".join("%02d" % h for h in luecken) or "keine"
+    stille_liste = ", ".join(
+        "%s (%dh)" % (e.get("shop"), int(e.get("alter_s") or 0) // 3600)
+        for e in (stille.get("stille") or [])[:5]
+    ) or "keine"
     fq = daten.get("fehlalarme") or {}
     fehlalarm_text = (
         "Fehlalarme: %d von %d geprueft (%s), %d bestaetigt, %d unklar, %d offen"
@@ -379,6 +511,23 @@ def _text(daten):
             ),
             latenz,
             fehlalarm_text,
+            "Abdeckung: %d von 24 Stunden mit Checks; Luecken: %s"
+            % (int(abdeckung.get("abgedeckt") or 0), luecken_text),
+            "Stille Shops: %d von %d (Schwelle %dh): %s"
+            % (
+                len(stille.get("stille") or []),
+                int(stille.get("gesamt") or 0),
+                int(stille.get("schwelle_s") or 0) // 3600,
+                stille_liste,
+            ),
+            "Preise: %d gueltig, %d ohne Preis, %d unplausibel "
+            "(%.1f %% ohne plausiblen Preis)"
+            % (
+                int(preise.get("gueltig") or 0),
+                int(preise.get("ohne_preis") or 0),
+                int(preise.get("unplausibel") or 0),
+                float(preise.get("anteil_ohne") or 0.0),
+            ),
             "Kosten: %.2f EUR/Monat | Zeitraum %.2f EUR | pro Alarm %s"
             % (kosten["monat"], kosten["zeitraum"], pro_alarm),
             "Hochrechnung: %.1f Alarme/Monat" % kosten["alarme_pro_monat"],

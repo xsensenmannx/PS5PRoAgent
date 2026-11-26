@@ -2412,6 +2412,13 @@ def live_tests():
                 "ts": lern_ts(16, 10 + i % 2)} for i in range(6)]
     check("Lernfenster ein Tag",
           core.lerne_drop_fenster(ein_tag)["shops"], {})
+    health_daten = {}
+    for zeile in lern_checks:
+        health_daten.setdefault(zeile["shop"], {"verlauf": []})["verlauf"].append(
+            {"ts": zeile["ts"], "status": zeile["klass"]})
+    aus_health = core.lerne_drop_fenster_aus_health(health_daten)
+    check("Lernfenster aus Health",
+          aus_health["shops"]["PS Direct DE"]["fenster"], [[10, 0, 12, 0]])
 
     tmp_fenster = tempfile.mkdtemp(prefix="ps5pro-fenster-")
     try:
@@ -2987,6 +2994,9 @@ def cloud_watcher_tests():
           30 <= cw.takt_sekunden(
               "PS Direct DE", ruhig, k,
               time.mktime((2026, 11, 16, 19, 0, 0, 0, 0, -1))) <= 34, True)
+    check("cloud takt kette",
+          15 <= cw.takt_sekunden("Alternate DE", ruhig, k, takt_ts,
+                                 takt_ts + 60) <= 17, True)
     check("cloud takt neben mit jitter",
           30 <= cw.takt_sekunden("Alternate DE", ruhig, k) <= 34, True)
     check("cloud takt sperre",
@@ -4184,6 +4194,50 @@ def watcher_report_tests():
     fq_text = wr._text(wr.bericht(fq_zeilen, 4.40))
     check("report text fehlalarm",
           "Fehlalarme: 1 von 3 geprueft (33.3 %)" in fq_text, True)
+
+    # Abdeckung, stille Shops und Preis-Guard-Telemetrie.
+    def at(h, m=0):
+        return time.mktime((2026, 11, 16, h, m, 0, 0, 0, -1))
+
+    audit_zeilen = [
+        {"typ": "check", "ts": at(15, 0), "shop": "PS Direct DE",
+         "klass": "unavail", "preis": None},
+        {"typ": "check", "ts": at(15, 5), "shop": "PS Direct DE",
+         "klass": "unavail", "preis": None},
+        {"typ": "check", "ts": at(10, 0), "shop": "Alternate DE",
+         "klass": "unavail", "preis": 1.0},
+        {"typ": "check", "ts": at(11, 0), "shop": "Alternate DE",
+         "klass": "unavail", "preis": 5001.0},
+        {"typ": "check", "ts": at(14, 0), "shop": "Alternate DE",
+         "klass": "hit", "preis": 799.0},
+        {"typ": "check", "ts": at(17, 50), "shop": "Amazon DE",
+         "klass": "unavail", "preis": None},
+    ]
+    audit = wr.bericht(audit_zeilen, 4.40)
+    check("report abdeckung", audit["abdeckung_stunden"]["abgedeckt"], 5)
+    check("report stille shops",
+          len(audit["stille_shops"]["stille"]), 2)
+    check("report stille gesamt", audit["stille_shops"]["gesamt"], 3)
+    ursachen = {e["shop"]: e["ursache"]
+                for e in audit["stille_shops"]["stille"]}
+    check("report stille ursache PS", ursachen.get("PS Direct DE"),
+          "nur_unavail")
+    check("report stille ursache Alternate", ursachen.get("Alternate DE"),
+          "gemischt")
+    check("report preis gueltig", audit["preis_telemetrie"]["gueltig"], 1)
+    check("report preis ohne", audit["preis_telemetrie"]["ohne_preis"], 3)
+    check("report preis unplausibel",
+          audit["preis_telemetrie"]["unplausibel"], 2)
+    check("report preis anteil", audit["preis_telemetrie"]["anteil_ohne"],
+          83.3)
+    audit_text = wr._text(audit)
+    check("report text abdeckung",
+          "Abdeckung: 5 von 24 Stunden mit Checks" in audit_text, True)
+    check("report text stille",
+          "Stille Shops: 2 von 3 (Schwelle 2h)" in audit_text, True)
+    check("report text preise",
+          "Preise: 1 gueltig, 3 ohne Preis, 2 unplausibel" in audit_text,
+          True)
 
 
 if __name__ == "__main__":
