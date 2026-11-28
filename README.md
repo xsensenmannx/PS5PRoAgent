@@ -12,7 +12,7 @@ Preisänderung gegenüber dem letzten Scan — als Radar im PS1-BIOS-Look.
 
 ## Direkt herunterladen
 
-**[PS5 Pro Search Agent v1.5.5 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.5.5/ps5prosearchagent-1.5.5-arm64-v8a.apk)**
+**[PS5 Pro Search Agent v1.5.6 als APK herunterladen](https://github.com/xsensenmannx/PS5PRoAgent/releases/download/v1.5.6/ps5prosearchagent-1.5.6-arm64-v8a.apk)**
 
 Die APK ist für Android-Geräte mit **arm64-v8a** gebaut. Nach dem Download
 die Datei antippen und die Installation aus dieser Quelle erlauben.
@@ -21,13 +21,13 @@ Die Release-APK ist mit einem festen Schlüssel signiert: Ein Update legt sich
 über die bestehende Installation. Nur beim Wechsel aus der alten 5.x-Reihe ist
 einmalig eine Deinstallation nötig.
 
-Die Release-APK hat **23.099.653 Bytes**; SHA-256:
-`cb0ce858088734840efdc12f64c796e7be48088fa143211490ff71943784adaf`.
+Die Release-APK-Größe und der SHA-256-Wert stehen in den Release-Notes der Version.
 
 | Stand | Bedeutung |
 |---|---|
-| **v1.5.5** | Die aktuelle Version (versionCode 10505). Diese APK installieren. |
-| **v1.5.4** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.6** | Die aktuelle Version (versionCode 10506). Diese APK installieren. |
+| **v1.5.5** | Vorherige Version; bleibt als Archiv-Release erhalten. |
+| **v1.5.4** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.5.3** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.5.2** | Ältere Version; bleibt als Archiv-Release erhalten. |
 | **v1.5.1** | Ältere Version; bleibt als Archiv-Release erhalten. |
@@ -42,12 +42,12 @@ Alle Zwischenstände, Beta-Versionen und Test-Releases wurden entfernt; die
 aktuelle Version steht oben. Alle Downloads:
 **[github.com/xsensenmannx/PS5PRoAgent/releases](https://github.com/xsensenmannx/PS5PRoAgent/releases)**
 
-> **Eine Nummer für alles:** App, Release und Download heißen **v1.5.5**
-> (App-Version 1.5.5, versionCode 10505). Der Button oben führt immer zur
+> **Eine Nummer für alles:** App, Release und Download heißen **v1.5.6**
+> (App-Version 1.5.6, versionCode 10506). Der Button oben führt immer zur
 > aktuellen APK.
 >
-> **Zur Zählung:** v1.5.5 setzt die 1.5-Linie fort. Die
-> Zählung läuft sauber als 1.x-Linie weiter (v1.0–v1.5.4 Archiv, v1.5.5 aktuell).
+> **Zur Zählung:** v1.5.6 setzt die 1.5-Linie fort. Die
+> Zählung läuft sauber als 1.x-Linie weiter (v1.0–v1.5.5 Archiv, v1.5.6 aktuell).
 
 ## Eindruck
 
@@ -299,7 +299,14 @@ Helfer nicht aus und braucht keinen Shop-Zugriff.
 
 Aktueller Stand und Archiv:
 
-* **v1.5.5** – Die aktuelle veröffentlichte Version (versionCode 10505):
+* **v1.5.6** – Die aktuelle veröffentlichte Version (versionCode 10506):
+  Der Schatten-Report misst Alarm-Latenz, Fehlalarm-Quote, Stundenabdeckung,
+  stille Shops mit Ursache und einen synthetischen Alarm-Canary; Drop-Fenster
+  werden lokal aus Health und Events gelernt, ein Treffer prüft kurz alle
+  Shops im schnellen Takt. Der Preis-Guard gilt für 400–5000 €, die
+  Preis-Klippe folgt je Shop dem Regalpreis (höchstens +2 %, gedeckelt auf
+  1500 €). Dazu 1737 Logiktests.
+* **v1.5.5** – Vorherige Version (versionCode 10505):
   Der Cloud-Wächter prüft PS Direct DE/AT und Alternate DE outbound-only, im
   Schattenmodus mit Tagesbericht und Testalarm; die App startet den Schnellscan
   in den belegten PS-Direct-Fenstern (09:00–18:00) automatisch und beendet nur
