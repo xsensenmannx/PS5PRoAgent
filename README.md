@@ -21,7 +21,8 @@ Die Release-APK ist mit einem festen Schlüssel signiert: Ein Update legt sich
 über die bestehende Installation. Nur beim Wechsel aus der alten 5.x-Reihe ist
 einmalig eine Deinstallation nötig.
 
-Die Release-APK-Größe und der SHA-256-Wert stehen in den Release-Notes der Version.
+Die Release-APK hat **23.111.941 Bytes**; SHA-256:
+`e2f4136105fa3e212acd1781082e09a15c6d0c9b3eb45117565decf70540e622`.
 
 | Stand | Bedeutung |
 |---|---|
