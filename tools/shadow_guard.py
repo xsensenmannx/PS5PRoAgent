@@ -27,7 +27,7 @@ import time
 from datetime import datetime
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_DIR = os.path.join(ROOT, "_verify", "cloud_shadow_20261123_225425")
+DEFAULT_DIR = os.path.join(ROOT, "_verify", "cloud_shadow_20261127_1215")
 STARTUP_NAME = "PS5ProShadowWatcher.cmd"
 
 STATE_FILE = "cloud_watch_state.json"
@@ -187,7 +187,7 @@ def waechter_env(ordner):
             "WATCH_DATA_DIR": ordner,
             # Fest im Schatten: keine Produktionsalarme aus diesem Lauf.
             "WATCH_SHADOW": "1",
-            "WATCH_SHADOW_HOURS": "48",
+            "WATCH_SHADOW_HOURS": "60",
             "WATCH_SHOPS": "PS Direct DE,PS Direct AT,Alternate DE",
             "WATCH_TAKT": "15",
             "WATCH_TAKT_NEBEN": "30",
@@ -327,6 +327,10 @@ def supervise(ordner, python):
     try:
         while True:
             jetzt = time.time()
+            if not grenze:
+                # Frisches Verzeichnis: der Zustand entsteht erst mit dem
+                # ersten Waechterstart, die Frist wird dann nachgezogen.
+                grenze = schatten_bis(ordner)
             if grenze and jetzt >= grenze:
                 pid = waechter_pid(ordner)
                 log(ordner, "Schattenfrist erreicht, Waechter PID %s wird beendet" % pid)

@@ -4312,9 +4312,361 @@ def alarm_canary_report_tests():
           r["alarm_canary"]["fehlgeschlagen"], 1)
     check("report canary letzte",
           r["alarm_canary"]["letzte"][-1]["ok"], False)
-    check("report canary text", "Alarm-Canary: 1/2 ok" in wr._text(r), True)
+    check("report canary nach tag",
+          [(t["datum"], t["gesamt"], t["ok"], t["bestanden"])
+           for t in r["alarm_canary"]["tage"]],
+          [("2026-11-26", 1, 1, True), ("2026-11-27", 1, 0, False)])
+    check("report canary tage gezaehlt", r["alarm_canary"]["tage_ok"], 1)
+    check("report canary text",
+          "Alarm-Canary: 1/2 Tage ok (2 Laeufe, 1 fehlgeschlagen)"
+          in wr._text(r), True)
+
+    # Mehrere Laeufe am selben Tag bleiben ein Tag.
+    doppelt = wr.bericht([
+        {"typ": "alarm_canary", "ts": 300.0,
+         "iso": "2026-11-26T08:00:00", "ok": True},
+        {"typ": "alarm_canary", "ts": 400.0,
+         "iso": "2026-11-26T20:00:00", "ok": True},
+    ])["alarm_canary"]
+    check("report canary doppelt ein tag", len(doppelt["tage"]), 1)
+    check("report canary doppelt laeufe", doppelt["tage"][0]["gesamt"], 2)
+    check("report canary doppelt ok", doppelt["tage"][0]["bestanden"], True)
+    check("report canary doppelt tage", doppelt["tage_ok"], 1)
     check("report canary text zuletzt",
           "2026-11-27T08:00:00: kein Ereignis" in wr._text(r), True)
+
+
+def abnahme_report_tests():
+    """Die feste 48-h-Abnahme: sechs klare Bestanden-Kriterien."""
+    import watcher_report as wr
+    from datetime import datetime as _dt, timedelta as _td
+
+    start = _dt.fromisoformat("2026-11-27T12:00:00+01:00")
+
+    def zeilen(stunden=48.0, takt_s=300, canary_tage=3,
+               shops=("Shop A",)):
+        daten = [{"typ": "start", "ts": start.timestamp(),
+                  "iso": start.isoformat(), "shops": list(shops)}]
+        schritte = int(stunden * 3600 / takt_s)
+        for i in range(schritte + 1):
+            ts = start.timestamp() + i * takt_s
+            iso = (start + _td(seconds=i * takt_s)).isoformat()
+            daten.append({"typ": "check", "ts": ts, "iso": iso,
+                          "shop": "Shop A", "klass": "unavail",
+                          "preis": 899.99, "ms": 100, "bytes": 1000})
+            if i % 12 == 0:
+                daten.append({"typ": "runde", "ts": ts, "geprueft": 1,
+                              "faellig": ["Shop A"], "uebersprungen": []})
+        for tag in range(canary_tage):
+            ts = start.timestamp() + tag * 86400
+            iso = (start + _td(days=tag)).isoformat()
+            daten.append({"typ": "alarm_canary", "ts": ts, "iso": iso,
+                          "ok": True, "event": "restock"})
+        return daten
+
+    r = wr.bericht(zeilen(), 4.40)
+    a = r["abnahme"]
+    check("abnahme bestanden", a["bestanden"], True)
+    check("abnahme sechs kriterien", len(a["kriterien"]), 6)
+    check("abnahme shop quote ok", a["kriterien"][1]["ok"], True)
+    check("abnahme nichts offen", a["fehlgeschlagen"], [])
+    check("abnahme abdeckung detail",
+          a["kriterien"][0]["wert"].startswith("3 Tage, 3/3 vollstaendig"),
+          True)
+    check("abdeckung randstunden",
+          [t["erwartet_h"] for t in r["abdeckung_stunden"]["tage"]],
+          [12, 24, 12])
+    check("abdeckung randstunden summe",
+          sum(t["erwartet_h"] for t in r["abdeckung_stunden"]["tage"]), 48)
+    text = wr._text(r)
+    check("abnahme text", "Abnahme 48 h: BESTANDEN" in text, True)
+    check("abnahme text voller tag", "2026-11-28 24/24" in text, True)
+    check("abnahme text randtag", "2026-11-27 12/12 (Randtag)" in text, True)
+
+    kurz = wr.bericht(zeilen(stunden=2, canary_tage=1), 4.40)["abnahme"]
+    check("abnahme kurz nicht bestanden", kurz["bestanden"], False)
+    check("abnahme kurz abdeckung",
+          "abdeckung" in kurz["fehlgeschlagen"], True)
+
+    skip = zeilen()
+    for x in [x for x in skip if x.get("typ") == "runde"][:3]:
+        x["faellig"] = ["Shop A", "Shop B"]
+        x["uebersprungen"] = ["Shop B"]
+    spa = wr.bericht(skip, 4.40)["abnahme"]
+    check("abnahme uebersprungen",
+          "uebersprungen" in spa["fehlgeschlagen"], True)
+
+    bud = zeilen()
+    bud.append({"typ": "budget", "ts": start.timestamp() + 3600,
+                "faellig": ["Shop A"]})
+    bua = wr.bericht(bud, 4.40)["abnahme"]
+    check("abnahme budget voll",
+          "budget_voll" in bua["fehlgeschlagen"], True)
+
+    can = wr.bericht(zeilen(canary_tage=2), 4.40)["abnahme"]
+    check("abnahme canary fehlt",
+          "canary" in can["fehlgeschlagen"], True)
+    check("abnahme canary wert", can["kriterien"][4]["wert"],
+          "2/3 Tage ok (2 Laeufe, 0 fehlgeschlagen)")
+    check("abnahme canary detail fehlt",
+          "2026-11-29 fehlt" in can["kriterien"][4]["detail"], True)
+
+    # Zwei Laeufe am ersten Tag ersetzen den fehlenden zweiten nicht.
+    zweimal = [x for x in zeilen(canary_tage=1)
+               if x.get("typ") != "alarm_canary"]
+    for stunde in (8, 16):
+        versatz = (stunde - 12) * 3600
+        zweimal.append({
+            "typ": "alarm_canary", "ts": start.timestamp() + versatz,
+            "iso": (start + _td(seconds=versatz)).isoformat(),
+            "ok": True, "event": "restock",
+        })
+    zw = wr.bericht(zweimal, 4.40)["abnahme"]
+    check("abnahme canary doppelt kein ersatz",
+          "canary" in zw["fehlgeschlagen"], True)
+    check("abnahme canary doppelt wert", zw["kriterien"][4]["wert"],
+          "1/3 Tage ok (2 Laeufe, 0 fehlgeschlagen)")
+    check("abnahme canary doppelt detail",
+          "2026-11-28 fehlt" in zw["kriterien"][4]["detail"], True)
+
+    # Mehrere erfolgreiche Laeufe pro Tag sind erlaubt.
+    # Die Laeufe bleiben im Beobachtungsfenster: Ein Canary nach dem letzten
+    # Check wuerde den Shop zu Recht als still erscheinen lassen.
+    mehrfach = [x for x in zeilen() if x.get("typ") != "alarm_canary"]
+    for tag in range(3):
+        for versatz_s in ((3600, 7200) if tag < 2 else (-3600, 0)):
+            versatz = tag * 86400 + versatz_s
+            mehrfach.append({
+                "typ": "alarm_canary", "ts": start.timestamp() + versatz,
+                "iso": (start + _td(seconds=versatz)).isoformat(),
+                "ok": True, "event": "restock",
+            })
+    mf = wr.bericht(mehrfach, 4.40)["abnahme"]
+    check("abnahme canary mehrfach bestanden", mf["bestanden"], True)
+    check("abnahme canary mehrfach wert", mf["kriterien"][4]["wert"],
+          "3/3 Tage ok (6 Laeufe, 0 fehlgeschlagen)")
+
+    # Ein Tag mit nur fehlgeschlagenen Laeufen bleibt ein fehlender Tag.
+    kaputt = [x for x in zeilen() if x.get("typ") != "alarm_canary"]
+    for tag in range(3):
+        versatz = tag * 86400
+        kaputt.append({
+            "typ": "alarm_canary", "ts": start.timestamp() + versatz,
+            "iso": (start + _td(seconds=versatz)).isoformat(),
+            "ok": tag < 2, "event": "restock" if tag < 2 else None,
+        })
+    ka = wr.bericht(kaputt, 4.40)["abnahme"]
+    check("abnahme canary ohne erfolg",
+          "canary" in ka["fehlgeschlagen"], True)
+    check("abnahme canary ohne erfolg detail",
+          "2026-11-29 kein Erfolg (1 Lauf)" in ka["kriterien"][4]["detail"],
+          True)
+
+    still = wr.bericht(zeilen(shops=("Shop A", "Shop B")))
+    check("abnahme stille shops",
+          "stille_shops" in still["abnahme"]["fehlgeschlagen"], True)
+    # Ein konfigurierter Shop ohne Check erbt das volle Laufenster, statt
+    # mit 0 erwarteten Stunden still bestanden zu sein.
+    check("abnahme stille shops ohne stunden",
+          still["abdeckung_stunden"]["shops"]["Shop B"]["fehlende_h"], 48)
+    check("abnahme stille shops erste fehlende",
+          still["abdeckung_stunden"]["shops"]["Shop B"]["erste_fehlende"],
+          "2026-11-27 12")
+
+    luecke = [x for x in zeilen()
+              if not (x.get("typ") == "check"
+                      and str(x.get("iso", "")).startswith("2026-11-27T20:"))]
+    lua = wr.bericht(luecke, 4.40)["abnahme"]
+    check("abnahme stundenluecke",
+          "abdeckung" in lua["fehlgeschlagen"], True)
+
+    sitzung = [x for x in zeilen()
+               if not (x.get("typ") == "check"
+                       and "2026-11-28T11:" in str(x.get("iso", ""))
+                       and int(str(x.get("iso"))[14:16]) < 25)]
+    sia = wr.bericht(sitzung, 4.40)["abnahme"]
+    check("abnahme sitzungsluecke",
+          "abdeckung" in sia["fehlgeschlagen"], True)
+    check("abnahme sitzung kein eigenes kriterium",
+          all(k.get("name") != "sitzungen" for k in sia["kriterien"]), True)
+
+    # Ein dauerhaft geblockter Shop scheitert an der Shop-Quote und hat
+    # zugleich keine gueltige Abdeckung; entscheidend ist, dass er nicht
+    # erst als stiller Shop auffaellt.
+    block = zeilen()
+    for i in range(10):
+        ts = start.timestamp() + 48 * 3600 - 600 + i * 60
+        iso = (start + _td(seconds=48 * 3600 - 600 + i * 60)).isoformat()
+        block.append({"typ": "check", "ts": ts, "iso": iso,
+                      "shop": "Shop B", "klass": "challenge",
+                      "preis": None})
+    ba = wr.bericht(block, 4.40)["abnahme"]
+    check("abnahme shop quote",
+          "shop_qualitaet" in ba["fehlgeschlagen"], True)
+    check("abnahme shop quote abdeckung",
+          "abdeckung" in ba["fehlgeschlagen"], True)
+    check("abnahme shop quote nicht still",
+          "stille_shops" not in ba["fehlgeschlagen"], True)
+    check("abnahme shop quote detail",
+          any("Shop B: 0/48 h" in d
+              for d in ba["kriterien"][0]["detail"]), True)
+
+    # Die 5-%-Grenze entscheidet auf Rohwerten, nicht auf der Anzeige.
+    # 62/1250 = 4,96 % (bestanden), 63/1250 = 5,04 % (nicht bestanden).
+    q = wr._shop_qualitaet({
+        "knapp": [{"klass": "challenge"}] * 62
+                 + [{"klass": "unavail"}] * 1188,
+        "ueber": [{"klass": "challenge"}] * 63
+                 + [{"klass": "unavail"}] * 1187,
+    })
+    check("shop quote 4.96 bestanden", q["knapp"]["bestanden"], True)
+    check("shop quote 4.96 anzeige", q["knapp"]["quote"], 4.96)
+    check("shop quote 5.04 nicht bestanden", q["ueber"]["bestanden"], False)
+    check("shop quote 5.04 anzeige", q["ueber"]["quote"], 5.04)
+
+    qa = wr._abnahme({"shop_qualitaet": {"knapp": q["knapp"]}})
+    qk = next(k for k in qa["kriterien"] if k["name"] == "shop_qualitaet")
+    check("abnahme shop 4.96 ok", qk["ok"], True)
+    qa2 = wr._abnahme({"shop_qualitaet": {"ueber": q["ueber"]}})
+    check("abnahme shop 5.04 fehlt",
+          "shop_qualitaet" in qa2["fehlgeschlagen"], True)
+
+    # Die Schwelle greift auf dem Ungueltig-Anteil, nicht nur auf Challenge.
+    qc = wr._shop_qualitaet({
+        "chance_knapp": [{"klass": "chance"}] * 62
+                       + [{"klass": "unavail"}] * 1188,
+        "chance_ueber": [{"klass": "chance"}] * 63
+                       + [{"klass": "unavail"}] * 1187,
+    })
+    check("shop chance 4.96 bestanden",
+          qc["chance_knapp"]["bestanden"], True)
+    check("shop chance 5.04 nicht bestanden",
+          qc["chance_ueber"]["bestanden"], False)
+    check("shop chance zaehlt ungueltig",
+          qc["chance_knapp"]["ungueltig"], 62)
+
+    # Abdeckung je Shop: Jeder Shop muss jede erwartete Stunde selbst
+    # abdecken; zwei volle Shops bestehen, ein Check am Ende nicht.
+    doppelt = zeilen()
+    doppelt[0]["shops"] = ["Shop A", "Shop B"]
+    for x in [x for x in doppelt if x.get("typ") == "check"]:
+        kopie = dict(x)
+        kopie["shop"] = "Shop B"
+        doppelt.append(kopie)
+    db = wr.bericht(doppelt, 4.40)["abnahme"]
+    check("abnahme shop abdeckung bestanden", db["bestanden"], True)
+    check("abnahme shop abdeckung wert",
+          "2/2 Shops vollstaendig" in db["kriterien"][0]["wert"], True)
+    check("abnahme shop abdeckung detail",
+          "Shop B: 48/48 h, Luecke 300 s" in db["kriterien"][0]["detail"],
+          True)
+
+    einzeln = zeilen()
+    einzeln[0]["shops"] = ["Shop A", "Shop B"]
+    letzter_ts = max(x["ts"] for x in einzeln if x.get("typ") == "check")
+    einzeln.append({
+        "typ": "check", "ts": letzter_ts - 1800.0,
+        "iso": (start + _td(hours=47, minutes=30)).isoformat(),
+        "shop": "Shop B", "klass": "unavail",
+        "preis": 899.99, "ms": 100, "bytes": 1000,
+    })
+    ez = wr.bericht(einzeln, 4.40)
+    # Nur die Shop-Abdeckung scheitert: global sind alle Tage und die Luecke
+    # in Ordnung, der eine Check belegt genau eine erwartete Stunde.
+    check("abnahme shop einzelcheck nur abdeckung",
+          ez["abnahme"]["fehlgeschlagen"], ["abdeckung"])
+    check("abnahme shop einzelcheck global ok",
+          (all(t["bestanden"] for t in ez["abdeckung_stunden"]["tage"]),
+           ez["abdeckung_stunden"]["luecke_max_s"]), (True, 300))
+    check("abnahme shop einzelcheck detail",
+          any("Shop B: 1/48 h, Luecke 0 s "
+              "(fehlt 47 h, zuerst 2026-11-27 12)" in d
+              for d in ez["abnahme"]["kriterien"][0]["detail"]), True)
+    shop_a = ez["abdeckung_stunden"]["shops"]["Shop A"]
+    shop_b = ez["abdeckung_stunden"]["shops"]["Shop B"]
+    check("shop einzelcheck status",
+          (shop_a["bestanden"], shop_b["bestanden"],
+           shop_b["luecke_max_s"]), (True, False, 0))
+    check("shop einzelcheck stunden",
+          (shop_b["erwartet_h"], shop_b["abgedeckt_h"],
+           shop_b["fehlende_h"], shop_b["erste_fehlende"]),
+          (48, 1, 47, "2026-11-27 12"))
+
+    # Zwei Checks am Stundenrand decken die Stunde, verdecken aber fast eine
+    # Stunde Ausfall; die globale Luecke bleibt durch Shop A klein.
+    rand = zeilen()
+    rand[0]["shops"] = ["Shop A", "Shop B"]
+    for stunde in range(48):
+        for minute, sekunde in ((0, 0), (59, 59)):
+            versatz = stunde * 3600 + minute * 60 + sekunde
+            rand.append({
+                "typ": "check", "ts": start.timestamp() + versatz,
+                "iso": (start + _td(seconds=versatz)).isoformat(),
+                "shop": "Shop B", "klass": "unavail",
+                "preis": 899.99, "ms": 100, "bytes": 1000,
+            })
+    rb = wr.bericht(rand, 4.40)
+    check("abnahme shop luecke fehlt",
+          "abdeckung" in rb["abnahme"]["fehlgeschlagen"], True)
+    check("abnahme shop luecke wert",
+          "1/2 Shops vollstaendig" in rb["abnahme"]["kriterien"][0]["wert"],
+          True)
+    check("abnahme shop luecke detail",
+          any("Shop B: 48/48 h, Luecke 3599 s" in d
+              for d in rb["abnahme"]["kriterien"][0]["detail"]), True)
+    shop_rand = rb["abdeckung_stunden"]["shops"]["Shop B"]
+    check("shop luecke rand stunden", shop_rand["abgedeckt_h"], 48)
+    check("shop luecke rand max", shop_rand["luecke_max_s"], 3599)
+    check("shop luecke rand nicht bestanden", shop_rand["bestanden"], False)
+    check("shop luecke gesund max",
+          rb["abdeckung_stunden"]["shops"]["Shop A"]["luecke_max_s"], 300)
+    check("shop luecke gesund bestanden",
+          rb["abdeckung_stunden"]["shops"]["Shop A"]["bestanden"], True)
+    check("shop luecke global klein", rb["abdeckung_stunden"]["luecke_max_s"],
+          300)
+
+    # Ein komplett fehlender Kalendertag muss als 0/24 in der Tagesliste
+    # stehen, nicht aus der Auswertung verschwinden.
+    ausfall = [x for x in zeilen()
+               if not (x.get("typ") == "check"
+                       and "2026-11-28" in str(x.get("iso", "")))]
+    ausfall_bericht = wr.bericht(ausfall, 4.40)
+    ausfall_tage = [t["datum"] for t in
+                    ausfall_bericht["abdeckung_stunden"]["tage"]]
+    check("abnahme ganzer tag sichtbar", "2026-11-28" in ausfall_tage, True)
+    ausfall_tag = next(
+        t for t in ausfall_bericht["abdeckung_stunden"]["tage"]
+        if t["datum"] == "2026-11-28"
+    )
+    check("abnahme ausfalltag erwartet", ausfall_tag["erwartet_h"], 24)
+    check("abnahme ausfalltag leer", ausfall_tag["abgedeckt_im_fenster"], 0)
+    check("abnahme ganzer tag nicht bestanden",
+          "abdeckung" in ausfall_bericht["abnahme"]["fehlgeschlagen"], True)
+
+    # Abdeckung und Beobachtungszeit zaehlen nur gueltige Klassen.
+    klassen = ("hit", "expensive", "unavail", "unknown",
+               "chance", "challenge", "error", "parser")
+    roh = wr._abdeckung_stunden([
+        {"typ": "check", "ts": start.timestamp() + i * 15,
+         "iso": (start + _td(seconds=i * 15)).isoformat(),
+         "shop": "A", "klass": klasse}
+        for i, klasse in enumerate(klassen)
+    ])
+    check("report abdeckung nur gueltig",
+          roh["tage"][0]["abgedeckt_im_fenster"], 1)
+    check("report abdeckung gueltig gesamt", roh["checks_gueltig"], 4)
+    check("report abdeckung ungueltig", roh["ungueltig"], 4)
+    check("report abdeckung gesamt", roh["checks_gesamt"], 8)
+
+    # Ohne verwertbare Zeit gibt es keinen Tag und keine gueltige Beobachtung.
+    ohne_zeit = wr._abdeckung_stunden([
+        {"typ": "check", "klass": "unavail"},
+        {"typ": "check", "klass": "challenge"},
+    ])
+    check("report abdeckung ohne zeit keine tage", ohne_zeit["tage"], [])
+    check("report abdeckung ohne zeit gueltig",
+          ohne_zeit["checks_gueltig"], 0)
+    check("report abdeckung ohne zeit ungueltig", ohne_zeit["ungueltig"], 2)
 
 
 def watcher_report_tests():
@@ -4435,7 +4787,10 @@ def watcher_report_tests():
          "klass": "unavail", "preis": None},
     ]
     audit = wr.bericht(audit_zeilen, 4.40)
-    check("report abdeckung", audit["abdeckung_stunden"]["abgedeckt"], 5)
+    check("report abdeckung",
+          audit["abdeckung_stunden"]["tage"][0]["abgedeckt_im_fenster"], 5)
+    check("report abdeckung erwartet",
+          audit["abdeckung_stunden"]["tage"][0]["erwartet_h"], 8)
     check("report stille shops",
           len(audit["stille_shops"]["stille"]), 3)
     check("report stille gesamt", audit["stille_shops"]["gesamt"], 4)
@@ -4455,7 +4810,7 @@ def watcher_report_tests():
           83.3)
     audit_text = wr._text(audit)
     check("report text abdeckung",
-          "Abdeckung: 5 von 24 Stunden mit Checks" in audit_text, True)
+          "Abdeckung: 0/1 Tag vollstaendig" in audit_text, True)
     check("report text stille",
           "Stille Shops: 3 von 4 (Schwelle 2h)" in audit_text, True)
     check("report text stille ohne check",
@@ -4464,8 +4819,8 @@ def watcher_report_tests():
           "Preise: 1 gueltig, 3 ohne Preis, 2 unplausibel" in audit_text,
           True)
 
-    # Abdeckung je Tag und beobachtete Zeit: "6 von 24" ist Laufzeit, kein
-    # Polling-Fehler. Drei Sitzungen an drei Tagen, dazwischen grosse Luecken.
+    # Abdeckung je Tag und beobachtete Zeit: drei Kalendertage mit grossen
+    # Luecken; die Tagesfenster werden trotzdem korrekt bewertet.
     from datetime import datetime as _dt
 
     def ck(iso):
@@ -4490,20 +4845,26 @@ def watcher_report_tests():
     check("report abdeckung tage",
           [t["datum"] for t in ab["tage"]],
           ["2026-11-23", "2026-11-24", "2026-11-25"])
-    check("report abdeckung tag1 stunden", ab["tage"][0]["abgedeckt"], 2)
+    check("report abdeckung tag1 stunden",
+          ab["tage"][0]["abgedeckt_im_fenster"], 2)
     check("report abdeckung tag1 zeit", ab["tage"][0]["beobachtet_s"], 360)
     check("report abdeckung tag2 zeit", ab["tage"][1]["beobachtet_s"], 60)
-    check("report abdeckung tag3 stunden", ab["tage"][2]["abgedeckt"], 2)
+    check("report abdeckung tag3 stunden",
+          ab["tage"][2]["abgedeckt_im_fenster"], 2)
     check("report abdeckung tag3 zeit", ab["tage"][2]["beobachtet_s"], 120)
     check("report abdeckung gesamt zeit", ab["beobachtet_s"], 540)
     check("report abdeckung beobachtet h", ab["beobachtet_h"], 0.15)
     check("report abdeckung sitzungen", ab["sitzungen"], 4)
-    check("report abdeckung stunden unveraendert", ab["abgedeckt"], 4)
+    check("report abdeckung fenster summe",
+          sum(t["abgedeckt_im_fenster"] for t in ab["tage"]), 5)
     ab_text = wr._text(tag_bericht)
     check("report text beobachtet",
           "Beobachtet: 0.15 h in 4 Sitzungen" in ab_text, True)
+    check("report text abdeckung summe",
+          "Abdeckung: 1/3 Tage vollstaendig" in ab_text, True)
     check("report text je tag",
-          "2026-11-23 2/24 Std, 0.10 h, 3 Checks" in ab_text, True)
+          "2026-11-23 2/2 (Randtag), 0.10 h, 3/3 Checks gueltig" in ab_text,
+          True)
 
     # Verhungern und Zustandswechsel: eine Runde kann Shops faellig lassen,
     # ohne dass Budget oder Schleife sie bedienen.
@@ -4603,6 +4964,7 @@ if __name__ == "__main__":
         outbox_tests()
         watcher_log_tests()
         watcher_report_tests()
+        abnahme_report_tests()
         alarm_canary_tests()
         alarm_canary_report_tests()
     finally:

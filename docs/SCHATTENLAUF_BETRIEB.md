@@ -18,7 +18,7 @@ der Lauf nicht.
 Datenverzeichnis des aktuellen Laufs:
 
 ```
-_verify/cloud_shadow_20261123_225425
+_verify/cloud_shadow_20261127_1215
 ```
 
 Die Wache schreibt in dieses Verzeichnis:
@@ -72,7 +72,7 @@ keine Meldung nach außen schickt.
 Ausführliche Auswertung über den gesamten Lauf:
 
 ```bash
-python tools/watcher_report.py --dir _verify/cloud_shadow_20261123_225425
+python tools/watcher_report.py --dir _verify/cloud_shadow_20261127_1215
 ```
 
 Rohdaten und Protokoll:

@@ -16,7 +16,7 @@ import glob
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 LOG_MUSTER = "watcher-log-*.ndjson"
 KOSTEN_MONAT = 4.40
@@ -36,6 +36,19 @@ STILLE_SHOP_S = 2 * 3600.0
 # zehn Minuten ohne Check sind eine Luecke (Prozess weg, Rechner aus) und keine
 # Beobachtungszeit.
 ABDECKUNG_SITZUNG_S = 600.0
+# Feste Abnahme des 48-h-Laufs. Die Schwellen stehen hier und nicht im
+# Kopf des Auswerters, damit nach dem Lauf nicht ueber die Definition
+# verhandelt wird.
+ABNAHME_BEOBACHTET_H = 47.5
+ABNAHME_MAX_LUECKE_S = 300.0
+ABNAHME_UEBERSPRUNGEN_PCT = 5.0
+ABNAHME_BUDGET_VOLL = 0
+ABNAHME_CANARY_MIN_TAGE = 2
+# Nur diese Klassen belegen eine Bestandsbeobachtung. ``chance``
+# (Lotterie, Marktabholung, Einladung) ist keine Verfuegbarkeitsaussage.
+GUELTIGE_KLASSEN = ("hit", "expensive", "unavail", "unknown")
+# Je Shop hoechstens 5 % Challenge-/Fehler-Checks im gesamten Lauf.
+ABNAHME_SHOP_QUOTE_PCT = 5.0
 # Muss zu scan_core.preis_plausibel passen. Der Report bleibt bewusst
 # eigenstaendig und importiert den Scan-Kern nicht.
 MIN_PREIS = 550.0
@@ -154,8 +167,28 @@ def _wechsel_uebersicht(wechsel_zeilen):
 
 
 def _alarm_canary(zeilen):
-    """Ergebnis des synthetischen Alarmtests, getrennt von echten Alarmen."""
+    """Ergebnis des synthetischen Alarmtests, getrennt von echten Alarmen.
+
+    Die Laeufe werden nach Kalendertag gruppiert. Fuer die Abnahme zaehlt je
+    erwartetem Tag mindestens ein erfolgreicher Lauf; weitere Laeufe am selben
+    Tag sind erlaubt, ersetzen aber keinen fehlenden Tag.
+    """
     ok = sum(1 for z in zeilen if z.get("ok") is True)
+    tage = {}
+    for z in zeilen:
+        dt = _check_dt(z)
+        if dt is None:
+            continue
+        datum = dt.date().isoformat()
+        tag = tage.setdefault(
+            datum, {"datum": datum, "gesamt": 0, "ok": 0}
+        )
+        tag["gesamt"] += 1
+        if z.get("ok") is True:
+            tag["ok"] += 1
+    geordnet = [tage[d] for d in sorted(tage)]
+    for tag in geordnet:
+        tag["bestanden"] = tag["ok"] > 0
     letzte = [
         {"iso": str(z.get("iso") or ""), "ok": z.get("ok") is True,
          "event": z.get("event")}
@@ -165,6 +198,9 @@ def _alarm_canary(zeilen):
         "gesamt": len(zeilen),
         "ok": ok,
         "fehlgeschlagen": len(zeilen) - ok,
+        "tage_gesamt": len(geordnet),
+        "tage_ok": sum(1 for t in geordnet if t["bestanden"]),
+        "tage": geordnet,
         "letzte": letzte,
     }
 
@@ -243,8 +279,9 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     jetzt = max(zeiten) if zeiten else 0.0
     stille_shops = _stille_shops(checks_nach_shop, jetzt,
                                  konfigurierte_shops=konfigurierte_shops)
-    abdeckung = _abdeckung_stunden(checks)
+    abdeckung = _abdeckung_stunden(checks, konfigurierte_shops)
     shop_takt = _takt_je_shop(checks_nach_shop, runde_zeilen, budget_zeilen)
+    shop_qualitaet = _shop_qualitaet(checks_nach_shop)
     wechsel = _wechsel_uebersicht(wechsel_zeilen)
     preise = _preis_telemetrie(checks)
     ms = [max(0.0, _zahl(daten.get("ms"))) for daten in checks]
@@ -268,7 +305,7 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
     kosten_zeitraum = kosten_monat / TAGE_MONAT * tage
     alarme_monat = alarme / tage * TAGE_MONAT
 
-    return {
+    ergebnis = {
         "zeitraum": {
             "von_ts": round(von, 3),
             "bis_ts": round(bis, 3),
@@ -302,6 +339,7 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
         "stille_shops": stille_shops,
         "abdeckung_stunden": abdeckung,
         "shop_takt": shop_takt,
+        "shop_qualitaet": shop_qualitaet,
         "wechsel": wechsel,
         "alarm_canary": _alarm_canary(alarm_canary_zeilen),
         "preis_telemetrie": preise,
@@ -315,6 +353,8 @@ def bericht(zeilen, kosten_monat=KOSTEN_MONAT):
             else None,
         },
     }
+    ergebnis["abnahme"] = _abnahme(ergebnis)
+    return ergebnis
 
 
 def _alarm_latenz(alarme, checks_nach_shop, outbox):
@@ -501,34 +541,19 @@ def _stille_shops(checks_nach_shop, jetzt, schwelle=STILLE_SHOP_S,
     }
 
 
-def _check_stunde(daten):
+def _check_dt(daten):
+    """Lokale Zeit eines Checks: ISO zuerst, sonst Unix-Zeitstempel."""
     iso = daten.get("iso")
     if iso:
         try:
-            return datetime.fromisoformat(str(iso)).hour
+            return datetime.fromisoformat(str(iso))
         except (TypeError, ValueError):
             pass
     ts = _check_ts(daten)
     if ts is None:
         return None
     try:
-        return datetime.fromtimestamp(ts).hour
-    except (OSError, OverflowError, ValueError):
-        return None
-
-
-def _check_tag(daten):
-    iso = daten.get("iso")
-    if iso:
-        try:
-            return datetime.fromisoformat(str(iso)).date().isoformat()
-        except (TypeError, ValueError):
-            pass
-    ts = _check_ts(daten)
-    if ts is None:
-        return None
-    try:
-        return datetime.fromtimestamp(ts).date().isoformat()
+        return datetime.fromtimestamp(ts)
     except (OSError, OverflowError, ValueError):
         return None
 
@@ -546,46 +571,143 @@ def _beobachtete_sekunden(zeiten):
     ))
 
 
-def _abdeckung_stunden(checks):
-    """Stunden-Buckets plus Abdeckung je Tag und beobachtete Zeit.
+def _abdeckung_stunden(checks, konfigurierte_shops=()):
+    """Abdeckung je Kalendertag, je Shop und beobachtete Zeit.
 
-    Die 24 Stunden zaehlen ueber alle Tage. Ohne die Tageswerte liest sich
-    "6 von 24" wie ein Polling-Fehler, obwohl in Wahrheit nur 5 Stunden lang
-    ein Prozess lief. ``beobachtet_s`` summiert deshalb nur Abstaende im Takt
-    und ``sitzungen`` zaehlt die zusammenhaengenden Laeufe.
+    Fuer Abdeckung, Sitzungen und Beobachtungszeit zaehlen ausschliesslich
+    gueltige Bestandsbeobachtungen (``GUELTIGE_KLASSEN``). Challenge-, Fehler-
+    und Parser-Checks sowie ``chance`` belegen keinen Bestand; sie erzeugen
+    aber weiterhin einen Tag, damit ein dauerhaft geblockter Shop als
+    ``0/24`` sichtbar bleibt und nicht aus der Auswertung verschwindet.
+    Zusaetzlich muss jeder Shop in jeder erwarteten Stunde mindestens einen
+    gueltigen Check haben; ein einzelner Check am Rand fuellt keinen Tag.
+    Konfigurierte Shops ohne Check erscheinen mit 0 Stunden.
+    Randtage zaehlen mit ihrem tatsaechlichen Fenster; ein Check exakt auf
+    der Stundengrenze am Ende zaehlt die neue Stunde nicht mit.
     """
-    stunden = [0] * 24
+    def _leerer_tag(datum):
+        return {"datum": datum, "stunden": [0] * 24, "checks": 0,
+                "checks_gueltig": 0, "zeiten": []}
+
     tage = {}
+    stunden_je_shop = {}
+    zeiten_je_shop = {}
     zeitpunkte = []
+    gueltig = 0
     for daten in checks:
-        stunde = _check_stunde(daten)
-        if stunde is None or not 0 <= stunde < 24:
+        dt = _check_dt(daten)
+        if dt is None:
             continue
-        stunden[stunde] += 1
-        tag = _check_tag(daten) or "?"
-        eintrag = tage.setdefault(
-            tag, {"datum": tag, "stunden": [0] * 24, "checks": 0, "zeiten": []}
-        )
-        eintrag["stunden"][stunde] += 1
+        tag = dt.date().isoformat()
+        shop = str(daten.get("shop") or "?")
+        shop_stunden = stunden_je_shop.setdefault(shop, {})
+        eintrag = tage.setdefault(tag, _leerer_tag(tag))
         eintrag["checks"] += 1
+        if str(daten.get("klass") or "") not in GUELTIGE_KLASSEN:
+            continue
+        gueltig += 1
+        eintrag["checks_gueltig"] += 1
+        eintrag["stunden"][dt.hour] += 1
+        shop_stunden.setdefault(tag, set()).add(dt.hour)
         ts = _check_ts(daten)
         if ts is not None:
             eintrag["zeiten"].append(ts)
             zeitpunkte.append(ts)
+            zeiten_je_shop.setdefault(shop, []).append(ts)
+
+    # Tage ohne einen einzigen Check ebenfalls aufnehmen: Ein Ausfall ueber
+    # einen ganzen Kalendertag muss als 0/24 sichtbar sein und darf nicht
+    # stillschweigend aus der Tagesliste verschwinden.
+    if tage:
+        vorhandene = sorted(tage)
+        erster_datum = datetime.fromisoformat(vorhandene[0]).date()
+        letzter_datum = datetime.fromisoformat(vorhandene[-1]).date()
+        tag = erster_datum
+        while tag <= letzter_datum:
+            schluessel = tag.isoformat()
+            tage.setdefault(schluessel, _leerer_tag(schluessel))
+            tag += timedelta(days=1)
+
+    # Erstes und letztes Check-Zeitfenster bestimmen. Randtage werden mit
+    # ihrem tatsaechlichen Fenster gewertet: Ein Lauf ab 12:00 hat am ersten
+    # Tag 12 erwartete Stunden, keine 12 fehlenden. Ein fehlender Check in
+    # einer erwarteten Stunde bleibt dagegen ein Fehler.
+    mit_ts = [c for c in checks if _check_ts(c) is not None]
+    erste = min(mit_ts, key=_check_ts) if mit_ts else None
+    letzte = max(mit_ts, key=_check_ts) if mit_ts else None
+    erste_dt = _check_dt(erste) if erste is not None else None
+    letzte_dt = _check_dt(letzte) if letzte is not None else None
+    erster_tag = erste_dt.date().isoformat() if erste_dt else None
+    letzter_tag = letzte_dt.date().isoformat() if letzte_dt else None
+    erste_stunde = erste_dt.hour if erste_dt else 0
+    letzte_stunde = letzte_dt.hour if letzte_dt else 23
+    letzte_am_rand = bool(
+        letzte_dt is not None
+        and letzte_dt.minute == 0
+        and letzte_dt.second == 0
+        and letzte_dt.microsecond == 0
+    )
 
     pro_tag = []
+    fenster = {}
     for datum in sorted(tage):
         eintrag = tage[datum]
         sekunden = _beobachtete_sekunden(eintrag["zeiten"])
-        tag_luecken = [h for h, n in enumerate(eintrag["stunden"]) if n == 0]
+        start = erste_stunde if datum == erster_tag else 0
+        ende = letzte_stunde if datum == letzter_tag else 23
+        # Ein Check exakt auf der Endstundengrenze belegt die neue Stunde
+        # nicht mehr; am einzigen Tag bleibt mindestens die Startstunde.
+        if (datum == letzter_tag and letzte_am_rand
+                and (datum != erster_tag or ende > start)):
+            ende -= 1
+        erwartet = list(range(start, ende + 1)) if start <= ende else []
+        fenster[datum] = erwartet
+        fehlend = [h for h in erwartet if eintrag["stunden"][h] == 0]
         pro_tag.append({
             "datum": datum,
-            "abgedeckt": 24 - len(tag_luecken),
-            "luecken": tag_luecken,
             "checks": eintrag["checks"],
+            "checks_gueltig": eintrag["checks_gueltig"],
             "beobachtet_s": int(round(sekunden)),
             "beobachtet_h": round(sekunden / 3600.0, 2),
+            "erwartet_h": len(erwartet),
+            "abgedeckt_im_fenster": len(erwartet) - len(fehlend),
+            "fehlende_stunden": fehlend,
+            "randtag": 0 < len(erwartet) < 24,
+            "bestanden": not fehlend,
         })
+
+    for shop in konfigurierte_shops:
+        stunden_je_shop.setdefault(str(shop), {})
+    erwartet_gesamt = sum(len(h) for h in fenster.values())
+    shops = {}
+    for shop in sorted(stunden_je_shop):
+        belegt = stunden_je_shop[shop]
+        fehlende_h = 0
+        erste_fehlende = None
+        for datum, stunden in fenster.items():
+            for h in stunden:
+                if h in belegt.get(datum, ()):
+                    continue
+                fehlende_h += 1
+                if erste_fehlende is None:
+                    erste_fehlende = "%s %02d" % (datum, h)
+        shop_zeiten = sorted(zeiten_je_shop.get(shop, []))
+        luecke = max(
+            (b - a for a, b in zip(shop_zeiten, shop_zeiten[1:])),
+            default=0.0,
+        )
+        shops[shop] = {
+            "erwartet_h": erwartet_gesamt,
+            "abgedeckt_h": erwartet_gesamt - fehlende_h,
+            "fehlende_h": fehlende_h,
+            "erste_fehlende": erste_fehlende,
+            "luecke_max_s": int(round(luecke)),
+            "bestanden": (
+                erwartet_gesamt > 0
+                and fehlende_h == 0
+                and luecke <= ABNAHME_MAX_LUECKE_S
+            ),
+        }
 
     beobachtet = _beobachtete_sekunden(zeitpunkte)
     zeiten = sorted(zeitpunkte)
@@ -593,17 +715,21 @@ def _abdeckung_stunden(checks):
     for a, b in zip(zeiten, zeiten[1:]):
         if b - a > ABDECKUNG_SITZUNG_S:
             sitzungen += 1
-    luecken = [h for h, n in enumerate(stunden) if n == 0]
+    luecke_max = max(
+        (b - a for a, b in zip(zeiten, zeiten[1:])),
+        default=0.0,
+    )
     return {
-        "stunden": stunden,
-        "abgedeckt": 24 - len(luecken),
-        "luecken": luecken,
-        "checks": sum(stunden),
+        "checks_gesamt": len(checks),
+        "checks_gueltig": gueltig,
+        "ungueltig": len(checks) - gueltig,
         "beobachtet_s": int(round(beobachtet)),
         "beobachtet_h": round(beobachtet / 3600.0, 2),
+        "luecke_max_s": int(round(luecke_max)),
         "sitzungen": sitzungen,
         "schwelle_s": int(ABDECKUNG_SITZUNG_S),
         "tage": pro_tag,
+        "shops": shops,
     }
 
 
@@ -644,6 +770,256 @@ def _ms(wert):
     return None if wert is None else int(round(float(wert) * 1000.0))
 
 
+def _tage_wort(n):
+    return "Tag" if int(n) == 1 else "Tage"
+
+
+def _shop_qualitaet(checks_nach_shop):
+    """Challenge-/Fehlerquote je Shop ueber den gesamten Lauf.
+
+    ``quote`` zaehlt Challenge sowie Netz-/Parserfehler. ``ungueltig_quote``
+    zaehlt zusaetzlich jede andere Nicht-Beobachtung (insbesondere
+    ``chance``), weil auch sie keinen Bestand belegt.
+    """
+    daten = {}
+    for shop, checks in checks_nach_shop.items():
+        gesamt = len(checks)
+        zaehler = {"challenge": 0, "error": 0, "parser": 0, "chance": 0}
+        gueltig = 0
+        for pruefung in checks:
+            klasse = str(pruefung.get("klass") or "")
+            if klasse in zaehler:
+                zaehler[klasse] += 1
+            if klasse in GUELTIGE_KLASSEN:
+                gueltig += 1
+        fehler = zaehler["error"] + zaehler["parser"]
+        quote = 100.0 * (zaehler["challenge"] + fehler) / gesamt if gesamt else None
+        ungueltig = gesamt - gueltig
+        ungueltig_quote = 100.0 * ungueltig / gesamt if gesamt else None
+        # ungueltig enthaelt Challenge und Fehler bereits; eine zweite
+        # Schwelle auf quote waere daher immer redundant. Vergleich auf
+        # ungerundeten Prozentwerten, die Anzeige rundet erst.
+        bestanden = (
+            ungueltig_quote is not None
+            and ungueltig_quote < ABNAHME_SHOP_QUOTE_PCT
+        )
+        daten[shop] = {
+            "checks": gesamt,
+            "challenge": zaehler["challenge"],
+            "fehler": fehler,
+            "chance": zaehler["chance"],
+            "quote": round(quote, 2) if quote is not None else None,
+            "ungueltig": ungueltig,
+            "ungueltig_quote": round(ungueltig_quote, 2)
+            if ungueltig_quote is not None else None,
+            "bestanden": bestanden,
+        }
+    return daten
+
+
+def _abnahme(daten):
+    """Feste Bestanden-Kriterien fuer den 48-h-Lauf.
+
+    Abdeckung: jeder Kalendertag im Beobachtungsfenster hat in jeder
+    erwarteten Stunde mindestens einen Check; Randtage zaehlen mit ihrem
+    tatsaechlichen Fenster, volle Tage mit 24 Stunden. Jeder Shop muss
+    zusaetzlich jede erwartete Stunde selbst abdecken und dabei seine eigene
+    groesste Luecke von 5 min einhalten, damit sich Shops nicht gegenseitig
+    fuellen und zwei Checks am Stundenrand keinen Ausfall verdecken.
+    Zusaetzlich muessen mindestens 47,5 h beobachtet sein und die groesste
+    Luecke ueber alle Shops darf 5 min nicht ueberschreiten.
+    Die groesste Luecke von 5 min deckt die fruehere Sitzungspruefung ab:
+    Jede Unterbrechung ueber 10 min erzeugt eine groessere Luecke; eine eigene
+    Sitzungszahl waere nur ein zweiter Name fuer dieselbe Bedingung.
+    Uebersprungen: unter 5 % aller faelligen Shops.
+    Budget voll: kein einziger Fall. Canary: fuer jeden Kalendertag mindestens
+    ein erfolgreicher Lauf, mindestens zwei Tage; weitere Laeufe am selben Tag
+    sind erlaubt. Stille Shops: keiner.
+    Je Shop muss der Anteil ungueltiger Checks unter 5 % liegen; Challenge
+    und Fehler sind darin enthalten. Damit faellt ein dauerhaft geblockter
+    Shop durch, auch wenn andere Shops die Stunden fuellen. Abdeckung und
+    Beobachtungszeit zaehlen nur gueltige Bestandsbeobachtungen.
+    """
+    ab = daten.get("abdeckung_stunden") or {}
+    tage = list(ab.get("tage") or [])
+    shops = dict(ab.get("shops") or {})
+    beobachtet_h = float(ab.get("beobachtet_h") or 0.0)
+    luecke_max_s = int(ab.get("luecke_max_s") or 0)
+    vollstaendig = sum(1 for t in tage if t.get("bestanden"))
+    shops_voll = sum(1 for e in shops.values() if e.get("bestanden"))
+    abdeckung_ok = (
+        bool(tage)
+        and vollstaendig == len(tage)
+        and bool(shops)
+        and shops_voll == len(shops)
+        and beobachtet_h >= ABNAHME_BEOBACHTET_H
+        and luecke_max_s <= ABNAHME_MAX_LUECKE_S
+    )
+    abdeckung_wert = (
+        "%d %s, %d/%d vollstaendig, %.2f h, max. Luecke %d s, "
+        "%d/%d Shops vollstaendig"
+        % (len(tage), _tage_wort(len(tage)), vollstaendig, len(tage),
+           beobachtet_h, luecke_max_s, shops_voll, len(shops))
+        if tage else "keine Tagesdaten"
+    )
+    abdeckung_detail = [
+        "%s %d/%d%s%s"
+        % (
+            str(t.get("datum") or "?"),
+            int(t.get("abgedeckt_im_fenster") or 0),
+            int(t.get("erwartet_h") or 0),
+            " (Randtag)" if t.get("randtag") else "",
+            " fehlt: " + ",".join(
+                "%02d" % h for h in (t.get("fehlende_stunden") or [])
+            ) if t.get("fehlende_stunden") else "",
+        )
+        for t in tage
+    ]
+    for name, e in sorted(shops.items()):
+        zeile = "%s: %d/%d h, Luecke %d s" % (
+            name,
+            int(e.get("abgedeckt_h") or 0),
+            int(e.get("erwartet_h") or 0),
+            int(e.get("luecke_max_s") or 0),
+        )
+        fehlende_h = int(e.get("fehlende_h") or 0)
+        if fehlende_h:
+            zeile += " (fehlt %d h, zuerst %s)" % (
+                fehlende_h, e.get("erste_fehlende") or "?")
+        abdeckung_detail.append(zeile)
+
+    takt = daten.get("shop_takt") or {}
+    faellig = sum(int(e.get("faellig") or 0) for e in takt.values())
+    uebersprungen = sum(int(e.get("uebersprungen") or 0) for e in takt.values())
+    quote = 100.0 * uebersprungen / faellig if faellig else None
+    ueber_ok = quote is not None and quote < ABNAHME_UEBERSPRUNGEN_PCT
+    ueber_wert = (
+        "%d von %d (%.1f %%)" % (uebersprungen, faellig, quote)
+        if quote is not None else "keine Runden"
+    )
+
+    budget_voll = sum(int(e.get("budget_voll") or 0) for e in takt.values())
+    budget_ok = faellig > 0 and budget_voll == ABNAHME_BUDGET_VOLL
+    budget_wert = str(budget_voll) if faellig else "keine Runden"
+
+    canary = daten.get("alarm_canary") or {}
+    canary_gesamt = int(canary.get("gesamt") or 0)
+    canary_ok_n = int(canary.get("ok") or 0)
+    canary_nach_tag = {
+        str(t.get("datum")): t for t in (canary.get("tage") or [])
+    }
+    canary_erwartet = [str(t.get("datum")) for t in tage]
+    canary_fehlt = [
+        d for d in canary_erwartet
+        if not (canary_nach_tag.get(d) or {}).get("bestanden")
+    ]
+    canary_ok = (
+        len(canary_erwartet) >= ABNAHME_CANARY_MIN_TAGE
+        and not canary_fehlt
+    )
+    canary_wert = "%d/%d Tage ok (%d %s, %d fehlgeschlagen)" % (
+        len(canary_erwartet) - len(canary_fehlt), len(canary_erwartet),
+        canary_gesamt,
+        "Lauf" if canary_gesamt == 1 else "Laeufe",
+        canary_gesamt - canary_ok_n,
+    )
+    canary_detail = []
+    for datum in canary_erwartet:
+        eintrag = canary_nach_tag.get(datum)
+        if not eintrag:
+            canary_detail.append("%s fehlt" % datum)
+            continue
+        laeufe = int(eintrag.get("gesamt") or 0)
+        canary_detail.append(
+            "%s %s (%d %s)"
+            % (datum, "ok" if eintrag.get("bestanden") else "kein Erfolg",
+               laeufe, "Lauf" if laeufe == 1 else "Laeufe")
+        )
+
+    stille = daten.get("stille_shops") or {}
+    stille_n = len(stille.get("stille") or [])
+    stille_gesamt = int(stille.get("gesamt") or 0)
+    stille_ok = stille_gesamt > 0 and stille_n == 0
+
+    qualitaet = daten.get("shop_qualitaet") or {}
+    qualitaet_ok = bool(qualitaet) and all(
+        bool(e.get("bestanden")) for e in qualitaet.values()
+    )
+    if qualitaet:
+        max_quote = max(float(e.get("quote") or 0.0) for e in qualitaet.values())
+        max_uquote = max(float(e.get("ungueltig_quote") or 0.0)
+                         for e in qualitaet.values())
+        qualitaet_wert = (
+            "max. %.2f %% Challenge/Fehler, %.2f %% ungueltig (%d Shops)"
+            % (max_quote, max_uquote, len(qualitaet))
+        )
+    else:
+        qualitaet_wert = "keine Shops"
+    qualitaet_detail = [
+        "%s: %d/%d Challenge/Fehler (%.2f %%), ungueltig %.2f %% "
+        "(Chance %d)"
+        % (
+            name,
+            int(e.get("challenge") or 0) + int(e.get("fehler") or 0),
+            int(e.get("checks") or 0),
+            float(e.get("quote") or 0.0),
+            float(e.get("ungueltig_quote") or 0.0),
+            int(e.get("chance") or 0),
+        )
+        for name, e in sorted(qualitaet.items())
+    ]
+
+    kriterien = [
+        {"name": "abdeckung", "label": "Abdeckung",
+         "ok": abdeckung_ok, "wert": abdeckung_wert,
+         "soll": "24/24 je Tag und Shop, >= %.1f h, Luecke <= %d s"
+                 % (ABNAHME_BEOBACHTET_H, int(ABNAHME_MAX_LUECKE_S)),
+         "detail": abdeckung_detail},
+        {"name": "shop_qualitaet", "label": "Shop-Quote",
+         "ok": qualitaet_ok, "wert": qualitaet_wert,
+         "soll": "< %.1f %% ungueltig je Shop" % ABNAHME_SHOP_QUOTE_PCT,
+         "detail": qualitaet_detail},
+        {"name": "uebersprungen", "label": "Uebersprungen",
+         "ok": ueber_ok, "wert": ueber_wert,
+         "soll": "< %.1f %%" % ABNAHME_UEBERSPRUNGEN_PCT},
+        {"name": "budget_voll", "label": "Budget voll",
+         "ok": budget_ok, "wert": budget_wert, "soll": "0"},
+        {"name": "canary", "label": "Alarm-Canary",
+         "ok": canary_ok, "wert": canary_wert,
+         "detail": canary_detail,
+         "soll": "je Tag >= 1 Erfolg, mind. %d Tage"
+                 % ABNAHME_CANARY_MIN_TAGE},
+        {"name": "stille_shops", "label": "Stille Shops",
+         "ok": stille_ok, "wert": "%d von %d" % (stille_n, stille_gesamt),
+         "soll": "0"},
+    ]
+    fehlgeschlagen = [k["name"] for k in kriterien if not k["ok"]]
+    return {
+        "bestanden": not fehlgeschlagen,
+        "kriterien": kriterien,
+        "fehlgeschlagen": fehlgeschlagen,
+    }
+
+
+def _abnahme_text(abnahme):
+    status = "BESTANDEN" if abnahme.get("bestanden") else "NICHT BESTANDEN"
+    zeilen = ["Abnahme 48 h: %s" % status]
+    for k in abnahme.get("kriterien") or []:
+        zeilen.append(
+            "  [%s] %s: %s (Soll: %s)"
+            % ("ok" if k.get("ok") else "FEHLT", k.get("label"),
+               k.get("wert"), k.get("soll"))
+        )
+        if k.get("name") in ("abdeckung", "shop_qualitaet", "canary"):
+            for detail in k.get("detail") or []:
+                zeilen.append("      " + detail)
+    if abnahme.get("fehlgeschlagen"):
+        zeilen.append(
+            "  Nicht bestanden: " + ", ".join(abnahme["fehlgeschlagen"])
+        )
+    return "\n".join(zeilen)
+
+
 def _text(daten):
     z = daten["zeitraum"]
     ms = daten["ms"]
@@ -672,18 +1048,27 @@ def _text(daten):
     abdeckung = daten.get("abdeckung_stunden") or {}
     stille = daten.get("stille_shops") or {}
     preise = daten.get("preis_telemetrie") or {}
-    luecken = abdeckung.get("luecken") or []
-    luecken_text = ", ".join("%02d" % h for h in luecken) or "keine"
+    tage = abdeckung.get("tage") or []
     tage_text = " | ".join(
-        "%s %d/24 Std, %.2f h, %d Checks"
+        "%s %d/%d%s, %.2f h, %d/%d Checks gueltig"
         % (
             str(t.get("datum") or "?"),
-            int(t.get("abgedeckt") or 0),
+            int(t.get("abgedeckt_im_fenster") or 0),
+            int(t.get("erwartet_h") or 0),
+            " (Randtag)" if t.get("randtag") else "",
             float(t.get("beobachtet_h") or 0.0),
+            int(t.get("checks_gueltig") or 0),
             int(t.get("checks") or 0),
         )
-        for t in (abdeckung.get("tage") or [])
+        for t in tage
     ) or "keine"
+    vollstaendige_tage = sum(1 for t in tage if t.get("bestanden"))
+    abdeckung_text = (
+        "Abdeckung: %d/%d %s vollstaendig"
+        % (vollstaendige_tage, len(tage),
+           "Tag" if len(tage) == 1 else "Tage")
+        if tage else "Abdeckung: keine Tagesdaten"
+    )
     takt = daten.get("shop_takt") or {}
     takt_text = " | ".join(
         "%s p95 %s, %d von %d Runden uebersprungen"
@@ -701,9 +1086,12 @@ def _text(daten):
         for paar, anzahl in sorted((wechsel_daten.get("paare") or {}).items())
     ) or "keine"
     canary_daten = daten.get("alarm_canary") or {}
-    canary_text = "Alarm-Canary: %d/%d ok" % (
-        int(canary_daten.get("ok") or 0),
+    canary_text = "Alarm-Canary: %d/%d Tage ok (%d %s, %d fehlgeschlagen)" % (
+        int(canary_daten.get("tage_ok") or 0),
+        int(canary_daten.get("tage_gesamt") or 0),
         int(canary_daten.get("gesamt") or 0),
+        "Lauf" if int(canary_daten.get("gesamt") or 0) == 1 else "Laeufe",
+        int(canary_daten.get("fehlgeschlagen") or 0),
     )
     if canary_daten.get("gesamt"):
         letzter = (canary_daten.get("letzte") or [{}])[-1]
@@ -733,7 +1121,8 @@ def _text(daten):
             int(fq.get("offen") or 0),
         )
     )
-    return "\n".join(
+    abnahme = daten.get("abnahme") or _abnahme(daten)
+    return _abnahme_text(abnahme) + "\n\n" + "\n".join(
         [
             "Zeitraum: %s bis %s (%.2f Tage)"
             % (z["von_iso"], z["bis_iso"], z["tage"]),
@@ -769,8 +1158,13 @@ def _text(daten):
             ),
             latenz,
             fehlalarm_text,
-            "Abdeckung: %d von 24 Stunden mit Checks; Luecken: %s"
-            % (int(abdeckung.get("abgedeckt") or 0), luecken_text),
+            abdeckung_text,
+            "Gueltige Beobachtungen: %d von %d Checks (%d ungueltig)"
+            % (
+                int(abdeckung.get("checks_gueltig") or 0),
+                int(abdeckung.get("checks_gesamt") or 0),
+                int(abdeckung.get("ungueltig") or 0),
+            ),
             "Beobachtet: %.2f h in %d Sitzungen (Abstand > %d min gilt als Luecke)"
             % (
                 float(abdeckung.get("beobachtet_h") or 0.0),

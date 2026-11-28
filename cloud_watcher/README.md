@@ -397,6 +397,24 @@ python tools/watcher_report.py --dir cloud_watcher/data
 docker compose exec watcher python tools/watcher_report.py --dir /data --json
 ```
 
+Der Report beginnt mit der **Abnahme des 48-h-Laufs**: sechs Kriterien.
+Abdeckung je Kalendertag und je Shop (jede erwartete Stunde mindestens ein
+gültiger Check, Randtage mit ihrem tatsächlichen Fenster, größte Lücke je
+Shop und über alle Shops höchstens 5 Minuten), Shop-Quote (Ungültig-Anteil
+je Shop), höchstens
+5 % übersprungene fällige Shops, kein volles Minutenbudget, mindestens ein
+erfolgreicher Alarm-Canary je Kalendertag (mehrere Läufe am selben Tag sind
+erlaubt) und keine stillen Shops. Abdeckung und
+Beobachtungszeit zählen nur gültige Bestandsbeobachtungen (`hit`,
+`expensive`, `unavail`, `unknown`); je Shop müssen Challenge-/Fehlerquote und
+der Anteil ungültiger Checks (inklusive `chance`; Challenge und Fehler sind
+darin enthalten) unter 5 % liegen. Die Challenge-/Fehlerquote steht getrennt
+daneben. Die Entscheidung nutzt den ungerundeten Wert; angezeigt werden zwei
+Nachkommastellen. Eine eigene Sitzungsprüfung entfällt: Die Lückengrenze von
+5 Minuten ist strenger als „eine Sitzung“ und deckt sie ab. Oben steht `BESTANDEN` oder
+`NICHT BESTANDEN`; `--json` liefert dasselbe als `abnahme.bestanden` und
+`abnahme.fehlgeschlagen`.
+
 Das Tool berechnet p50/p95 der Prüfdauer, die 304-Quote (Anteil der Abrufe mit
 beobachtetem HTTP 304), Traffic aus der Summe von `bytes`, Alarme und die
 Kosten pro nützlichem Alarm (`--kosten`, Standard 4,40 €/Monat). Checks mit
